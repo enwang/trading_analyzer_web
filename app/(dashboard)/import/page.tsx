@@ -119,6 +119,7 @@ export default function ImportPage() {
           <CardTitle className="text-base">IBKR Flex Web Service</CardTitle>
           <CardDescription>
             Fetch trades directly from Interactive Brokers using your Flex Query credentials.
+            Auto-sync runs daily at 8 PM ET.
             {lastSync && (
               <span className="ml-2 text-xs text-muted-foreground">
                 Last sync: {lastSync}
