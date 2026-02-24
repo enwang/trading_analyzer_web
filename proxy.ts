@@ -1,7 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
 
   const supabase = createServerClient(
@@ -28,13 +28,10 @@ export async function middleware(request: NextRequest) {
 
   const { pathname } = request.nextUrl
 
+  const protectedRoutes = ['/overview', '/trades', '/winners', '/losers', '/analysis', '/import']
+
   // Redirect unauthenticated users away from dashboard routes
-  if (!user && pathname.startsWith('/overview') ||
-      !user && pathname.startsWith('/trades') ||
-      !user && pathname.startsWith('/winners') ||
-      !user && pathname.startsWith('/losers') ||
-      !user && pathname.startsWith('/analysis') ||
-      !user && pathname.startsWith('/import')) {
+  if (!user && protectedRoutes.some((route) => pathname.startsWith(route))) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)
