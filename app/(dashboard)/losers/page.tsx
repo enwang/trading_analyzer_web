@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { rowToTrade } from '@/types/trade'
+import { LocalTime } from '@/components/ui/local-time'
 import {
   Table,
   TableBody,
@@ -8,11 +9,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-
-function fmtDt(s: string | null) {
-  if (!s) return '—'
-  return s.slice(0, 16).replace('T', ' ')
-}
 
 export default async function LosersPage() {
   const supabase = await createClient()
@@ -47,8 +43,8 @@ export default async function LosersPage() {
               <TableHead className="w-10">#</TableHead>
               <TableHead>Symbol</TableHead>
               <TableHead>Side</TableHead>
-              <TableHead>Entry (UTC)</TableHead>
-              <TableHead>Exit (UTC)</TableHead>
+              <TableHead>Entry</TableHead>
+              <TableHead>Exit</TableHead>
               <TableHead className="text-right">Shares</TableHead>
               <TableHead className="text-right">Entry $</TableHead>
               <TableHead className="text-right">Exit $</TableHead>
@@ -74,11 +70,11 @@ export default async function LosersPage() {
                 <TableCell className="text-muted-foreground">{i + 1}</TableCell>
                 <TableCell className="font-medium">{t.symbol}</TableCell>
                 <TableCell className="capitalize">{t.side ?? '—'}</TableCell>
-                <TableCell className="text-muted-foreground text-xs font-mono">
-                  {fmtDt(t.entryTime)}
+                <TableCell>
+                  <LocalTime date={t.entryTime} className="text-muted-foreground text-xs font-mono" />
                 </TableCell>
-                <TableCell className="text-muted-foreground text-xs font-mono">
-                  {fmtDt(t.exitTime)}
+                <TableCell>
+                  <LocalTime date={t.exitTime} className="text-muted-foreground text-xs font-mono" />
                 </TableCell>
                 <TableCell className="text-right">{t.shares ?? '—'}</TableCell>
                 <TableCell className="text-right">

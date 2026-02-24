@@ -335,7 +335,35 @@ function parseCsv(csvStr: string): NormalizedTrade[] {
     normalized.push(withDerived)
   }
 
-  return normalized
+  // Final dedup: collapse rows sharing the same DB constraint key (symbol, exit_time, pnl)
+  // This prevents batch-level duplicate key errors when partial fills have mismatched entry_times.
+  return dedupByConstraintKey(normalized)
+}
+
+// ---------------------------------------------------------------------------
+// Final dedup pass — collapse rows that share the DB unique key to prevent batch conflicts
+// ---------------------------------------------------------------------------
+function dedupByConstraintKey(trades: NormalizedTrade[]): NormalizedTrade[] {
+  const map = new Map<string, NormalizedTrade>()
+  for (const t of trades) {
+    // Open positions: key by entry_time
+    if (!t.exit_time) {
+      const k = `${t.symbol}|open|${t.entry_time}`
+      if (!map.has(k)) map.set(k, { ...t })
+      continue
+    }
+    // Closed positions: key matches the DB partial unique index
+    const pnlKey = Math.round((t.pnl ?? 0) * 1000)
+    const k = `${t.symbol}|${t.exit_time}|${pnlKey}`
+    if (map.has(k)) {
+      // Merge shares into the first occurrence
+      const existing = map.get(k)!
+      existing.shares = (existing.shares ?? 0) + (t.shares ?? 0)
+    } else {
+      map.set(k, { ...t })
+    }
+  }
+  return [...map.values()]
 }
 
 // ---------------------------------------------------------------------------
@@ -347,7 +375,15 @@ function mergePartialFills(trades: NormalizedTrade[]): NormalizedTrade[] {
 
   const groups = new Map<string, NormalizedTrade[]>()
   for (const t of withEntry) {
-    const pk = `${t.symbol}|${t.entry_time}`
+    // Group by symbol + entry DATE (not full timestamp, not exit date).
+    // All C-rows from the same original position share the same entry date via
+    // the O-row fallback (OpenDateTime is empty in this broker's export), even
+    // when sells span multiple exit dates.  Using exit date instead would split
+    // a multi-day unwind of one position into N separate rows.
+    // Verified against mytrade.csv: MRNA (1 buy → 2 exit days → 1 row),
+    // TTMI (1 buy → 4 exit days → 1 row), GOOG (2 entry groups → 2 rows).
+    const entryDate = t.entry_time?.slice(0, 10) ?? 'unknown'
+    const pk = `${t.symbol}|${entryDate}`
     if (!groups.has(pk)) groups.set(pk, [])
     groups.get(pk)!.push(t)
   }
@@ -426,19 +462,41 @@ function appendOpenPositions(
       if (remaining <= 0) continue
 
       if (totalClosed > 0) {
-        // Partial close: update the most-recently-closed row for this symbol
-        const candidates = trades.filter(t => t.symbol === sym && t.exit_time != null)
-        if (!candidates.length) continue
-        const latest = candidates.reduce((a, b) =>
-          (a.exit_time ?? '') > (b.exit_time ?? '') ? a : b
-        )
-        const idx = trades.indexOf(latest)
-        trades[idx] = {
-          ...trades[idx],
-          outcome: 'open',
-          exit_time: null,
-          shares: remaining,
+        // Position is partially closed but still open.
+        // Remove the partial-sell closed rows — don't surface them as separate
+        // trades until the position is fully closed.
+        for (let i = trades.length - 1; i >= 0; i--) {
+          if (trades[i].symbol === sym && trades[i].exit_time != null) {
+            trades.splice(i, 1)
+          }
         }
+        // Add one open row for the remaining shares.
+        const symO = oTemp.filter(o => o.symbol === sym)
+        if (!symO.length) continue
+        const totalW = symO.reduce((s, o) => s + o.shares, 0)
+        const wtPrice = totalW > 0
+          ? symO.reduce((s, o) => s + o.price * o.shares, 0) / totalW
+          : 0
+        const earliest = symO.map(o => o.entry_time).sort()[0]
+        trades.push({
+          symbol: sym,
+          entry_time: earliest,
+          exit_time: null,
+          side: 'long',
+          shares: remaining,
+          entry_price: wtPrice,
+          exit_price: null,
+          pnl: null,
+          pnl_pct: null,
+          outcome: 'open',
+          hold_days: null,
+          hold_time_min: null,
+          hour_of_day: null,
+          day_of_week: null,
+          r_multiple: null,
+          setup_tag: 'untagged',
+          source: 'ibkr',
+        })
       } else {
         // Fully open: no C-rows at all → add new row
         const symO = oTemp.filter(o => o.symbol === sym)
@@ -572,7 +630,7 @@ function parseXml(xml: string): NormalizedTrade[] {
     trades.push(t)
   }
 
-  return mergePartialFills(trades)
+  return dedupByConstraintKey(mergePartialFills(trades))
 }
 
 // ---------------------------------------------------------------------------

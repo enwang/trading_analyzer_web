@@ -32,9 +32,22 @@ export async function POST(request: NextRequest) {
 
     const rows = trades.map(t => ({ ...t, user_id: user.id }))
 
+    // Open positions (exit_time IS NULL) have no unique constraint match because
+    // NULL != NULL in PostgreSQL indexes, so they accumulate on every sync.
+    // Delete stale open rows for these symbols before upserting.
+    const openSymbols = [...new Set(rows.filter(r => !r.exit_time).map(r => r.symbol))]
+    if (openSymbols.length > 0) {
+      await supabase
+        .from('trades')
+        .delete()
+        .eq('user_id', user.id)
+        .is('exit_time', null)
+        .in('symbol', openSymbols)
+    }
+
     const { error, data } = await supabase
       .from('trades')
-      .upsert(rows, { ignoreDuplicates: true })
+      .upsert(rows, { onConflict: 'user_id,symbol,exit_time,pnl', ignoreDuplicates: true })
       .select('id')
 
     if (error) {

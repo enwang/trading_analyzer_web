@@ -34,9 +34,21 @@ export async function GET(request: Request) {
       let upserted = 0
       if (trades.length) {
         const rows = trades.map(t => ({ ...t, user_id: s.user_id }))
+
+        // Delete stale open-position rows before upserting (NULL != NULL in PG unique index)
+        const openSymbols = [...new Set(rows.filter(r => !r.exit_time).map(r => r.symbol))]
+        if (openSymbols.length > 0) {
+          await supabase
+            .from('trades')
+            .delete()
+            .eq('user_id', s.user_id)
+            .is('exit_time', null)
+            .in('symbol', openSymbols)
+        }
+
         const { data, error: upsertErr } = await supabase
           .from('trades')
-          .upsert(rows, { ignoreDuplicates: true })
+          .upsert(rows, { onConflict: 'user_id,symbol,exit_time,pnl', ignoreDuplicates: true })
           .select('id')
 
         if (upsertErr) throw new Error(upsertErr.message)

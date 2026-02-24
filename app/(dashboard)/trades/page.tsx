@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { rowToTrade } from '@/types/trade'
 import { Badge } from '@/components/ui/badge'
+import { LocalTime } from '@/components/ui/local-time'
 import {
   Table,
   TableBody,
@@ -19,11 +20,6 @@ function pnlClass(outcome: string | null) {
 function fmtPrice(n: number | null) {
   if (n == null) return '—'
   return `$${n.toFixed(2)}`
-}
-
-function fmtDt(s: string | null) {
-  if (!s) return '—'
-  return s.slice(0, 16).replace('T', ' ')
 }
 
 function OutcomeBadge({ outcome }: { outcome: string | null }) {
@@ -67,8 +63,8 @@ export default async function TradesPage() {
             <TableRow>
               <TableHead>Symbol</TableHead>
               <TableHead>Side</TableHead>
-              <TableHead>Entry (UTC)</TableHead>
-              <TableHead>Exit (UTC)</TableHead>
+              <TableHead>Entry</TableHead>
+              <TableHead>Exit</TableHead>
               <TableHead className="text-right">Shares</TableHead>
               <TableHead className="text-right">Entry $</TableHead>
               <TableHead className="text-right">Exit $</TableHead>
@@ -97,11 +93,11 @@ export default async function TradesPage() {
               <TableRow key={t.id}>
                 <TableCell className="font-medium">{t.symbol}</TableCell>
                 <TableCell className="capitalize">{t.side ?? '—'}</TableCell>
-                <TableCell className="text-muted-foreground text-xs font-mono">
-                  {fmtDt(t.entryTime)}
+                <TableCell>
+                  <LocalTime date={t.entryTime} className="text-muted-foreground text-xs font-mono" />
                 </TableCell>
-                <TableCell className="text-muted-foreground text-xs font-mono">
-                  {fmtDt(t.exitTime)}
+                <TableCell>
+                  <LocalTime date={t.exitTime} className="text-muted-foreground text-xs font-mono" />
                 </TableCell>
                 <TableCell className="text-right">{t.shares ?? '—'}</TableCell>
                 <TableCell className="text-right">{fmtPrice(t.entryPrice)}</TableCell>
