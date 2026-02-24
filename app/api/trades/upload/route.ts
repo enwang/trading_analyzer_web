@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
 
     const { error, data } = await supabase
       .from('trades')
-      .upsert(rows, { ignoreDuplicates: true })
+      .upsert(rows, { onConflict: 'user_id,symbol,entry_time,exit_time', ignoreDuplicates: false })
       .select('id')
 
     if (error) {

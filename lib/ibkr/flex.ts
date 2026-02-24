@@ -1,14 +1,13 @@
 /**
- * ibkr/flex.ts — TypeScript port of ibkr_flex.py
+ * ibkr/flex.ts — IBKR Flex Web Service client
  *
- * End-to-end IBKR Flex Web Service client:
  * 1. POST SendRequest  → ReferenceCode
  * 2. GET  GetStatement → poll until complete, download content
  * 3. Parse CSV/XML → normalize → return Trade rows
  */
 
 import Papa from 'papaparse'
-import { toZonedTime, fromZonedTime } from 'date-fns-tz'
+import { fromZonedTime } from 'date-fns-tz'
 
 // ---------------------------------------------------------------------------
 // IBKR API endpoints
@@ -44,6 +43,7 @@ export interface NormalizedTrade {
   day_of_week: string | null
   r_multiple: number | null
   setup_tag: string
+  execution_legs?: { time: string; action: 'BUY' | 'SELL'; shares: number; price: number }[] | null
   source: 'ibkr'
 }
 
@@ -117,23 +117,19 @@ async function pollAndDownload(
     const text = await resp.text()
     const trimmed = text.trimStart()
 
-    // Check for complete FlexStatements XML or CSV data
     if (trimmed.startsWith('<FlexStatements') || trimmed.startsWith('<FlexQueryResponse')) {
       return text
     }
-    if (!trimmed.startsWith('<')) {
-      // CSV content
-      return text
-    }
-    // Check status
+    if (!trimmed.startsWith('<')) return text   // CSV content
+
     const status = extractXmlTag(text, 'Status')
     if (!status || status.toLowerCase() === 'processing') {
       await sleep(POLL_INTERVAL_MS)
       continue
     }
     if (status.toLowerCase() === 'success') return text
-    // 'Warn' = report ready but with data warnings; fetch from the Url in response
     if (status.toLowerCase() === 'warn' || status.toLowerCase() === 'warning') {
+      // IBKR returns a status envelope; fetch data from the embedded URL
       const warnUrl = extractXmlTag(text, 'Url') ?? dlUrl
       const warnParams = new URLSearchParams({ t: token, q: refCode, v: FLEX_VERSION })
       const warnResp = await fetch(`${warnUrl}?${warnParams}`)
@@ -146,7 +142,6 @@ async function pollAndDownload(
       ) {
         return warnText
       }
-      // Data not ready yet — keep polling
       await sleep(POLL_INTERVAL_MS)
       continue
     }
@@ -156,10 +151,9 @@ async function pollAndDownload(
 }
 
 // ---------------------------------------------------------------------------
-// CSV parsing (primary path for CSV Flex Queries)
+// CSV parsing (primary path)
 // ---------------------------------------------------------------------------
 function parseCsv(csvStr: string): NormalizedTrade[] {
-  // IBKR CSVs sometimes have a second header row or blank lines — skip them
   const result = Papa.parse<Record<string, string>>(csvStr, {
     header: true,
     skipEmptyLines: true,
@@ -169,28 +163,39 @@ function parseCsv(csvStr: string): NormalizedTrade[] {
   const raw = result.data as Record<string, string>[]
   if (!raw.length) throw new Error('No rows found in Flex CSV')
 
-  // Case-insensitive column lookup helper
+  // Case-insensitive column lookup
   const keys = Object.keys(raw[0]).map(k => k.toLowerCase())
-  function col(raw: Record<string, string>, ...names: string[]): string {
+  function col(row: Record<string, string>, ...names: string[]): string {
     for (const n of names) {
       const k = keys.find(k => k === n.toLowerCase().trim())
-      if (k && raw[k] !== undefined) return raw[k]
+      if (k && row[k] !== undefined) return row[k]
     }
     return ''
   }
 
-  // Identify Open/CloseIndicator column
   const ociKey = keys.find(k =>
     ['open/closeindicator', 'opencloseindicator', 'openclose', 'open/close'].includes(k)
   ) ?? ''
 
-  // Build open-entry map from O-rows for entry_time fallback
-  const openEntryMap = new Map<string, string>()  // "(SYMBOL|YYYY-MM-DD)" → datetime string
-  const symOpenDates = new Map<string, string[]>() // symbol → sorted date strings
+  // Build open-entry maps from O-rows. Entry price is always from O-row fill
+  // prices (TradePrice), never from C-row CostBasis.
+  const openEntryMap = new Map<string, string>()
+  const symOpenEntries = new Map<string, string[]>()
+  const openPriceMapByEntry = new Map<string, { totalShares: number; totalCost: number }>()
+  const openPriceMapByDate = new Map<string, { totalShares: number; totalCost: number }>()
+  const openLegsByEntry = new Map<string, { time: string; action: 'BUY' | 'SELL'; shares: number; price: number }[]>()
+  const closeLegsByEntry = new Map<string, { time: string; action: 'BUY' | 'SELL'; shares: number; price: number }[]>()
+  const openLotsBySymbol = new Map<string, { entryIso: string; avgPrice: number; remainingShares: number }[]>()
+  const openGroups = new Map<string, {
+    symbol: string
+    entryIso: string
+    totalShares: number
+    totalCost: number
+    legs: { time: string; action: 'BUY' | 'SELL'; shares: number; price: number }[]
+  }>()
+
   const oRaw: Record<string, string>[] = []
   const cRaw: Record<string, string>[] = []
-
-  // Accumulate O-qty and C-qty per symbol for open-position detection
   const oQtyBySym = new Map<string, number>()
   const cQtyBySym = new Map<string, number>()
 
@@ -198,102 +203,155 @@ function parseCsv(csvStr: string): NormalizedTrade[] {
     const oci = ociKey ? (row[ociKey] ?? '').toUpperCase() : ''
     const sym = col(row, 'symbol').toUpperCase().trim()
     const qty = Math.abs(parseNum(col(row, 'quantity')) ?? 0)
-
-    const isO = oci.includes('O') && !oci.includes('C')  // pure open
-    const isC = oci.includes('C')                         // any close
+    const isO = oci.includes('O') && !oci.includes('C')
+    const isC = oci.includes('C')
 
     if (isO && sym) {
       oRaw.push(row)
       oQtyBySym.set(sym, (oQtyBySym.get(sym) ?? 0) + qty)
 
-      const dtStr = col(row,
-        'date/time', 'datetime', 'tradedatetime',
-        'dateandhour', 'date', 'tradedate'
-      )
+      const dtStr = col(row, 'date/time', 'datetime', 'tradedatetime', 'open date/time', 'opendatetime', 'dateandhour', 'date', 'tradedate')
       if (dtStr) {
         const ts = parseIbkrDatetime(dtStr)
         if (ts) {
-          const dateKey = ts.toISOString().slice(0, 10)
-          const mapKey = `${sym}|${dateKey}`
-          if (!openEntryMap.has(mapKey)) openEntryMap.set(mapKey, dtStr)
-          if (!symOpenDates.has(sym)) symOpenDates.set(sym, [])
-          const dates = symOpenDates.get(sym)!
-          if (!dates.includes(dateKey)) dates.push(dateKey)
+          const entryIso = toUtcIso(ts)
+          if (!entryIso) continue
+          const dateKey = entryIso.slice(0, 10)
+          const dateMapKey = `${sym}|${dateKey}`
+
+          if (!openEntryMap.has(dateMapKey)) openEntryMap.set(dateMapKey, entryIso)
+          if (!symOpenEntries.has(sym)) symOpenEntries.set(sym, [])
+          const entries = symOpenEntries.get(sym)!
+          if (!entries.includes(entryIso)) entries.push(entryIso)
+
+          const fillPrice = parseNum(col(row, 't. price', 'tradeprice', 'price')) ?? 0
+          const byDate = openPriceMapByDate.get(dateMapKey) ?? { totalShares: 0, totalCost: 0 }
+          byDate.totalShares += qty
+          byDate.totalCost += fillPrice * qty
+          openPriceMapByDate.set(dateMapKey, byDate)
+
+          const ibOrderId = col(row, 'iborderid').trim()
+          const groupId = ibOrderId && ibOrderId !== '0'
+            ? `${sym}|ord:${ibOrderId}`
+            : `${sym}|ts:${entryIso}`
+          const bs = col(row, 'buy/sell', 'buysell').toUpperCase()
+          const action: 'BUY' | 'SELL' = bs.includes('SELL') ? 'SELL' : 'BUY'
+          const group = openGroups.get(groupId) ?? {
+            symbol: sym,
+            entryIso,
+            totalShares: 0,
+            totalCost: 0,
+            legs: [],
+          }
+          if (entryIso < group.entryIso) group.entryIso = entryIso
+          group.totalShares += qty
+          group.totalCost += fillPrice * qty
+          group.legs.push({ time: entryIso, action, shares: qty, price: fillPrice })
+          openGroups.set(groupId, group)
         }
       }
     }
+
     if (isC && sym) {
       cRaw.push(row)
       cQtyBySym.set(sym, (cQtyBySym.get(sym) ?? 0) + qty)
     }
   }
 
-  // Sort open dates for fallback scan
-  for (const [, dates] of symOpenDates) dates.sort()
+  for (const [, entries] of symOpenEntries) entries.sort()
+  for (const group of openGroups.values()) {
+    const entryKey = `${group.symbol}|${group.entryIso}`
+    const byEntry = openPriceMapByEntry.get(entryKey) ?? { totalShares: 0, totalCost: 0 }
+    byEntry.totalShares += group.totalShares
+    byEntry.totalCost += group.totalCost
+    openPriceMapByEntry.set(entryKey, byEntry)
 
-  // Filter to C-rows only (or fallback to non-zero pnl rows)
-  let closeRows: Record<string, string>[]
-  if (cRaw.length > 0) {
-    closeRows = cRaw
-  } else {
-    // Fallback: keep rows with non-zero Realized P/L
-    closeRows = raw.filter(row => {
-      const pnl = parseNum(col(row, 'realized p/l', 'fifopnlrealized', 'realized p&l'))
-      return pnl != null && pnl !== 0
+    const legs = openLegsByEntry.get(entryKey) ?? []
+    legs.push(...group.legs)
+    openLegsByEntry.set(entryKey, legs)
+
+    const avgPrice = group.totalShares > 0 ? group.totalCost / group.totalShares : 0
+    if (!openLotsBySymbol.has(group.symbol)) openLotsBySymbol.set(group.symbol, [])
+    openLotsBySymbol.get(group.symbol)!.push({
+      entryIso: group.entryIso,
+      avgPrice,
+      remainingShares: group.totalShares,
     })
   }
+  for (const [, lots] of openLotsBySymbol) {
+    lots.sort((a, b) => (a.entryIso < b.entryIso ? -1 : a.entryIso > b.entryIso ? 1 : 0))
+  }
+
+  // Use C-rows, or fall back to rows with non-zero realized P/L
+  const closeRows = cRaw.length > 0
+    ? cRaw
+    : raw.filter(row => {
+        const pnl = parseNum(col(row, 'realized p/l', 'fifopnlrealized', 'realized p&l'))
+        return pnl != null && pnl !== 0
+      })
 
   if (!closeRows.length) throw new Error('No closing trades found in Flex CSV')
 
-  // Parse each closing row
+  // --- Build a raw trade per C-row ---
   const trades: NormalizedTrade[] = []
-  for (const row of closeRows) {
-    const sym = col(row, 'symbol').toUpperCase().trim()
-    if (!sym) continue
+  function allocateClose(
+    sym: string,
+    exitTime: string | null,
+    requestedShares: number | null,
+    preferredEntryTime: string | null,
+    basisEntryPrice: number | null
+  ): { entryTime: string; shares: number } | null {
+    if (!exitTime || requestedShares == null || requestedShares <= 0) return null
+    const lots = openLotsBySymbol.get(sym) ?? []
+    const candidates = lots.filter(l => l.entryIso <= exitTime && l.remainingShares > 0)
+    if (!candidates.length) return null
 
-    const exitDtStr = col(row, 'date/time', 'datetime', 'tradedatetime')
-    const entryDtStr = col(row, 'open date/time', 'opendatetime', 'open date', 'opendate')
-
-    const exitTime = exitDtStr ? toUtcIso(parseIbkrDatetime(exitDtStr)) : null
-    let entryTime = entryDtStr ? toUtcIso(parseIbkrDatetime(entryDtStr)) : null
-
-    // Fallback: fill entry_time from O-row map
-    if (!entryTime && exitTime) {
-      const exitDateStr = exitTime.slice(0, 10)
-      const direct = openEntryMap.get(`${sym}|${exitDateStr}`)
-      if (direct) {
-        entryTime = toUtcIso(parseIbkrDatetime(direct))
-      } else {
-        // Scan for most-recent O-row date ≤ exitDate
-        const dates = symOpenDates.get(sym) ?? []
-        const valid = dates.filter(d => d <= exitDateStr)
-        if (valid.length) {
-          const best = valid[valid.length - 1]
-          const fallback = openEntryMap.get(`${sym}|${best}`)
-          if (fallback) entryTime = toUtcIso(parseIbkrDatetime(fallback))
-        }
+    let chosen: { entryIso: string; avgPrice: number; remainingShares: number } | null = null
+    if (preferredEntryTime) {
+      chosen = candidates.find(c => c.entryIso === preferredEntryTime) ?? null
+    }
+    if (!chosen) {
+      chosen = candidates[candidates.length - 1]
+      if (basisEntryPrice != null) {
+        chosen = candidates
+          .slice()
+          .sort((a, b) => {
+            const da = Math.abs(a.avgPrice - basisEntryPrice)
+            const db = Math.abs(b.avgPrice - basisEntryPrice)
+            if (da !== db) return da - db
+            return a.entryIso < b.entryIso ? -1 : a.entryIso > b.entryIso ? 1 : 0
+          })[0]
       }
     }
 
-    const buySell = col(row, 'buy/sell', 'buysell').toUpperCase()
+    const matched = Math.min(requestedShares, chosen.remainingShares)
+    if (matched <= 0) return null
+    chosen.remainingShares = Math.max(0, chosen.remainingShares - matched)
+    return { entryTime: chosen.entryIso, shares: matched }
+  }
+
+  function pushCloseTrade(
+    sym: string,
+    entryTime: string | null,
+    exitTime: string | null,
+    buySell: string,
+    shares: number,
+    basisRaw: number | null,
+    requestedShares: number | null,
+    exitPrice: number | null
+  ) {
+    if (!entryTime || !exitTime) return
     const side = parseSide(buySell)
-
-    const sharesRaw = parseNum(col(row, 'quantity'))
-    const shares = sharesRaw != null ? Math.abs(sharesRaw) : null
-
-    const exitPrice = parseNum(col(row, 't. price', 'tradeprice', 'price'))
-    const basisRaw = parseNum(col(row, 'basis', 'cost', 'costbasis'))
-    const entryPrice = basisRaw != null && shares && shares > 0
-      ? Math.abs(basisRaw / shares)
+    const entryPrice = basisRaw != null && requestedShares && requestedShares > 0
+      ? Math.abs(basisRaw / requestedShares)
       : null
-
-    const pnlGross = parseNum(col(row, 'realized p/l', 'fifopnlrealized', 'realized p&l'))
-    const commission = parseNum(col(row, 'comm/fee', 'ibcommission', 'commission', 'comm in usd')) ?? 0
-    const pnl = pnlGross != null ? pnlGross + commission : null
-
-    const pnlPct = pnl != null && basisRaw != null && basisRaw !== 0
-      ? pnl / Math.abs(basisRaw)
+    const pnl = side && entryPrice != null && exitPrice != null
+      ? (side === 'long'
+          ? (exitPrice - entryPrice) * shares
+          : (entryPrice - exitPrice) * shares)
       : null
+    const cost = entryPrice != null ? Math.abs(entryPrice * shares) : null
+    const pnlPct = pnl != null && cost != null && cost > 0 ? pnl / cost : null
 
     trades.push({
       symbol: sym,
@@ -314,19 +372,103 @@ function parseCsv(csvStr: string): NormalizedTrade[] {
       setup_tag: 'untagged',
       source: 'ibkr',
     })
+
+    if (exitPrice != null) {
+      const action: 'BUY' | 'SELL' = buySell.includes('SELL') ? 'SELL' : 'BUY'
+      const closeKey = `${sym}|${entryTime}`
+      const legs = closeLegsByEntry.get(closeKey) ?? []
+      legs.push({ time: exitTime, action, shares, price: exitPrice })
+      closeLegsByEntry.set(closeKey, legs)
+    }
   }
 
-  // Merge partial fills: group by (symbol + entry_time)
+  for (const row of closeRows) {
+    const sym = col(row, 'symbol').toUpperCase().trim()
+    if (!sym) continue
+
+    const exitDtStr = col(row, 'date/time', 'datetime', 'tradedatetime')
+    const entryDtStr = col(row, 'open date/time', 'opendatetime', 'open date', 'opendate')
+
+    const sharesRaw = parseNum(col(row, 'quantity'))
+    const requestedShares = sharesRaw != null ? Math.abs(sharesRaw) : null
+    const basisRaw = parseNum(col(row, 'basis', 'cost', 'costbasis'))
+    const basisEntryPrice = basisRaw != null && requestedShares && requestedShares > 0
+      ? Math.abs(basisRaw / requestedShares)
+      : null
+
+    const exitTime = exitDtStr ? toUtcIso(parseIbkrDatetime(exitDtStr)) : null
+    let entryTime = entryDtStr ? toUtcIso(parseIbkrDatetime(entryDtStr)) : null
+    if (entryTime && exitTime && new Date(entryTime).getTime() >= new Date(exitTime).getTime()) {
+      entryTime = null
+    }
+
+    if (!entryTime && exitTime) {
+      const exitDateStr = exitTime.slice(0, 10)
+      const entries = symOpenEntries.get(sym) ?? []
+      const atOrBeforeExit = entries.filter(e => e <= exitTime)
+      if (atOrBeforeExit.length) {
+        entryTime = atOrBeforeExit[atOrBeforeExit.length - 1]
+      } else {
+        const direct = openEntryMap.get(`${sym}|${exitDateStr}`)
+        if (direct) entryTime = direct
+      }
+    }
+
+    const buySell = col(row, 'buy/sell', 'buysell').toUpperCase()
+    const exitPrice = parseNum(col(row, 't. price', 'tradeprice', 'price'))
+
+    let remaining = requestedShares ?? 0
+    let preferred = entryTime
+    const matchedPieces: { entryTime: string; shares: number }[] = []
+
+    while (remaining > 0) {
+      const match = allocateClose(sym, exitTime, remaining, preferred, basisEntryPrice)
+      if (!match) break
+      matchedPieces.push(match)
+      remaining -= match.shares
+      // First allocation can honor preferred entry; subsequent ones should flow by lot availability.
+      preferred = null
+    }
+
+    if (matchedPieces.length === 0) continue
+
+    for (const piece of matchedPieces) {
+      pushCloseTrade(sym, piece.entryTime, exitTime, buySell, piece.shares, basisRaw, requestedShares, exitPrice)
+    }
+
+    // Intentionally drop unmatched remainder to avoid synthesizing carry-in lots.
+  }
+
   const merged = mergePartialFills(trades)
 
-  // Append open positions
-  appendOpenPositions(merged, oRaw, oQtyBySym, cQtyBySym, raw)
+  for (const t of merged) {
+    if (!t.entry_time || !t.exit_time) continue
+    const exactKey = `${t.symbol}|${t.entry_time}`
+    const dateKey = `${t.symbol}|${t.entry_time.slice(0, 10)}`
+    const oPrice = openPriceMapByEntry.get(exactKey) ?? openPriceMapByDate.get(dateKey)
+    if (oPrice && oPrice.totalShares > 0) {
+      t.entry_price = oPrice.totalCost / oPrice.totalShares
+    }
+    if (t.side && t.entry_price != null && t.exit_price != null && t.shares != null) {
+      t.pnl = t.side === 'long'
+        ? (t.exit_price - t.entry_price) * t.shares
+        : (t.entry_price - t.exit_price) * t.shares
+      const cost = Math.abs(t.entry_price * t.shares)
+      t.pnl_pct = cost > 0 ? t.pnl / cost : null
+    }
 
-  // Compute derived fields
+    const legs = [
+      ...(openLegsByEntry.get(exactKey) ?? []),
+      ...(closeLegsByEntry.get(exactKey) ?? []),
+    ].sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0))
+    t.execution_legs = legs.length > 0 ? legs : null
+  }
+
+  appendOpenPositions(merged, openLotsBySymbol)
+
   const normalized: NormalizedTrade[] = []
   for (const t of merged) {
     const withDerived = computeDerived(t)
-    // Filter: drop closed trades opened before QUERY_START with no/bad entry_time
     if (withDerived.outcome !== 'open') {
       if (!withDerived.entry_time) continue
       if (new Date(withDerived.entry_time) < QUERY_START) continue
@@ -335,39 +477,11 @@ function parseCsv(csvStr: string): NormalizedTrade[] {
     normalized.push(withDerived)
   }
 
-  // Final dedup: collapse rows sharing the same DB constraint key (symbol, exit_time, pnl)
-  // This prevents batch-level duplicate key errors when partial fills have mismatched entry_times.
   return dedupByConstraintKey(normalized)
 }
 
 // ---------------------------------------------------------------------------
-// Final dedup pass — collapse rows that share the DB unique key to prevent batch conflicts
-// ---------------------------------------------------------------------------
-function dedupByConstraintKey(trades: NormalizedTrade[]): NormalizedTrade[] {
-  const map = new Map<string, NormalizedTrade>()
-  for (const t of trades) {
-    // Open positions: key by entry_time
-    if (!t.exit_time) {
-      const k = `${t.symbol}|open|${t.entry_time}`
-      if (!map.has(k)) map.set(k, { ...t })
-      continue
-    }
-    // Closed positions: key matches the DB partial unique index
-    const pnlKey = Math.round((t.pnl ?? 0) * 1000)
-    const k = `${t.symbol}|${t.exit_time}|${pnlKey}`
-    if (map.has(k)) {
-      // Merge shares into the first occurrence
-      const existing = map.get(k)!
-      existing.shares = (existing.shares ?? 0) + (t.shares ?? 0)
-    } else {
-      map.set(k, { ...t })
-    }
-  }
-  return [...map.values()]
-}
-
-// ---------------------------------------------------------------------------
-// Merge partial fills (same symbol + entry_time → one row)
+// Merge C-rows for the same position into one row
 // ---------------------------------------------------------------------------
 function mergePartialFills(trades: NormalizedTrade[]): NormalizedTrade[] {
   const withEntry = trades.filter(t => t.entry_time != null)
@@ -375,15 +489,8 @@ function mergePartialFills(trades: NormalizedTrade[]): NormalizedTrade[] {
 
   const groups = new Map<string, NormalizedTrade[]>()
   for (const t of withEntry) {
-    // Group by symbol + entry DATE (not full timestamp, not exit date).
-    // All C-rows from the same original position share the same entry date via
-    // the O-row fallback (OpenDateTime is empty in this broker's export), even
-    // when sells span multiple exit dates.  Using exit date instead would split
-    // a multi-day unwind of one position into N separate rows.
-    // Verified against mytrade.csv: MRNA (1 buy → 2 exit days → 1 row),
-    // TTMI (1 buy → 4 exit days → 1 row), GOOG (2 entry groups → 2 rows).
-    const entryDate = t.entry_time?.slice(0, 10) ?? 'unknown'
-    const pk = `${t.symbol}|${entryDate}`
+    // Group by symbol + exact entry_time so independent lots stay separate.
+    const pk = `${t.symbol}|${t.entry_time}`
     if (!groups.has(pk)) groups.set(pk, [])
     groups.get(pk)!.push(t)
   }
@@ -413,9 +520,9 @@ function mergePartialFills(trades: NormalizedTrade[]): NormalizedTrade[] {
       base.exit_price = grp.reduce((s, t) => s + (t.exit_price ?? 0) * w(t), 0) / totalShares
       base.entry_price = grp.reduce((s, t) => s + (t.entry_price ?? 0) * w(t), 0) / totalShares
     }
-    // Recalculate pnl_pct
     const cost = base.entry_price != null && base.shares != null
-      ? base.entry_price * base.shares : null
+      ? base.entry_price * base.shares
+      : null
     base.pnl_pct = cost && cost > 0 && base.pnl != null ? base.pnl / cost : null
     merged.push(base)
   }
@@ -424,97 +531,76 @@ function mergePartialFills(trades: NormalizedTrade[]): NormalizedTrade[] {
 }
 
 // ---------------------------------------------------------------------------
-// Open position detection
+// Final dedup — collapse rows sharing the same DB unique key
+// ---------------------------------------------------------------------------
+function dedupByConstraintKey(trades: NormalizedTrade[]): NormalizedTrade[] {
+  const map = new Map<string, NormalizedTrade>()
+  for (const t of trades) {
+    if (!t.exit_time) {
+      const k = `${t.symbol}|open|${t.entry_time}`
+      if (!map.has(k)) map.set(k, { ...t })
+      continue
+    }
+    // Key matches the DB unique identity (user_id, symbol, entry_time, exit_time)
+    const k = `${t.symbol}|${t.entry_time}|${t.exit_time}`
+    if (map.has(k)) {
+      const existing = map.get(k)!
+      existing.shares = (existing.shares ?? 0) + (t.shares ?? 0)
+      if (existing.execution_legs || t.execution_legs) {
+        const mergedLegs = [...(existing.execution_legs ?? []), ...(t.execution_legs ?? [])]
+          .sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0))
+        existing.execution_legs = mergedLegs.length ? mergedLegs : null
+      }
+    } else {
+      map.set(k, { ...t })
+    }
+  }
+  return [...map.values()]
+}
+
+// ---------------------------------------------------------------------------
+// Open position detection — appends open rows; hides partial-close C-rows
 // ---------------------------------------------------------------------------
 function appendOpenPositions(
   trades: NormalizedTrade[],
-  oRaw: Record<string, string>[],
-  oQtyBySym: Map<string, number>,
-  cQtyBySym: Map<string, number>,
-  allRaw: Record<string, string>[]
+  openLotsBySymbol: Map<string, { entryIso: string; avgPrice: number; remainingShares: number }[]>,
 ): void {
   try {
-    // Build o_temp: entry_time + price + shares per O-row
-    const oTemp: { symbol: string; entry_time: string; price: number; shares: number }[] = []
-    for (const row of oRaw) {
-      const sym = (row['symbol'] ?? '').toUpperCase().trim()
-      const dtStr = Object.entries(row).find(([k]) =>
-        ['date/time', 'datetime', 'tradedatetime'].includes(k)
-      )?.[1] ?? ''
-      const price = Math.abs(parseNum(
-        Object.entries(row).find(([k]) =>
-          ['t. price', 'tradeprice', 'price'].includes(k)
-        )?.[1] ?? ''
-      ) ?? 0)
-      const qty = Math.abs(parseNum(
-        Object.entries(row).find(([k]) => k === 'quantity')?.[1] ?? ''
-      ) ?? 0)
-      const ts = dtStr ? parseIbkrDatetime(dtStr) : null
-      const entryIso = ts ? toUtcIso(ts) : null
-      if (sym && entryIso) {
-        oTemp.push({ symbol: sym, entry_time: entryIso, price, shares: qty })
+    const openKeys = new Set<string>()
+    const realizedByOpenLot = new Map<string, number>()
+    for (const [sym, lots] of openLotsBySymbol) {
+      for (const lot of lots) {
+        if (lot.remainingShares > 0) {
+          openKeys.add(`${sym}|${lot.entryIso}`)
+        }
+      }
+    }
+    // Hide partial-close rows only when that exact lot is still open.
+    for (let i = trades.length - 1; i >= 0; i--) {
+      const t = trades[i]
+      if (!t.exit_time || !t.entry_time) continue
+      const lotKey = `${t.symbol}|${t.entry_time}`
+      if (openKeys.has(lotKey)) {
+        realizedByOpenLot.set(lotKey, (realizedByOpenLot.get(lotKey) ?? 0) + (t.pnl ?? 0))
+        trades.splice(i, 1)
       }
     }
 
-    for (const [sym, totalOpened] of oQtyBySym) {
-      const totalClosed = cQtyBySym.get(sym) ?? 0
-      const remaining = totalOpened - totalClosed
-      if (remaining <= 0) continue
-
-      if (totalClosed > 0) {
-        // Position is partially closed but still open.
-        // Remove the partial-sell closed rows — don't surface them as separate
-        // trades until the position is fully closed.
-        for (let i = trades.length - 1; i >= 0; i--) {
-          if (trades[i].symbol === sym && trades[i].exit_time != null) {
-            trades.splice(i, 1)
-          }
-        }
-        // Add one open row for the remaining shares.
-        const symO = oTemp.filter(o => o.symbol === sym)
-        if (!symO.length) continue
-        const totalW = symO.reduce((s, o) => s + o.shares, 0)
-        const wtPrice = totalW > 0
-          ? symO.reduce((s, o) => s + o.price * o.shares, 0) / totalW
-          : 0
-        const earliest = symO.map(o => o.entry_time).sort()[0]
+    for (const [sym, lots] of openLotsBySymbol) {
+      for (const lot of lots) {
+        if (lot.remainingShares <= 0) continue
+        const lotKey = `${sym}|${lot.entryIso}`
+        const realizedPnl = realizedByOpenLot.get(lotKey) ?? 0
         trades.push({
           symbol: sym,
-          entry_time: earliest,
+          entry_time: lot.entryIso,
           exit_time: null,
           side: 'long',
-          shares: remaining,
-          entry_price: wtPrice,
+          shares: lot.remainingShares,
+          entry_price: lot.avgPrice,
           exit_price: null,
-          pnl: null,
-          pnl_pct: null,
-          outcome: 'open',
-          hold_days: null,
-          hold_time_min: null,
-          hour_of_day: null,
-          day_of_week: null,
-          r_multiple: null,
-          setup_tag: 'untagged',
-          source: 'ibkr',
-        })
-      } else {
-        // Fully open: no C-rows at all → add new row
-        const symO = oTemp.filter(o => o.symbol === sym)
-        if (!symO.length) continue
-        const totalW = symO.reduce((s, o) => s + o.shares, 0)
-        const wtPrice = totalW > 0
-          ? symO.reduce((s, o) => s + o.price * o.shares, 0) / totalW
-          : 0
-        const earliest = symO.map(o => o.entry_time).sort()[0]
-        trades.push({
-          symbol: sym,
-          entry_time: earliest,
-          exit_time: null,
-          side: 'long',
-          shares: totalOpened,
-          entry_price: wtPrice,
-          exit_price: null,
-          pnl: 0,
+          // Show realized P&L from partial closes on this still-open lot.
+          pnl: realizedPnl,
           pnl_pct: null,
           outcome: 'open',
           hold_days: null,
@@ -533,7 +619,7 @@ function appendOpenPositions(
 }
 
 // ---------------------------------------------------------------------------
-// Compute derived fields
+// Compute derived fields (outcome, hold times, hour/day of entry)
 // ---------------------------------------------------------------------------
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
@@ -565,7 +651,7 @@ function computeDerived(t: NormalizedTrade): NormalizedTrade {
   let dayOfWeek: string | null = null
   if (t.entry_time) {
     const d = new Date(t.entry_time)
-    hourOfDay = d.getUTCHours()    // already converted to Pacific in parseIbkrDatetime
+    hourOfDay = d.getUTCHours()    // timestamps are stored as UTC (converted from Eastern)
     dayOfWeek = DAYS[d.getUTCDay()]
   }
 
@@ -576,7 +662,6 @@ function computeDerived(t: NormalizedTrade): NormalizedTrade {
 // XML parsing (secondary path)
 // ---------------------------------------------------------------------------
 function parseXml(xml: string): NormalizedTrade[] {
-  // Very basic XML attribute extraction — IBKR Trade elements are self-closing
   const tradeRegex = /<Trade\s([^/]+)\/>/gi
   const attrRegex = /(\w+)="([^"]*)"/g
   const trades: NormalizedTrade[] = []
@@ -591,7 +676,7 @@ function parseXml(xml: string): NormalizedTrade[] {
     }
 
     const oci = (attrs['openindicator'] ?? attrs['opencloseIndicator'] ?? attrs['opencloseindicator'] ?? '').toUpperCase()
-    if (!oci.includes('C')) continue  // only closing trades
+    if (!oci.includes('C')) continue
 
     const sym = (attrs['symbol'] ?? '').toUpperCase().trim()
     if (!sym) continue
@@ -607,17 +692,20 @@ function parseXml(xml: string): NormalizedTrade[] {
     const basis = parseNum(attrs['cost'] ?? attrs['costbasis'] ?? '')
     const entryPrice = basis != null && shares && shares > 0 ? Math.abs(basis / shares) : null
 
-    const pnlGross = parseNum(attrs['fifopnlrealized'] ?? attrs['realizedpnl'] ?? '')
-    const commission = parseNum(attrs['ibcommission'] ?? attrs['commission'] ?? '') ?? 0
-    const pnl = pnlGross != null ? pnlGross + commission : null
-
     const buySell = (attrs['buysell'] ?? '').toUpperCase()
     const side = parseSide(buySell)
+    const pnl = side && entryPrice != null && exitPrice != null && shares != null
+      ? (side === 'long'
+          ? (exitPrice - entryPrice) * shares
+          : (entryPrice - exitPrice) * shares)
+      : null
+    const cost = entryPrice != null && shares != null ? Math.abs(entryPrice * shares) : null
+    const pnlPct = pnl != null && cost != null && cost > 0 ? pnl / cost : null
 
     const t = computeDerived({
       symbol: sym, entry_time: entryTime, exit_time: exitTime,
       side, shares, entry_price: entryPrice, exit_price: exitPrice,
-      pnl, pnl_pct: null, outcome: null,
+      pnl, pnl_pct: pnlPct, outcome: null,
       hold_days: null, hold_time_min: null, hour_of_day: null, day_of_week: null,
       r_multiple: null, setup_tag: 'untagged', source: 'ibkr',
     })
@@ -642,19 +730,16 @@ function parseIbkrDatetime(s: string): Date | null {
   if (!s || ['', '0', 'n/a', 'null', 'undefined'].includes(s.toLowerCase().trim())) return null
   const norm = s.trim().replace(';', ' ').replace(/\s+/, ' ')
 
-  // Try standard ISO-ish format first
   const d = new Date(norm)
   if (!isNaN(d.getTime())) {
-    // Convert Eastern → UTC (IBKR reports in Eastern)
     try {
-      const eastern = fromZonedTime(d, 'America/New_York')
-      return eastern
+      return fromZonedTime(d, 'America/New_York')
     } catch {
       return d
     }
   }
 
-  // YYYYMMDD HH:MM:SS or YYYYMMDD
+  // YYYYMMDD[ HHMMSS]
   const m8 = norm.match(/^(\d{4})(\d{2})(\d{2})(?:\s(\d{2})(\d{2})(\d{2}))?$/)
   if (m8) {
     const iso = `${m8[1]}-${m8[2]}-${m8[3]}T${m8[4] ?? '00'}:${m8[5] ?? '00'}:${m8[6] ?? '00'}`
@@ -680,7 +765,7 @@ function parseNum(s: string | undefined): number | null {
 }
 
 function parseSide(buySell: string): 'long' | 'short' {
-  // For closing trades: SELL closes a long; BUY closes a short
+  // For closing trades: SELL closes a long; BUY covers a short
   if (['sell', 'sshrt'].includes(buySell.toLowerCase())) return 'long'
   return 'short'
 }

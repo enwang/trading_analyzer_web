@@ -48,7 +48,7 @@ export async function GET(request: Request) {
 
         const { data, error: upsertErr } = await supabase
           .from('trades')
-          .upsert(rows, { onConflict: 'user_id,symbol,exit_time,pnl', ignoreDuplicates: true })
+          .upsert(rows, { onConflict: 'user_id,symbol,entry_time,exit_time', ignoreDuplicates: false })
           .select('id')
 
         if (upsertErr) throw new Error(upsertErr.message)

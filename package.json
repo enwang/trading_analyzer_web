@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "test:parser-regression": "node --experimental-strip-types scripts/parser-regression.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.8.0",
@@ -14,6 +15,7 @@
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "date-fns-tz": "^3.2.0",
+    "lightweight-charts": "^4.2.0",
     "lucide-react": "^0.575.0",
     "next": "16.1.6",
     "papaparse": "^5.5.3",

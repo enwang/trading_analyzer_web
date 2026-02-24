@@ -53,8 +53,24 @@ const pk = `${t.symbol}|${entryDate}`
 
 ## Entry Price Shows Higher Than Expected
 
-**Seen:** GOOG showing $316 when user bought at $314.62.
+**Seen:** GOOG showing $316.41 when user bought at $314.62.
 
-**Explanation (not a bug):** Entry price is derived from `CostBasis / shares` from the IBKR Flex C-row. `CostBasis` reflects IBKR's **FIFO cost** — if the user holds pre-2026 lots at a higher price, those get consumed first, making the blended entry price higher than the most recent purchase.
+**Root cause:** Entry price was derived from `CostBasis / shares` on the **C-row**. `CostBasis` on a C-row reflects which **historical FIFO lot was consumed**, not the price of the current position. When you hold pre-2026 GOOG lots (at e.g. $320–$324, outside this Flex query's date range), IBKR FIFO consumes those oldest lots first on every sale — even when you've since opened and closed a separate position at $314.62. The Jan-9/Jan-20/Feb-5 C-rows used pre-2026 lots at $320.46; the Feb-12 C-rows used pre-2026 lots at $324.15 and $315.55, giving a weighted avg of $316.41 instead of $314.62. The fact that the Jan-2 position was fully closed by Feb-5 is irrelevant — the pre-2026 lots are what's driving the discrepancy.
 
-This is technically correct for P&L and tax purposes. The discrepancy is expected when the user has older lots not visible in the Flex query date range.
+**Fix:** Build `openPriceMap` from O-rows (`TradePrice` × `Quantity`) and use it to override `entry_price` after `mergePartialFills`. Fall back to CostBasis only if no matching O-row is found.
+```ts
+// In parseCsv — accumulate actual fill price from O-rows
+const fillPrice = parseNum(col(row, 't. price', 'tradeprice', 'price')) ?? 0
+const existing = openPriceMap.get(mapKey) ?? { totalShares: 0, totalCost: 0 }
+existing.totalShares += qty
+existing.totalCost += fillPrice * qty
+openPriceMap.set(mapKey, existing)
+
+// After mergePartialFills — override with O-row weighted avg
+const oPrice = openPriceMap.get(`${t.symbol}|${entryDate}`)
+if (oPrice && oPrice.totalShares > 0) {
+  t.entry_price = oPrice.totalCost / oPrice.totalShares
+  t.pnl_pct = ...
+}
+```
+Verified: GOOG Feb-12 now shows $314.62.

@@ -5,8 +5,6 @@ import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import {
   BarChart2,
-  TrendingUp,
-  TrendingDown,
   List,
   LineChart,
   Upload,
@@ -18,8 +16,6 @@ import { cn } from '@/lib/utils'
 const nav = [
   { href: '/overview', label: 'Overview', icon: LayoutDashboard },
   { href: '/trades', label: 'Trades', icon: List },
-  { href: '/winners', label: 'Winners', icon: TrendingUp },
-  { href: '/losers', label: 'Losers', icon: TrendingDown },
   { href: '/analysis', label: 'Analysis', icon: BarChart2 },
   { href: '/import', label: 'Import', icon: Upload },
 ]

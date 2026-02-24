@@ -1,3 +1,10 @@
+export interface ExecutionLeg {
+  time: string
+  action: 'BUY' | 'SELL'
+  shares: number
+  price: number
+}
+
 export interface Trade {
   id: string
   userId: string
@@ -15,8 +22,11 @@ export interface Trade {
   holdTimeMin: number | null
   hourOfDay: number | null
   dayOfWeek: string | null
+  stopLoss: number | null
   rMultiple: number | null
   setupTag: string
+  notes: string
+  executionLegs: ExecutionLeg[] | null
   source: 'ibkr' | 'csv'
   createdAt: string
 }
@@ -39,8 +49,11 @@ export interface TradeRow {
   hold_time_min: number | null
   hour_of_day: number | null
   day_of_week: string | null
+  stop_loss?: number | null
   r_multiple: number | null
   setup_tag: string
+  notes?: string | null
+  execution_legs?: ExecutionLeg[] | null
   source: string
   created_at: string
 }
@@ -63,8 +76,11 @@ export function rowToTrade(r: TradeRow): Trade {
     holdTimeMin: r.hold_time_min,
     hourOfDay: r.hour_of_day,
     dayOfWeek: r.day_of_week,
+    stopLoss: r.stop_loss ?? null,
     rMultiple: r.r_multiple,
     setupTag: r.setup_tag ?? 'untagged',
+    notes: r.notes ?? '',
+    executionLegs: r.execution_legs ?? null,
     source: r.source as Trade['source'],
     createdAt: r.created_at,
   }
