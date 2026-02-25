@@ -94,6 +94,9 @@ export default async function TradeDetailsPage({
           symbol={trade.symbol}
           entryTime={trade.entryTime}
           exitTime={trade.exitTime}
+          side={trade.side}
+          entryPrice={trade.entryPrice}
+          exitPrice={trade.exitPrice}
         />
       </div>
     </div>

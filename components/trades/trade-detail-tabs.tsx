@@ -1,5 +1,7 @@
 'use client'
 
+import { useState } from 'react'
+
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { LocalTime } from '@/components/ui/local-time'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -63,17 +65,24 @@ function perFillGrossPnl(
 
 function mergeExecutionLegs(legs: ExecutionLeg[] | null): ExecutionLeg[] {
   if (!legs || legs.length === 0) return []
-  const buckets = new Map<string, { time: string; action: 'BUY' | 'SELL'; shares: number; weightedCost: number }>()
+  const buckets = new Map<string, { time: string; action: 'BUY' | 'SELL'; shares: number; weightedCost: number; sortTs: number }>()
   for (const leg of legs) {
-    const key = `${leg.time}|${leg.action}`
+    const ts = Date.parse(leg.time)
+    const minuteBucket = Number.isNaN(ts) ? leg.time : String(Math.floor(ts / 60000))
+    const key = `${minuteBucket}|${leg.action}`
     const existing = buckets.get(key) ?? {
       time: leg.time,
       action: leg.action,
       shares: 0,
       weightedCost: 0,
+      sortTs: Number.isNaN(ts) ? 0 : ts,
     }
     existing.shares += leg.shares
     existing.weightedCost += leg.price * leg.shares
+    if (!Number.isNaN(ts) && (existing.sortTs === 0 || ts < existing.sortTs)) {
+      existing.sortTs = ts
+      existing.time = leg.time
+    }
     buckets.set(key, existing)
   }
   return Array.from(buckets.values())
@@ -83,11 +92,36 @@ function mergeExecutionLegs(legs: ExecutionLeg[] | null): ExecutionLeg[] {
       shares: b.shares,
       price: b.shares > 0 ? b.weightedCost / b.shares : 0,
     }))
-    .sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0))
+    .sort((a, b) => {
+      const ta = Date.parse(a.time)
+      const tb = Date.parse(b.time)
+      if (Number.isNaN(ta) || Number.isNaN(tb)) return a.time < b.time ? -1 : a.time > b.time ? 1 : 0
+      return ta - tb
+    })
+}
+
+function fmtPrice(n: number | null) {
+  if (n == null) return '—'
+  return `$${n.toFixed(2)}`
+}
+
+function computeR(side: Side, entry: number, exit: number, stop: number): number | null {
+  const risk = side === 'long' ? entry - stop : stop - entry
+  if (risk <= 0) return null
+  const reward = side === 'long' ? exit - entry : entry - exit
+  return reward / risk
 }
 
 export function TradeDetailTabs(props: Props) {
   const mergedExecutionLegs = mergeExecutionLegs(props.executionLegs)
+  const [liveStopLoss, setLiveStopLoss] = useState<number | null>(props.initialStopLoss)
+  const [liveRMultiple, setLiveRMultiple] = useState<number | null>(props.initialRMultiple)
+
+  const displayR = liveRMultiple ?? (
+    props.side && props.entryPrice != null && props.exitPrice != null && liveStopLoss != null
+      ? computeR(props.side, props.entryPrice, props.exitPrice, liveStopLoss)
+      : null
+  )
 
   return (
     <Tabs defaultValue="summary" className="w-full">
@@ -111,6 +145,7 @@ export function TradeDetailTabs(props: Props) {
           source={props.source}
           initialStopLoss={props.initialStopLoss}
           initialRMultiple={props.initialRMultiple}
+          onStopLossSaved={(sl, r) => { setLiveStopLoss(sl); setLiveRMultiple(r) }}
         />
       </TabsContent>
 
@@ -136,6 +171,18 @@ export function TradeDetailTabs(props: Props) {
               <div className="mb-1 text-xs text-muted-foreground">Duration</div>
               <div className="text-sm font-medium">
                 {formatDuration(props.holdTimeMin)}
+              </div>
+            </div>
+            <div className="rounded-lg border p-3">
+              <div className="mb-1 text-xs text-muted-foreground">Stop Loss</div>
+              <div className="text-sm font-medium text-red-600">
+                {fmtPrice(liveStopLoss)}
+              </div>
+            </div>
+            <div className="rounded-lg border p-3">
+              <div className="mb-1 text-xs text-muted-foreground">R Multiple</div>
+              <div className={`text-sm font-medium ${displayR != null ? (displayR >= 0 ? 'text-emerald-600' : 'text-red-600') : ''}`}>
+                {displayR != null ? displayR.toFixed(2) : '—'}
               </div>
             </div>
             <div className="rounded-lg border p-3">

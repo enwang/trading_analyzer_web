@@ -1,9 +1,9 @@
 import { createClient } from '@/lib/supabase/server'
 import { rowToTrade } from '@/types/trade'
-import { computeSummary, equityCurve, byDay } from '@/lib/metrics'
+import { computeSummary, equityCurve } from '@/lib/metrics'
 import { KpiCard } from '@/components/kpi/kpi-card'
 import { EquityCurve } from '@/components/charts/equity-curve'
-import { PnlBar } from '@/components/charts/pnl-bar'
+import { DailyPnlByTimezone } from '@/components/charts/daily-pnl-by-timezone'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
 function fmtMoney(n: number) {
@@ -66,28 +66,7 @@ export default async function OverviewPage() {
   const largestLossTrade = closedTrades.length
     ? closedTrades.reduce((worst, t) => ((worst == null || (t.pnl ?? Infinity) < (worst.pnl ?? Infinity)) ? t : worst), null as typeof closedTrades[number] | null)
     : null
-  const closedByDate = new Map<string, typeof trades>()
-  for (const t of trades) {
-    if (!t.exitTime) continue
-    const date = t.exitTime.slice(0, 10)
-    const dayTrades = closedByDate.get(date) ?? []
-    dayTrades.push(t)
-    closedByDate.set(date, dayTrades)
-  }
-  const daily = byDay(trades).map(d => ({
-    label: d.date.slice(5),
-    value: d.pnl,
-    href: `/trades?date=${d.date}`,
-    hoverTitle: `${d.date} (${closedByDate.get(d.date)?.length ?? 0} trades)`,
-    hoverItems: (() => {
-      const dayTrades = closedByDate.get(d.date) ?? []
-      const items = dayTrades
-        .slice(0, 6)
-        .map((t) => `${t.symbol} ${fmtMoneySigned(t.pnl ?? 0)}`)
-      if (dayTrades.length > 6) items.push(`+${dayTrades.length - 6} more`)
-      return items
-    })(),
-  }))
+  const dailyTrades = trades.map((t) => ({ symbol: t.symbol, exitTime: t.exitTime, pnl: t.pnl }))
 
   return (
     <div className="space-y-6">
@@ -172,7 +151,7 @@ export default async function OverviewPage() {
             <CardTitle className="text-sm font-medium">Daily P&L</CardTitle>
           </CardHeader>
           <CardContent>
-            <PnlBar data={daily} height={240} tooltipLabel="Daily P&L" />
+            <DailyPnlByTimezone trades={dailyTrades} height={240} />
           </CardContent>
         </Card>
       </div>

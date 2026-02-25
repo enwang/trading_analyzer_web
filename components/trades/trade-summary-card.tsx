@@ -21,6 +21,7 @@ interface Props {
   source: string
   initialStopLoss: number | null
   initialRMultiple: number | null
+  onStopLossSaved?: (stopLoss: number | null, rMultiple: number | null) => void
 }
 
 interface PreEntryExtremes {
@@ -98,6 +99,7 @@ export function TradeSummaryCard({
   source,
   initialStopLoss,
   initialRMultiple,
+  onStopLossSaved,
 }: Props) {
   const [stopLossInput, setStopLossInput] = useState(initialStopLoss?.toFixed(2) ?? '')
   const [savedR, setSavedR] = useState<number | null>(initialRMultiple)
@@ -185,6 +187,7 @@ export function TradeSummaryCard({
       }
       setSavedR(nextR)
       setLastSavedKey(JSON.stringify({ stopLoss: nextStopLoss, rMultiple: nextR }))
+      onStopLossSaved?.(nextStopLoss, nextR)
     } catch {
       setError('Failed to save risk values')
     }

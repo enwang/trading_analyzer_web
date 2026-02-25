@@ -464,7 +464,7 @@ function parseCsv(csvStr: string): NormalizedTrade[] {
     t.execution_legs = legs.length > 0 ? legs : null
   }
 
-  appendOpenPositions(merged, openLotsBySymbol)
+  appendOpenPositions(merged, openLotsBySymbol, openLegsByEntry)
 
   const normalized: NormalizedTrade[] = []
   for (const t of merged) {
@@ -564,10 +564,13 @@ function dedupByConstraintKey(trades: NormalizedTrade[]): NormalizedTrade[] {
 function appendOpenPositions(
   trades: NormalizedTrade[],
   openLotsBySymbol: Map<string, { entryIso: string; avgPrice: number; remainingShares: number }[]>,
+  openLegsByEntry: Map<string, { time: string; action: 'BUY' | 'SELL'; shares: number; price: number }[]>,
 ): void {
   try {
     const openKeys = new Set<string>()
     const realizedByOpenLot = new Map<string, number>()
+    const closedSharesByOpenLot = new Map<string, number>()
+    const closeLegsByOpenLot = new Map<string, { time: string; action: 'BUY' | 'SELL'; shares: number; price: number }[]>()
     for (const [sym, lots] of openLotsBySymbol) {
       for (const lot of lots) {
         if (lot.remainingShares > 0) {
@@ -582,6 +585,18 @@ function appendOpenPositions(
       const lotKey = `${t.symbol}|${t.entry_time}`
       if (openKeys.has(lotKey)) {
         realizedByOpenLot.set(lotKey, (realizedByOpenLot.get(lotKey) ?? 0) + (t.pnl ?? 0))
+        closedSharesByOpenLot.set(lotKey, (closedSharesByOpenLot.get(lotKey) ?? 0) + Math.abs(t.shares ?? 0))
+        if (t.exit_time && t.exit_price != null && t.shares != null && t.side) {
+          const closeAction: 'BUY' | 'SELL' = t.side === 'long' ? 'SELL' : 'BUY'
+          const legs = closeLegsByOpenLot.get(lotKey) ?? []
+          legs.push({
+            time: t.exit_time,
+            action: closeAction,
+            shares: Math.abs(t.shares),
+            price: t.exit_price,
+          })
+          closeLegsByOpenLot.set(lotKey, legs)
+        }
         trades.splice(i, 1)
       }
     }
@@ -591,11 +606,40 @@ function appendOpenPositions(
         if (lot.remainingShares <= 0) continue
         const lotKey = `${sym}|${lot.entryIso}`
         const realizedPnl = realizedByOpenLot.get(lotKey) ?? 0
+        const inferredOriginalShares = lot.remainingShares + (closedSharesByOpenLot.get(lotKey) ?? 0)
+        let executionLegs = [
+          ...(openLegsByEntry.get(lotKey) ?? []),
+          ...(closeLegsByOpenLot.get(lotKey) ?? []),
+        ]
+        const inferredSide: 'long' | 'short' =
+          executionLegs[0]?.action === 'SELL' ? 'short' : 'long'
+        const openingAction: 'BUY' | 'SELL' = inferredSide === 'long' ? 'BUY' : 'SELL'
+        const knownOpeningShares = executionLegs
+          .filter((leg) => leg.action === openingAction)
+          .reduce((sum, leg) => sum + leg.shares, 0)
+
+        if (executionLegs.length === 0 && inferredOriginalShares > 0) {
+          executionLegs = [{
+            time: lot.entryIso,
+            action: openingAction,
+            shares: inferredOriginalShares,
+            price: lot.avgPrice,
+          }]
+        } else if (knownOpeningShares > 0 && inferredOriginalShares > knownOpeningShares) {
+          executionLegs.push({
+            time: lot.entryIso,
+            action: openingAction,
+            shares: inferredOriginalShares - knownOpeningShares,
+            price: lot.avgPrice,
+          })
+        }
+        executionLegs.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0))
+
         trades.push({
           symbol: sym,
           entry_time: lot.entryIso,
           exit_time: null,
-          side: 'long',
+          side: inferredSide,
           shares: lot.remainingShares,
           entry_price: lot.avgPrice,
           exit_price: null,
@@ -609,6 +653,7 @@ function appendOpenPositions(
           day_of_week: null,
           r_multiple: null,
           setup_tag: 'untagged',
+          execution_legs: executionLegs.length > 0 ? executionLegs : null,
           source: 'ibkr',
         })
       }

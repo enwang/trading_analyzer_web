@@ -6,6 +6,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 
 import type { Trade } from '@/types/trade'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { LocalTime } from '@/components/ui/local-time'
 import {
   Select,
@@ -29,17 +30,44 @@ type SortKey =
   | 'side'
   | 'entryTime'
   | 'exitTime'
+  | 'holdDays'
   | 'shares'
   | 'entryPrice'
   | 'exitPrice'
+  | 'stopLoss'
   | 'pnl'
   | 'pnlPct'
   | 'initialAmount'
   | 'initialRisk'
+  | 'initialRiskPct'
   | 'rMultiple'
   | 'outcome'
 type SortDir = 'asc' | 'desc'
-const SORT_KEYS: SortKey[] = [
+type ColumnId =
+  | 'symbol'
+  | 'side'
+  | 'entryTime'
+  | 'exitTime'
+  | 'holdDays'
+  | 'shares'
+  | 'entryPrice'
+  | 'exitPrice'
+  | 'stopLoss'
+  | 'pnl'
+  | 'pnlPct'
+  | 'initialAmount'
+  | 'initialRisk'
+  | 'initialRiskPct'
+  | 'rMultiple'
+  | 'outcome'
+  | 'setupTag'
+  | 'notes'
+
+const COLUMN_ORDER_STORAGE_KEY = 'trades-table-column-order-v1'
+const LEGACY_COLUMN_MAP: Record<string, ColumnId> = {
+  initialStopPct: 'notes',
+}
+const DEFAULT_COLUMN_ORDER: ColumnId[] = [
   'symbol',
   'side',
   'entryTime',
@@ -47,10 +75,34 @@ const SORT_KEYS: SortKey[] = [
   'shares',
   'entryPrice',
   'exitPrice',
+  'stopLoss',
   'pnl',
   'pnlPct',
   'initialAmount',
   'initialRisk',
+  'rMultiple',
+  'outcome',
+  'setupTag',
+  'notes',
+  // New columns are appended so existing/default order stays intact.
+  'holdDays',
+  'initialRiskPct',
+]
+const SORT_KEYS: SortKey[] = [
+  'symbol',
+  'side',
+  'entryTime',
+  'exitTime',
+  'holdDays',
+  'shares',
+  'entryPrice',
+  'exitPrice',
+  'stopLoss',
+  'pnl',
+  'pnlPct',
+  'initialAmount',
+  'initialRisk',
+  'initialRiskPct',
   'rMultiple',
   'outcome',
 ]
@@ -68,6 +120,20 @@ function fmtPrice(n: number | null) {
 
 function fmtMoney(n: number) {
   return `$${n.toFixed(2)}`
+}
+
+function fmtHoldDuration(holdTimeMin: number | null, holdDays: number | null) {
+  if (holdTimeMin != null) {
+    if (holdTimeMin < 60) return `${holdTimeMin.toFixed(2)} min`
+    const totalMinutes = Math.round(holdTimeMin)
+    const days = Math.floor(totalMinutes / 1440)
+    const hours = Math.floor((totalMinutes % 1440) / 60)
+    const minutes = totalMinutes % 60
+    if (days > 0) return `${days}d ${hours}h ${minutes}m`
+    return `${hours}h ${minutes}m`
+  }
+  if (holdDays != null) return `${holdDays}d`
+  return '—'
 }
 
 function OutcomeBadge({ outcome }: { outcome: string | null }) {
@@ -101,18 +167,32 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
   const initialDrafts = useMemo(
     () =>
       Object.fromEntries(
-        trades.map((t) => [t.id, { setupTag: t.setupTag ?? 'untagged', notes: t.notes ?? '' }])
+        trades.map((t) => [
+          t.id,
+          {
+            setupTag: t.setupTag ?? 'untagged',
+            notes: t.notes ?? '',
+            stopLoss: t.stopLoss != null ? t.stopLoss.toFixed(2) : '',
+          },
+        ])
       ),
     [trades]
   )
-  const [drafts, setDrafts] = useState<Record<string, { setupTag: string; notes: string }>>(
+  const [drafts, setDrafts] = useState<Record<string, { setupTag: string; notes: string; stopLoss: string }>>(
     () => initialDrafts
   )
   const [sortKey, setSortKey] = useState<SortKey>(initialSortKey)
   const [sortDir, setSortDir] = useState<SortDir>(initialSortDir)
+  const [columnOrder, setColumnOrder] = useState<ColumnId[]>(DEFAULT_COLUMN_ORDER)
+  const [draggingColumn, setDraggingColumn] = useState<ColumnId | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const savedRef = useRef<Record<string, { setupTag: string; notes: string }>>(initialDrafts)
+  const [populating, setPopulating] = useState(false)
+  const [populateProgress, setPopulateProgress] = useState<{ done: number; total: number } | null>(null)
+  const savedRef = useRef<Record<string, { setupTag: string; notes: string; stopLoss: string }>>(initialDrafts)
   const timersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+  const autoStopFetchedRef = useRef<Set<string>>(new Set())
+  const sheetAppliedRef = useRef(false)
+  const tradeById = useMemo(() => new Map(trades.map((t) => [t.id, t])), [trades])
 
   const filtered = useMemo(() => {
     if (filter === 'all') return trades
@@ -128,6 +208,30 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
     setSortDir(initialSortDir)
   }, [initialSortKey, initialSortDir])
 
+  useEffect(() => {
+    const raw = window.localStorage.getItem(COLUMN_ORDER_STORAGE_KEY)
+    if (!raw) return
+    try {
+      const parsed = JSON.parse(raw) as string[]
+      const normalized = parsed.map((c) => LEGACY_COLUMN_MAP[c] ?? c)
+      const valid = normalized.filter((c): c is ColumnId => DEFAULT_COLUMN_ORDER.includes(c as ColumnId))
+      const deduped: ColumnId[] = []
+      for (const c of valid) {
+        if (!deduped.includes(c)) deduped.push(c)
+      }
+      const missing = DEFAULT_COLUMN_ORDER.filter((c) => !deduped.includes(c))
+      if (deduped.length > 0) {
+        setColumnOrder([...deduped, ...missing])
+      }
+    } catch {
+      // Ignore invalid saved layout.
+    }
+  }, [])
+
+  useEffect(() => {
+    window.localStorage.setItem(COLUMN_ORDER_STORAGE_KEY, JSON.stringify(columnOrder))
+  }, [columnOrder])
+
   const title = filter === 'all'
     ? 'All Trades'
     : filter === 'win'
@@ -141,16 +245,38 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
     return Math.abs(t.entryPrice * t.shares)
   }
 
-  function initialRisk(t: Trade) {
-    if (!t.side || t.entryPrice == null || t.stopLoss == null || t.shares == null) return null
-    const riskPerShare = t.side === 'long' ? t.entryPrice - t.stopLoss : t.stopLoss - t.entryPrice
-    if (!Number.isFinite(riskPerShare) || riskPerShare <= 0) return null
-    return Math.abs(riskPerShare * t.shares)
+  function riskShares(t: Trade): number | null {
+    const isOpenTrade = t.exitTime == null || t.outcome === 'open'
+    if (!isOpenTrade) return t.shares
+    if (!t.side || !t.executionLegs || t.executionLegs.length === 0) return null
+    const openingAction = t.side === 'long' ? 'BUY' : 'SELL'
+    const openingShares = t.executionLegs
+      .filter((leg) => leg.action === openingAction)
+      .reduce((sum, leg) => sum + leg.shares, 0)
+    return openingShares > 0 ? openingShares : null
   }
 
-  function computedR(t: Trade) {
-    if (!t.side || t.entryPrice == null || t.exitPrice == null || t.stopLoss == null) return null
-    const riskPerShare = t.side === 'long' ? t.entryPrice - t.stopLoss : t.stopLoss - t.entryPrice
+  function initialRisk(t: Trade, stopLossOverride?: number | null) {
+    const sharesForRisk = riskShares(t)
+    const stopLoss = stopLossOverride ?? t.stopLoss
+    if (!t.side || t.entryPrice == null || stopLoss == null || sharesForRisk == null) return null
+    const riskPerShare = t.side === 'long' ? t.entryPrice - stopLoss : stopLoss - t.entryPrice
+    if (!Number.isFinite(riskPerShare) || riskPerShare <= 0) return null
+    return Math.abs(riskPerShare * sharesForRisk)
+  }
+
+  function initialRiskPct(t: Trade, stopLossOverride?: number | null) {
+    const stopLoss = stopLossOverride ?? t.stopLoss
+    if (!t.side || t.entryPrice == null || stopLoss == null || t.entryPrice === 0) return null
+    const riskPerShare = t.side === 'long' ? t.entryPrice - stopLoss : stopLoss - t.entryPrice
+    if (!Number.isFinite(riskPerShare) || riskPerShare <= 0) return null
+    return Math.abs((riskPerShare / t.entryPrice) * 100)
+  }
+
+  function computedR(t: Trade, stopLossOverride?: number | null) {
+    const stopLoss = stopLossOverride ?? t.stopLoss
+    if (!t.side || t.entryPrice == null || t.exitPrice == null || stopLoss == null) return null
+    const riskPerShare = t.side === 'long' ? t.entryPrice - stopLoss : stopLoss - t.entryPrice
     if (!Number.isFinite(riskPerShare) || riskPerShare <= 0) return null
     const rewardPerShare = t.side === 'long' ? t.exitPrice - t.entryPrice : t.entryPrice - t.exitPrice
     const r = rewardPerShare / riskPerShare
@@ -158,6 +284,12 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
   }
 
   function valueForSort(t: Trade, key: SortKey): string | number | null {
+    const draftStopLoss = drafts[t.id]?.stopLoss
+    const parsedDraftStopLoss =
+      draftStopLoss != null && draftStopLoss.trim() !== '' ? Number(draftStopLoss) : null
+    const effectiveStopLoss =
+      parsedDraftStopLoss != null && Number.isFinite(parsedDraftStopLoss) ? parsedDraftStopLoss : t.stopLoss
+
     switch (key) {
       case 'symbol':
         return t.symbol ?? null
@@ -167,12 +299,16 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
         return t.entryTime ? new Date(t.entryTime).getTime() : null
       case 'exitTime':
         return t.exitTime ? new Date(t.exitTime).getTime() : null
+      case 'holdDays':
+        return t.holdDays ?? null
       case 'shares':
         return t.shares ?? null
       case 'entryPrice':
         return t.entryPrice ?? null
       case 'exitPrice':
         return t.exitPrice ?? null
+      case 'stopLoss':
+        return effectiveStopLoss ?? null
       case 'pnl':
         return t.pnl ?? null
       case 'pnlPct':
@@ -180,9 +316,11 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
       case 'initialAmount':
         return initialAmount(t)
       case 'initialRisk':
-        return initialRisk(t)
+        return initialRisk(t, effectiveStopLoss)
+      case 'initialRiskPct':
+        return initialRiskPct(t, effectiveStopLoss)
       case 'rMultiple':
-        return computedR(t) ?? t.rMultiple ?? null
+        return computedR(t, effectiveStopLoss) ?? t.rMultiple ?? null
       case 'outcome':
         return t.outcome ?? null
       default:
@@ -216,16 +354,39 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
     return sortDir === 'asc' ? ' ↑' : ' ↓'
   }
 
+  function moveColumn(source: ColumnId, target: ColumnId) {
+    if (source === target) return
+    setColumnOrder((prev) => {
+      const from = prev.indexOf(source)
+      const to = prev.indexOf(target)
+      if (from < 0 || to < 0) return prev
+      const next = [...prev]
+      const [item] = next.splice(from, 1)
+      next.splice(to, 0, item)
+      return next
+    })
+  }
+
+  function sortableHeader(label: string, key?: SortKey) {
+    if (!key) return label
+    return (
+      <button type="button" className="font-medium" onClick={() => toggleSort(key)}>
+        {label}{sortMarker(key)}
+      </button>
+    )
+  }
+
   const sortedFiltered = useMemo(() => {
     return [...filtered].sort(compareTrades)
-  }, [filtered, sortKey, sortDir])
+  }, [filtered, sortKey, sortDir, drafts])
 
-  function updateDraft(id: string, key: 'setupTag' | 'notes', value: string) {
+  function updateDraft(id: string, key: 'setupTag' | 'notes' | 'stopLoss', value: string) {
     setDrafts((prev) => ({
       ...prev,
       [id]: {
         setupTag: prev[id]?.setupTag ?? 'untagged',
         notes: prev[id]?.notes ?? '',
+        stopLoss: prev[id]?.stopLoss ?? '',
         [key]: value,
       },
     }))
@@ -238,10 +399,60 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
     router.replace(`${pathname}?${params.toString()}`, { scroll: false })
   }
 
-  async function saveJournal(id: string, draft: { setupTag: string; notes: string }) {
+  async function populateAllStopLosses() {
+    const needsStop = trades.filter(
+      (t) => t.stopLoss == null && t.entryTime != null && t.side != null
+    )
+    if (needsStop.length === 0) return
+
+    setPopulating(true)
+    setPopulateProgress({ done: 0, total: needsStop.length })
+    setError(null)
+
+    for (let i = 0; i < needsStop.length; i++) {
+      const t = needsStop[i]
+      try {
+        const res = await fetch(
+          `/api/market/pre-entry-extremes?symbol=${encodeURIComponent(t.symbol)}&entryTime=${encodeURIComponent(t.entryTime!)}`
+        )
+        if (!res.ok) {
+          setPopulateProgress({ done: i + 1, total: needsStop.length })
+          continue
+        }
+        const json = await res.json() as { preEntry: { low: number; high: number } }
+        const suggested = t.side === 'long'
+          ? Math.round((json.preEntry.low - 0.01) * 100) / 100
+          : Math.round((json.preEntry.high + 0.01) * 100) / 100
+
+        let rMultiple: number | null = null
+        if (t.entryPrice != null && t.exitPrice != null) {
+          const risk = t.side === 'long' ? t.entryPrice - suggested : suggested - t.entryPrice
+          if (risk > 0) {
+            const reward = t.side === 'long' ? t.exitPrice - t.entryPrice : t.entryPrice - t.exitPrice
+            rMultiple = reward / risk
+          }
+        }
+
+        await fetch(`/api/trades/${t.id}/risk`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stopLoss: suggested, rMultiple }),
+        })
+      } catch {
+        // skip failures silently
+      }
+      setPopulateProgress({ done: i + 1, total: needsStop.length })
+    }
+
+    setPopulating(false)
+    setPopulateProgress(null)
+    router.refresh()
+  }
+
+  async function saveTradeFields(id: string, draft: { setupTag: string; notes: string; stopLoss: string }) {
     setError(null)
     try {
-      const res = await fetch(`/api/trades/${id}/journal`, {
+      const journalRes = await fetch(`/api/trades/${id}/journal`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -249,21 +460,44 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
           notes: draft.notes,
         }),
       })
-      const json = await res.json()
-      if (!res.ok) {
-        setError(json.error ?? 'Failed to save journal')
+      const journalJson = await journalRes.json()
+      if (!journalRes.ok) {
+        setError(journalJson.error ?? 'Failed to save journal')
         return
       }
+
+      const parsedStopLoss = draft.stopLoss.trim() === '' ? null : Number(draft.stopLoss)
+      if (parsedStopLoss != null && !Number.isFinite(parsedStopLoss)) {
+        return
+      }
+      const trade = tradeById.get(id)
+      const nextR = trade ? computedR(trade, parsedStopLoss) : null
+      const riskRes = await fetch(`/api/trades/${id}/risk`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stopLoss: parsedStopLoss, rMultiple: nextR }),
+      })
+      const riskJson = await riskRes.json()
+      if (!riskRes.ok) {
+        setError(riskJson.error ?? 'Failed to save risk values')
+        return
+      }
+
       savedRef.current[id] = draft
     } catch {
-      setError('Failed to save journal')
+      setError('Failed to save trade values')
     }
   }
 
   useEffect(() => {
     for (const [id, draft] of Object.entries(drafts)) {
       const saved = savedRef.current[id]
-      if (saved && saved.setupTag === draft.setupTag && saved.notes === draft.notes) {
+      if (
+        saved &&
+        saved.setupTag === draft.setupTag &&
+        saved.notes === draft.notes &&
+        saved.stopLoss === draft.stopLoss
+      ) {
         continue
       }
 
@@ -271,7 +505,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
         clearTimeout(timersRef.current[id])
       }
       timersRef.current[id] = setTimeout(() => {
-        void saveJournal(id, draft)
+        void saveTradeFields(id, draft)
       }, 700)
     }
 
@@ -283,6 +517,124 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
     }
   }, [drafts])
 
+  useEffect(() => {
+    const candidates = trades.filter((t) => {
+      if (!t.side || !t.entryTime) return false
+      if (autoStopFetchedRef.current.has(t.id)) return false
+      const currentDraft = drafts[t.id]?.stopLoss ?? (t.stopLoss != null ? t.stopLoss.toFixed(2) : '')
+      return currentDraft.trim() === ''
+    })
+
+    if (candidates.length === 0) return
+
+    let cancelled = false
+
+    async function loadDefaults() {
+      for (const t of candidates) {
+        autoStopFetchedRef.current.add(t.id)
+        try {
+          const res = await fetch(
+            `/api/market/pre-entry-extremes?symbol=${encodeURIComponent(t.symbol)}&entryTime=${encodeURIComponent(t.entryTime!)}`
+          )
+          if (!res.ok) continue
+          const json = await res.json() as { preEntry: { low: number; high: number } }
+          const suggested = t.side === 'long'
+            ? Math.round((json.preEntry.low - 0.01) * 100) / 100
+            : Math.round((json.preEntry.high + 0.01) * 100) / 100
+
+          if (cancelled) return
+
+          setDrafts((prev) => {
+            const existing = prev[t.id]
+            const existingStopLoss = existing?.stopLoss ?? (t.stopLoss != null ? t.stopLoss.toFixed(2) : '')
+            if (existingStopLoss.trim() !== '') return prev
+            return {
+              ...prev,
+              [t.id]: {
+                setupTag: existing?.setupTag ?? t.setupTag ?? 'untagged',
+                notes: existing?.notes ?? t.notes ?? '',
+                stopLoss: suggested.toFixed(2),
+              },
+            }
+          })
+        } catch {
+          // Skip failed suggestions for this row.
+        }
+      }
+    }
+
+    void loadDefaults()
+
+    return () => {
+      cancelled = true
+    }
+  }, [trades, drafts])
+
+  useEffect(() => {
+    if (sheetAppliedRef.current || trades.length === 0) return
+    let cancelled = false
+
+    function keyFor(symbol: string, openDate: string | null, closeDate: string | null) {
+      return `${symbol}|${openDate ?? ''}|${closeDate ?? ''}`
+    }
+
+    async function applyStopsFromSheet() {
+      try {
+        const res = await fetch('/api/trades/sheet', { cache: 'no-store' })
+        if (!res.ok) return
+        const json = await res.json() as {
+          rows: Array<{ symbol: string; openDate: string | null; closeDate: string | null; initialStop: number | null }>
+        }
+        if (cancelled || !json.rows?.length) return
+
+        const exactMap = new Map<string, number>()
+        const openOnlyMap = new Map<string, number>()
+        for (const r of json.rows) {
+          if (r.initialStop == null) continue
+          exactMap.set(keyFor(r.symbol, r.openDate, r.closeDate), r.initialStop)
+          const openKey = `${r.symbol}|${r.openDate ?? ''}`
+          if (!openOnlyMap.has(openKey)) openOnlyMap.set(openKey, r.initialStop)
+        }
+
+        setDrafts((prev) => {
+          const next = { ...prev }
+          let changed = false
+
+          for (const t of trades) {
+            const openDate = t.entryTime?.slice(0, 10) ?? null
+            const closeDate = t.exitTime?.slice(0, 10) ?? null
+            const exact = exactMap.get(keyFor(t.symbol, openDate, closeDate))
+            const fallback = openOnlyMap.get(`${t.symbol}|${openDate ?? ''}`)
+            const sheetStop = exact ?? fallback
+            if (sheetStop == null) continue
+
+            const current = next[t.id] ?? {
+              setupTag: t.setupTag ?? 'untagged',
+              notes: t.notes ?? '',
+              stopLoss: t.stopLoss != null ? t.stopLoss.toFixed(2) : '',
+            }
+            const nextStop = sheetStop.toFixed(2)
+            if (current.stopLoss === nextStop) continue
+            next[t.id] = { ...current, stopLoss: nextStop }
+            changed = true
+          }
+
+          return changed ? next : prev
+        })
+      } catch {
+        // Ignore sheet sync errors.
+      } finally {
+        sheetAppliedRef.current = true
+      }
+    }
+
+    void applyStopsFromSheet()
+
+    return () => {
+      cancelled = true
+    }
+  }, [trades])
+
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -290,6 +642,18 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
           {title} ({filtered.length})
         </h1>
         <div className="flex items-center gap-2">
+          {trades.some((t) => t.stopLoss == null && t.entryTime != null && t.side != null) && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={populating}
+              onClick={() => void populateAllStopLosses()}
+            >
+              {populating && populateProgress
+                ? `Populating ${populateProgress.done}/${populateProgress.total}…`
+                : 'Populate Stop Losses'}
+            </Button>
+          )}
           <span className="text-sm text-muted-foreground">View</span>
           <Select value={filter} onValueChange={(v) => setFilterAndUrl(v as OutcomeFilter)}>
             <SelectTrigger className="w-[180px]">
@@ -310,142 +674,154 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>
-                <button type="button" className="font-medium" onClick={() => toggleSort('symbol')}>
-                  Symbol{sortMarker('symbol')}
-                </button>
-              </TableHead>
-              <TableHead>
-                <button type="button" className="font-medium" onClick={() => toggleSort('side')}>
-                  Side{sortMarker('side')}
-                </button>
-              </TableHead>
-              <TableHead>
-                <button type="button" className="font-medium" onClick={() => toggleSort('entryTime')}>
-                  Entry{sortMarker('entryTime')}
-                </button>
-              </TableHead>
-              <TableHead>
-                <button type="button" className="font-medium" onClick={() => toggleSort('exitTime')}>
-                  Exit{sortMarker('exitTime')}
-                </button>
-              </TableHead>
-              <TableHead className="text-right">
-                <button type="button" className="font-medium" onClick={() => toggleSort('shares')}>
-                  Shares{sortMarker('shares')}
-                </button>
-              </TableHead>
-              <TableHead className="text-right">
-                <button type="button" className="font-medium" onClick={() => toggleSort('entryPrice')}>
-                  Entry ${sortMarker('entryPrice')}
-                </button>
-              </TableHead>
-              <TableHead className="text-right">
-                <button type="button" className="font-medium" onClick={() => toggleSort('exitPrice')}>
-                  Exit ${sortMarker('exitPrice')}
-                </button>
-              </TableHead>
-              <TableHead className="text-right">
-                <button type="button" className="font-medium" onClick={() => toggleSort('pnl')}>
-                  P&L{sortMarker('pnl')}
-                </button>
-              </TableHead>
-              <TableHead className="text-right">
-                <button type="button" className="font-medium" onClick={() => toggleSort('pnlPct')}>
-                  P&L %{sortMarker('pnlPct')}
-                </button>
-              </TableHead>
-              <TableHead className="text-right">
-                <button type="button" className="font-medium" onClick={() => toggleSort('initialAmount')}>
-                  Initial Amount{sortMarker('initialAmount')}
-                </button>
-              </TableHead>
-              <TableHead className="text-right">
-                <button type="button" className="font-medium" onClick={() => toggleSort('initialRisk')}>
-                  Initial Risk{sortMarker('initialRisk')}
-                </button>
-              </TableHead>
-              <TableHead className="text-right">
-                <button type="button" className="font-medium" onClick={() => toggleSort('rMultiple')}>
-                  R Multiple{sortMarker('rMultiple')}
-                </button>
-              </TableHead>
-              <TableHead>
-                <button type="button" className="font-medium" onClick={() => toggleSort('outcome')}>
-                  Outcome{sortMarker('outcome')}
-                </button>
-              </TableHead>
-              <TableHead>Setup</TableHead>
-              <TableHead>Notes</TableHead>
+              {columnOrder.map((col) => {
+                const rightAligned =
+                  col === 'holdDays' ||
+                  col === 'shares' ||
+                  col === 'entryPrice' ||
+                  col === 'exitPrice' ||
+                  col === 'stopLoss' ||
+                  col === 'pnl' ||
+                  col === 'pnlPct' ||
+                  col === 'initialAmount' ||
+                  col === 'initialRisk' ||
+                  col === 'initialRiskPct' ||
+                  col === 'rMultiple'
+                const headerContent: Record<ColumnId, React.ReactNode> = {
+                  symbol: sortableHeader('Symbol', 'symbol'),
+                  side: sortableHeader('Side', 'side'),
+                  entryTime: sortableHeader('Entry', 'entryTime'),
+                  exitTime: sortableHeader('Exit', 'exitTime'),
+                  holdDays: sortableHeader('Hold Days', 'holdDays'),
+                  shares: sortableHeader('Shares', 'shares'),
+                  entryPrice: sortableHeader('Entry $', 'entryPrice'),
+                  exitPrice: sortableHeader('Exit $', 'exitPrice'),
+                  stopLoss: sortableHeader('Stop Loss $', 'stopLoss'),
+                  pnl: sortableHeader('P&L', 'pnl'),
+                  pnlPct: sortableHeader('P&L %', 'pnlPct'),
+                  initialAmount: sortableHeader('Initial Amount', 'initialAmount'),
+                  initialRisk: sortableHeader('Initial Risk', 'initialRisk'),
+                  initialRiskPct: sortableHeader('Initial Risk %', 'initialRiskPct'),
+                  rMultiple: sortableHeader('R Multiple', 'rMultiple'),
+                  outcome: sortableHeader('Outcome', 'outcome'),
+                  setupTag: 'Setup',
+                  notes: 'Notes',
+                }
+                const safeHeaderContent = headerContent[col] ?? (
+                  <span className="font-medium">{String(col)}</span>
+                )
+                return (
+                  <TableHead
+                    key={col}
+                    draggable
+                    onDragStart={() => setDraggingColumn(col)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={() => {
+                      if (draggingColumn) moveColumn(draggingColumn, col)
+                      setDraggingColumn(null)
+                    }}
+                    onDragEnd={() => setDraggingColumn(null)}
+                    className={`${rightAligned ? 'text-right' : ''} ${draggingColumn === col ? 'opacity-60' : ''}`}
+                  >
+                    {safeHeaderContent}
+                  </TableHead>
+                )
+              })}
             </TableRow>
           </TableHeader>
           <TableBody>
             {filtered.length === 0 && (
               <TableRow>
-                <TableCell colSpan={15} className="py-10 text-center text-muted-foreground">
+                <TableCell colSpan={columnOrder.length} className="py-10 text-center text-muted-foreground">
                   No trades for this filter.
                 </TableCell>
               </TableRow>
             )}
-            {sortedFiltered.map((t) => (
+            {sortedFiltered.map((t) => {
+              const draftStopLoss = drafts[t.id]?.stopLoss ?? (t.stopLoss != null ? t.stopLoss.toFixed(2) : '')
+              const parsedDraftStopLoss = draftStopLoss.trim() === '' ? null : Number(draftStopLoss)
+              const effectiveStopLoss =
+                parsedDraftStopLoss != null && Number.isFinite(parsedDraftStopLoss)
+                  ? parsedDraftStopLoss
+                  : t.stopLoss
+
+              return (
               <TableRow key={t.id} className="hover:bg-muted/40">
-                <TableCell className="font-medium">
-                  <Link
-                    href={`/trades/${t.id}?${(() => {
-                      const params = new URLSearchParams(searchParams.toString())
-                      params.set('view', filter)
-                      return params.toString()
-                    })()}`}
-                    className="underline-offset-4 hover:underline"
-                  >
-                    {t.symbol}
-                  </Link>
-                </TableCell>
-                <TableCell className="capitalize">{t.side ?? '—'}</TableCell>
-                <TableCell>
-                  <LocalTime date={t.entryTime} className="font-mono text-xs text-muted-foreground" />
-                </TableCell>
-                <TableCell>
-                  <LocalTime date={t.exitTime} className="font-mono text-xs text-muted-foreground" />
-                </TableCell>
-                <TableCell className="text-right">{t.shares ?? '—'}</TableCell>
-                <TableCell className="text-right">{fmtPrice(t.entryPrice)}</TableCell>
-                <TableCell className="text-right">{fmtPrice(t.exitPrice)}</TableCell>
-                <TableCell className={`text-right font-medium ${pnlClass(t.outcome)}`}>
-                  {t.pnl != null ? `${t.pnl >= 0 ? '+' : ''}$${t.pnl.toFixed(2)}` : '—'}
-                </TableCell>
-                <TableCell className={`text-right ${pnlClass(t.outcome)}`}>
-                  {t.pnlPct != null ? `${(t.pnlPct * 100).toFixed(2)}%` : '—'}
-                </TableCell>
-                <TableCell className="text-right">
-                  {initialAmount(t) != null ? fmtMoney(initialAmount(t) as number) : '—'}
-                </TableCell>
-                <TableCell className="text-right">
-                  {initialRisk(t) != null ? fmtMoney(initialRisk(t) as number) : '—'}
-                </TableCell>
-                <TableCell className="text-right">
-                  {(computedR(t) ?? t.rMultiple) != null ? (computedR(t) ?? t.rMultiple)?.toFixed(2) : '—'}
-                </TableCell>
-                <TableCell>
-                  <OutcomeBadge outcome={t.outcome} />
-                </TableCell>
-                <TableCell>
-                  <input
-                    className="h-8 w-[120px] rounded-md border px-2 text-xs"
-                    value={drafts[t.id]?.setupTag ?? t.setupTag}
-                    onChange={(e) => updateDraft(t.id, 'setupTag', e.target.value)}
-                  />
-                </TableCell>
-                <TableCell>
-                  <input
-                    className="h-8 w-[220px] rounded-md border px-2 text-xs"
-                    value={drafts[t.id]?.notes ?? t.notes}
-                    onChange={(e) => updateDraft(t.id, 'notes', e.target.value)}
-                    placeholder="Add notes"
-                  />
-                </TableCell>
+                {columnOrder.map((col) => {
+                  const detailsHref = `/trades/${t.id}?${(() => {
+                    const params = new URLSearchParams(searchParams.toString())
+                    params.set('view', filter)
+                    return params.toString()
+                  })()}`
+
+                  if (col === 'symbol') {
+                    return (
+                      <TableCell key={col} className="font-medium">
+                        <Link href={detailsHref} className="underline-offset-4 hover:underline">
+                          {t.symbol}
+                        </Link>
+                      </TableCell>
+                    )
+                  }
+                  if (col === 'side') return <TableCell key={col} className="capitalize">{t.side ?? '—'}</TableCell>
+                  if (col === 'entryTime') return <TableCell key={col}><LocalTime date={t.entryTime} dateOnly className="font-mono text-xs text-muted-foreground" /></TableCell>
+                  if (col === 'exitTime') return <TableCell key={col}><LocalTime date={t.exitTime} dateOnly className="font-mono text-xs text-muted-foreground" /></TableCell>
+                  if (col === 'holdDays') return <TableCell key={col} className="text-right">{fmtHoldDuration(t.holdTimeMin, t.holdDays)}</TableCell>
+                  if (col === 'shares') return <TableCell key={col} className="text-right">{t.shares ?? '—'}</TableCell>
+                  if (col === 'entryPrice') return <TableCell key={col} className="text-right">{fmtPrice(t.entryPrice)}</TableCell>
+                  if (col === 'exitPrice') return <TableCell key={col} className="text-right">{fmtPrice(t.exitPrice)}</TableCell>
+                  if (col === 'stopLoss') {
+                    return (
+                      <TableCell key={col} className="text-right">
+                        <input
+                          className="h-8 w-[92px] rounded-md border px-2 text-right text-xs"
+                          value={draftStopLoss}
+                          onChange={(e) => updateDraft(t.id, 'stopLoss', e.target.value)}
+                          placeholder="0.00"
+                          inputMode="decimal"
+                        />
+                      </TableCell>
+                    )
+                  }
+                  if (col === 'pnl') return <TableCell key={col} className={`text-right font-medium ${pnlClass(t.outcome)}`}>{t.pnl != null ? `${t.pnl >= 0 ? '+' : ''}$${t.pnl.toFixed(2)}` : '—'}</TableCell>
+                  if (col === 'pnlPct') return <TableCell key={col} className={`text-right ${pnlClass(t.outcome)}`}>{t.pnlPct != null ? `${(t.pnlPct * 100).toFixed(2)}%` : '—'}</TableCell>
+                  if (col === 'initialAmount') return <TableCell key={col} className="text-right">{initialAmount(t) != null ? fmtMoney(initialAmount(t) as number) : '—'}</TableCell>
+                  if (col === 'initialRisk') return <TableCell key={col} className="text-right">{initialRisk(t, effectiveStopLoss) != null ? fmtMoney(initialRisk(t, effectiveStopLoss) as number) : '—'}</TableCell>
+                  if (col === 'initialRiskPct') return <TableCell key={col} className="text-right">{initialRiskPct(t, effectiveStopLoss) != null ? `${initialRiskPct(t, effectiveStopLoss)?.toFixed(2)}%` : '—'}</TableCell>
+                  if (col === 'rMultiple') {
+                    const r = computedR(t, effectiveStopLoss) ?? t.rMultiple
+                    const rClass = r != null ? (r >= 0 ? 'text-emerald-600' : 'text-red-600') : ''
+                    return (
+                      <TableCell key={col} className={`text-right font-medium ${rClass}`}>
+                        {r != null ? r.toFixed(2) : '—'}
+                      </TableCell>
+                    )
+                  }
+                  if (col === 'outcome') return <TableCell key={col}><OutcomeBadge outcome={t.outcome} /></TableCell>
+                  if (col === 'setupTag') {
+                    return (
+                      <TableCell key={col}>
+                        <input
+                          className="h-8 w-[120px] rounded-md border px-2 text-xs"
+                          value={drafts[t.id]?.setupTag ?? t.setupTag}
+                          onChange={(e) => updateDraft(t.id, 'setupTag', e.target.value)}
+                        />
+                      </TableCell>
+                    )
+                  }
+                  return (
+                    <TableCell key={col}>
+                      <input
+                        className="h-8 w-[140px] rounded-md border px-2 text-xs"
+                        value={drafts[t.id]?.notes ?? t.notes}
+                        onChange={(e) => updateDraft(t.id, 'notes', e.target.value)}
+                        placeholder="Add notes"
+                      />
+                    </TableCell>
+                  )
+                })}
               </TableRow>
-            ))}
+            )})}
           </TableBody>
         </Table>
       </div>
