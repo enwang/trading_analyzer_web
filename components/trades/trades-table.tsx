@@ -184,6 +184,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
   const [sortKey, setSortKey] = useState<SortKey>(initialSortKey)
   const [sortDir, setSortDir] = useState<SortDir>(initialSortDir)
   const [columnOrder, setColumnOrder] = useState<ColumnId[]>(DEFAULT_COLUMN_ORDER)
+  const [columnOrderHydrated, setColumnOrderHydrated] = useState(false)
   const [draggingColumn, setDraggingColumn] = useState<ColumnId | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [populating, setPopulating] = useState(false)
@@ -210,27 +211,30 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
 
   useEffect(() => {
     const raw = window.localStorage.getItem(COLUMN_ORDER_STORAGE_KEY)
-    if (!raw) return
-    try {
-      const parsed = JSON.parse(raw) as string[]
-      const normalized = parsed.map((c) => LEGACY_COLUMN_MAP[c] ?? c)
-      const valid = normalized.filter((c): c is ColumnId => DEFAULT_COLUMN_ORDER.includes(c as ColumnId))
-      const deduped: ColumnId[] = []
-      for (const c of valid) {
-        if (!deduped.includes(c)) deduped.push(c)
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw) as string[]
+        const normalized = parsed.map((c) => LEGACY_COLUMN_MAP[c] ?? c)
+        const valid = normalized.filter((c): c is ColumnId => DEFAULT_COLUMN_ORDER.includes(c as ColumnId))
+        const deduped: ColumnId[] = []
+        for (const c of valid) {
+          if (!deduped.includes(c)) deduped.push(c)
+        }
+        const missing = DEFAULT_COLUMN_ORDER.filter((c) => !deduped.includes(c))
+        if (deduped.length > 0) {
+          setColumnOrder([...deduped, ...missing])
+        }
+      } catch {
+        // Ignore invalid saved layout.
       }
-      const missing = DEFAULT_COLUMN_ORDER.filter((c) => !deduped.includes(c))
-      if (deduped.length > 0) {
-        setColumnOrder([...deduped, ...missing])
-      }
-    } catch {
-      // Ignore invalid saved layout.
     }
+    setColumnOrderHydrated(true)
   }, [])
 
   useEffect(() => {
+    if (!columnOrderHydrated) return
     window.localStorage.setItem(COLUMN_ORDER_STORAGE_KEY, JSON.stringify(columnOrder))
-  }, [columnOrder])
+  }, [columnOrder, columnOrderHydrated])
 
   const title = filter === 'all'
     ? 'All Trades'

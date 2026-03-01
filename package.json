@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test:parser-regression": "node --experimental-strip-types scripts/parser-regression.mjs"
+    "test:parser-regression": "node --experimental-strip-types scripts/parser-regression.mjs",
+    "rag:transcribe": "node scripts/batch-transcribe.mjs",
+    "rag:build": "node scripts/rag-build.mjs",
+    "rag:query": "node scripts/rag-query.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.8.0",

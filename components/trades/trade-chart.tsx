@@ -5,6 +5,7 @@ import {
   createChart,
   ColorType,
   CrosshairMode,
+  LineType,
 } from 'lightweight-charts'
 import type {
   IChartApi,
@@ -13,6 +14,7 @@ import type {
   ISeriesApi,
   SeriesType,
 } from 'lightweight-charts'
+import type { ExecutionLeg } from '@/types/trade'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -33,10 +35,11 @@ interface Props {
   side?:       'long' | 'short' | null
   entryPrice?: number | null
   exitPrice?:  number | null
+  executionLegs?: ExecutionLeg[] | null
 }
 
 type Timeframe  = '1' | '5' | '15' | '30' | '60' | '1D'
-type ChartStyle = 'candles' | 'bars' | 'line' | 'area'
+type ChartStyle = 'candles' | 'hollow' | 'bars' | 'line' | 'area'
 
 interface Candle {
   time:   number
@@ -45,6 +48,14 @@ interface Candle {
   low:    number
   close:  number
   volume: number | null
+}
+
+interface PendingMarker {
+  time: UTCTimestamp
+  basePosition: 'aboveBar' | 'belowBar'
+  color: string
+  shape: 'arrowUp' | 'arrowDown'
+  text: string
 }
 
 interface ChartMeta {
@@ -68,6 +79,7 @@ const QUICK_TIMEFRAMES: Array<{ value: Timeframe; label: string }> = [
 const TF_TO_BACKEND: Record<Timeframe, string> = {
   '1': '1m', '5': '5m', '15': '15m', '30': '30m', '60': '1h', '1D': '1d',
 }
+const CHART_STYLE_STORAGE_KEY = 'trade-chart-style-v1'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -97,9 +109,32 @@ function calcEMA(candles: Candle[], period: number): { time: number; value: numb
 
 function calcSMA(candles: Candle[], period: number): { time: number; value: number }[] {
   const result: { time: number; value: number }[] = []
-  for (let i = period - 1; i < candles.length; i++) {
-    const avg = candles.slice(i - period + 1, i + 1).reduce((s, c) => s + c.close, 0) / period
-    result.push({ time: candles[i].time, value: avg })
+  if (candles.length === 0 || period <= 0) return result
+
+  let rollingSum = 0
+  for (let i = 0; i < candles.length; i++) {
+    rollingSum += candles[i].close
+    if (i >= period) {
+      rollingSum -= candles[i - period].close
+    }
+    const windowSize = Math.min(i + 1, period)
+    result.push({ time: candles[i].time, value: rollingSum / windowSize })
+  }
+  return result
+}
+
+function calcVolumeSMA(candles: Candle[], period: number): { time: number; value: number }[] {
+  const result: { time: number; value: number }[] = []
+  if (candles.length === 0 || period <= 0) return result
+
+  let rollingSum = 0
+  for (let i = 0; i < candles.length; i++) {
+    rollingSum += candles[i].volume ?? 0
+    if (i >= period) {
+      rollingSum -= candles[i - period].volume ?? 0
+    }
+    const windowSize = Math.min(i + 1, period)
+    result.push({ time: candles[i].time, value: rollingSum / windowSize })
   }
   return result
 }
@@ -114,18 +149,129 @@ function formatTradeDate(entryTime: string | null, timeZone: string) {
   })
 }
 
+function nearestCandleTimeSec(candles: Candle[], targetSec: number): number | null {
+  if (!candles.length) return null
+  let lo = 0
+  let hi = candles.length - 1
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2)
+    if (candles[mid].time < targetSec) lo = mid + 1
+    else hi = mid
+  }
+  const right = candles[lo]
+  const left = candles[Math.max(0, lo - 1)]
+  if (!left) return right?.time ?? null
+  if (!right) return left.time
+  return Math.abs(right.time - targetSec) < Math.abs(left.time - targetSec) ? right.time : left.time
+}
+
+function mergeLegsForMarkers(legs: ExecutionLeg[]) {
+  const map = new Map<string, { timeSec: number; action: 'BUY' | 'SELL'; shares: number; weightedCost: number }>()
+  for (const leg of legs) {
+    const ms = Date.parse(leg.time)
+    if (!Number.isFinite(ms)) continue
+    const timeSec = Math.floor(ms / 1000)
+    // Merge only exact-timestamp fills of the same side (same order burst),
+    // but do not collapse different executions that merely happen in the same second.
+    const key = `${ms}|${leg.action}`
+    const current = map.get(key) ?? { timeSec, action: leg.action, shares: 0, weightedCost: 0 }
+    current.shares += leg.shares
+    current.weightedCost += leg.price * leg.shares
+    map.set(key, current)
+  }
+
+  return Array.from(map.values())
+    .map((x) => ({
+      timeSec: x.timeSec,
+      action: x.action,
+      shares: x.shares,
+      price: x.shares > 0 ? x.weightedCost / x.shares : 0,
+    }))
+    .sort((a, b) => a.timeSec - b.timeSec)
+}
+
+function compactMarkerText(text: string, max = 18) {
+  if (text.length <= max) return text
+  return `${text.slice(0, max - 1)}…`
+}
+
+function resolveMarkerCollisions(markers: PendingMarker[], candles: Candle[]): SeriesMarker<UTCTimestamp>[] {
+  const byTime = new Map<number, PendingMarker[]>()
+  for (const m of markers) {
+    const t = Number(m.time)
+    const list = byTime.get(t) ?? []
+    list.push(m)
+    byTime.set(t, list)
+  }
+
+  const out: SeriesMarker<UTCTimestamp>[] = []
+  const cycle: Array<'aboveBar' | 'belowBar'> = ['aboveBar', 'belowBar']
+  const orderedTimes = Array.from(byTime.keys()).sort((a, b) => a - b)
+  const candleIndexByTime = new Map<number, number>(candles.map((c, i) => [c.time, i]))
+  const offsets = [0, -1, 1, -2, 2, -3, 3, -4, 4]
+
+  for (const t of orderedTimes) {
+    const group = byTime.get(t) ?? []
+    if (group.length === 1) {
+      const only = group[0]
+      out.push({
+        time: only.time,
+        position: only.basePosition,
+        color: only.color,
+        shape: only.shape,
+        text: compactMarkerText(only.text),
+        size: 1,
+      })
+      continue
+    }
+
+    const baseIdx = candleIndexByTime.get(t)
+    for (let i = 0; i < group.length; i++) {
+      const m = group[i]
+      let markerTime = m.time
+      if (baseIdx != null) {
+        const offset = offsets[i] ?? (i % 2 === 0 ? Math.floor(i / 2) : -Math.floor(i / 2))
+        const idx = Math.max(0, Math.min(candles.length - 1, baseIdx + offset))
+        markerTime = candles[idx].time as UTCTimestamp
+      }
+      out.push({
+        time: markerTime,
+        position: cycle[i % cycle.length],
+        color: m.color,
+        shape: m.shape,
+        // Always keep only one label for markers on the same candle time.
+        text: i === 0 ? compactMarkerText(m.text) : '',
+        size: 1,
+      })
+    }
+  }
+
+  return out
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
-export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exitPrice }: Props) {
+export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exitPrice, executionLegs }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
 
   const [topTab,    setTopTab]    = useState<'chart' | 'notes' | 'running'>('chart')
   const [timeframe, setTimeframe] = useState<Timeframe>(() => getDefaultTimeframe(entryTime, exitTime))
-  const [style,     setStyle]     = useState<ChartStyle>('candles')
+  const [style,     setStyle]     = useState<ChartStyle>(() => {
+    if (typeof window === 'undefined') return 'candles'
+    const raw = window.localStorage.getItem(CHART_STYLE_STORAGE_KEY)
+    return raw === 'candles' || raw === 'hollow' || raw === 'bars' || raw === 'line' || raw === 'area'
+      ? raw
+      : 'candles'
+  })
+  const [styleHydrated, setStyleHydrated] = useState(false)
   const [volumeOn,  setVolumeOn]  = useState(true)
   const [ema9On,    setEma9On]    = useState(true)
+  const [ma10On,    setMa10On]    = useState(true)
   const [ma20On,    setMa20On]    = useState(true)
+  const [ma50On,    setMa50On]    = useState(true)
+  const [ma200On,   setMa200On]   = useState(true)
+  const [volumeMa50On, setVolumeMa50On] = useState(true)
   const [loading,   setLoading]   = useState(false)
   const [error,     setError]     = useState<string | null>(null)
   const [candles,   setCandles]   = useState<Candle[] | null>(null)
@@ -136,6 +282,15 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
     if (tz) setUserTimeZone(tz)
   }, [])
+
+  useEffect(() => {
+    setStyleHydrated(true)
+  }, [])
+
+  useEffect(() => {
+    if (!styleHydrated) return
+    window.localStorage.setItem(CHART_STYLE_STORAGE_KEY, style)
+  }, [style, styleHydrated])
 
   // Sync default timeframe when trade changes
   useEffect(() => {
@@ -259,15 +414,36 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
           color: c.close >= c.open ? 'rgba(22,163,74,0.4)' : 'rgba(220,38,38,0.4)',
         }))
       )
+
+      if (volumeMa50On) {
+        const volMa50 = calcVolumeSMA(candles, 50)
+        if (volMa50.length) {
+          const s = chart.addLineSeries({
+            color: '#f97316',
+            lineWidth: 2,
+            lineStyle: 0,
+            lineType: LineType.WithSteps,
+            priceScaleId: 'volume',
+            priceLineVisible: false,
+            lastValueVisible: false,
+          })
+          s.setData(
+            volMa50.map((d) => ({
+              time: ts(d.time),
+              value: d.value,
+            }))
+          )
+        }
+      }
     }
 
     // --- Main price series ---
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let main: ISeriesApi<SeriesType>
 
-    if (style === 'candles') {
+    if (style === 'candles' || style === 'hollow') {
       const s = chart.addCandlestickSeries({
-        upColor:          '#22c55e',
+        upColor:          style === 'hollow' ? 'rgba(255,255,255,0)' : '#22c55e',
         downColor:        '#ef4444',
         borderUpColor:    '#22c55e',
         borderDownColor:  '#ef4444',
@@ -305,6 +481,17 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
       }
     }
 
+    // --- MA 10 ---
+    if (ma10On) {
+      const data = calcSMA(candles, 10)
+      if (data.length) {
+        const s = chart.addLineSeries({
+          color: '#0ea5e9', lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
+        })
+        s.setData(data.map(d => ({ time: ts(d.time), value: d.value })))
+      }
+    }
+
     // --- MA 20 ---
     if (ma20On) {
       const data = calcSMA(candles, 20)
@@ -316,38 +503,102 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
       }
     }
 
-    // --- Entry / exit markers ---
-    const markers: SeriesMarker<UTCTimestamp>[] = []
-
-    if (meta.entryTimeSec) {
-      const isShort = side === 'short'
-      markers.push({
-        time:     ts(meta.entryTimeSec),
-        position: 'belowBar',
-        color:    isShort ? '#dc2626' : '#16a34a',
-        shape:    'arrowUp',
-        text:     entryPrice != null
-          ? `${isShort ? 'SHORT' : 'BUY'} $${entryPrice.toFixed(2)}`
-          : (isShort ? 'SHORT' : 'BUY'),
-        size: 1,
-      })
+    // --- MA 50 ---
+    if (ma50On) {
+      const data = calcSMA(candles, 50)
+      if (data.length) {
+        const s = chart.addLineSeries({
+          color: '#22c55e', lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
+        })
+        s.setData(data.map(d => ({ time: ts(d.time), value: d.value })))
+      }
     }
 
-    if (meta.exitTimeSec && exitTime) {
-      const isShort = side === 'short'
-      markers.push({
-        time:     ts(meta.exitTimeSec),
-        position: 'aboveBar',
-        color:    isShort ? '#16a34a' : '#dc2626',
-        shape:    'arrowDown',
-        text:     exitPrice != null
-          ? `${isShort ? 'COVER' : 'SELL'} $${exitPrice.toFixed(2)}`
-          : (isShort ? 'COVER' : 'SELL'),
-        size: 1,
-      })
+    // --- MA 200 ---
+    if (ma200On) {
+      const data = calcSMA(candles, 200)
+      if (data.length) {
+        const s = chart.addLineSeries({
+          color: '#b45309', lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
+        })
+        s.setData(data.map(d => ({ time: ts(d.time), value: d.value })))
+      }
     }
 
-    if (markers.length > 0) {
+    // --- Execution markers ---
+    const pendingMarkers: PendingMarker[] = []
+
+    if (executionLegs && executionLegs.length > 0) {
+      const mergedLegs = mergeLegsForMarkers(executionLegs)
+      for (const leg of mergedLegs) {
+        const markerSec = nearestCandleTimeSec(candles, leg.timeSec)
+        if (markerSec == null) continue
+
+        const isBuy = leg.action === 'BUY'
+        pendingMarkers.push({
+          time: ts(markerSec),
+          basePosition: isBuy ? 'belowBar' : 'aboveBar',
+          color: isBuy ? '#16a34a' : '#dc2626',
+          shape: isBuy ? 'arrowUp' : 'arrowDown',
+          text: `${leg.action} ${leg.shares}@${leg.price.toFixed(2)}`,
+        })
+      }
+    } else {
+      // Fallback when no execution legs are available.
+      if (meta.entryTimeSec) {
+        const isShort = side === 'short'
+        pendingMarkers.push({
+          time: ts(meta.entryTimeSec),
+          basePosition: 'belowBar',
+          color: isShort ? '#dc2626' : '#16a34a',
+          shape: 'arrowUp',
+          text: entryPrice != null
+            ? `${isShort ? 'SHORT' : 'BUY'} $${entryPrice.toFixed(2)}`
+            : (isShort ? 'SHORT' : 'BUY'),
+        })
+      }
+
+      if (meta.exitTimeSec && exitTime) {
+        const isShort = side === 'short'
+        pendingMarkers.push({
+          time: ts(meta.exitTimeSec),
+          basePosition: 'aboveBar',
+          color: isShort ? '#16a34a' : '#dc2626',
+          shape: 'arrowDown',
+          text: exitPrice != null
+            ? `${isShort ? 'COVER' : 'SELL'} $${exitPrice.toFixed(2)}`
+            : (isShort ? 'COVER' : 'SELL'),
+        })
+      }
+    }
+
+    const baseMarkers = resolveMarkerCollisions(pendingMarkers, candles).sort(
+      (a, b) => Number(a.time) - Number(b.time)
+    )
+    const applyAdaptiveMarkers = () => {
+      if (baseMarkers.length === 0) {
+        main.setMarkers([])
+        return
+      }
+
+      const logical = chart.timeScale().getVisibleLogicalRange()
+      const from = logical ? Math.max(0, Math.floor(logical.from)) : 0
+      const to = logical ? Math.min(candles.length - 1, Math.ceil(logical.to)) : candles.length - 1
+      const visibleBars = Math.max(1, to - from + 1)
+
+      const markerSize =
+        visibleBars > 340 ? 0.8 :
+        visibleBars > 260 ? 0.85 :
+        visibleBars > 180 ? 0.9 :
+        visibleBars > 120 ? 0.95 : 1
+
+      const markers = baseMarkers.map((m) => {
+        return {
+          ...m,
+          size: markerSize,
+        }
+      })
+
       main.setMarkers(markers)
     }
 
@@ -365,11 +616,16 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
       chart.timeScale().fitContent()
     }
 
+    applyAdaptiveMarkers()
+    const handleVisibleRangeChange = () => applyAdaptiveMarkers()
+    chart.timeScale().subscribeVisibleLogicalRangeChange(handleVisibleRangeChange)
+
     return () => {
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleVisibleRangeChange)
       ro.disconnect()
       chart.remove()
     }
-  }, [candles, meta, style, volumeOn, ema9On, ma20On, topTab, side, entryPrice, exitPrice, userTimeZone])
+  }, [candles, meta, style, volumeOn, ema9On, ma10On, ma20On, ma50On, ma200On, volumeMa50On, topTab, side, entryPrice, exitPrice, executionLegs, userTimeZone])
 
   // ---------------------------------------------------------------------------
   // Render
@@ -429,6 +685,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="candles">Candles</SelectItem>
+                <SelectItem value="hollow">Hollow</SelectItem>
                 <SelectItem value="bars">Bars</SelectItem>
                 <SelectItem value="line">Line</SelectItem>
                 <SelectItem value="area">Area</SelectItem>
@@ -440,25 +697,64 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
         {/* Indicator toggles */}
         <div className="flex items-center gap-1.5 border-b border-[#e6e9ef] px-3 py-1.5">
           <Button
-            size="xs" className="h-7 text-[11px]"
-            variant={volumeOn ? 'default' : 'outline'}
-            onClick={() => setVolumeOn(v => !v)}
-          >
-            Volume
-          </Button>
-          <Button
-            size="xs" className="h-7 text-[11px]"
-            variant={ema9On ? 'default' : 'outline'}
+            size="xs"
+            className={`h-7 text-[11px] ${
+              ema9On
+                ? 'border-[#f97316] bg-[#ffedd5] text-[#f97316] hover:bg-[#fed7aa]'
+                : 'text-[#f97316]'
+            }`}
+            variant="outline"
             onClick={() => setEma9On(v => !v)}
           >
             EMA 9
           </Button>
           <Button
-            size="xs" className="h-7 text-[11px]"
-            variant={ma20On ? 'default' : 'outline'}
+            size="xs"
+            className={`h-7 text-[11px] ${
+              ma10On
+                ? 'border-[#0ea5e9] bg-[#e0f2fe] text-[#0ea5e9] hover:bg-[#bae6fd]'
+                : 'text-[#0ea5e9]'
+            }`}
+            variant="outline"
+            onClick={() => setMa10On(v => !v)}
+          >
+            MA 10
+          </Button>
+          <Button
+            size="xs"
+            className={`h-7 text-[11px] ${
+              ma20On
+                ? 'border-[#8b5cf6] bg-[#f3e8ff] text-[#8b5cf6] hover:bg-[#e9d5ff]'
+                : 'text-[#8b5cf6]'
+            }`}
+            variant="outline"
             onClick={() => setMa20On(v => !v)}
           >
             MA 20
+          </Button>
+          <Button
+            size="xs"
+            className={`h-7 text-[11px] ${
+              ma50On
+                ? 'border-[#22c55e] bg-[#dcfce7] text-[#22c55e] hover:bg-[#bbf7d0]'
+                : 'text-[#22c55e]'
+            }`}
+            variant="outline"
+            onClick={() => setMa50On(v => !v)}
+          >
+            MA 50
+          </Button>
+          <Button
+            size="xs"
+            className={`h-7 text-[11px] ${
+              ma200On
+                ? 'border-[#b45309] bg-[#fef3c7] text-[#b45309] hover:bg-[#fde68a]'
+                : 'text-[#b45309]'
+            }`}
+            variant="outline"
+            onClick={() => setMa200On(v => !v)}
+          >
+            MA 200
           </Button>
           {loading && (
             <span className="ml-2 text-[11px] text-[#7b8291]">Loading…</span>

@@ -61,6 +61,19 @@ function pickInterval(spanMs: number, fromMs: number, timeframe: string): string
   return '1d'
 }
 
+function preEntryLookbackMs(timeframe: string): number {
+  const day = 86_400_000
+  switch (timeframe) {
+    case '1m': return 3 * day
+    case '5m': return 14 * day
+    case '15m': return 30 * day
+    case '30m': return 45 * day
+    case '1h': return 90 * day
+    case '1d': return 365 * day
+    default: return 30 * day
+  }
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const symbol    = searchParams.get('symbol')
@@ -81,6 +94,7 @@ export async function GET(request: Request) {
   let entryMs: number
   let exitMs: number
   let spanMs: number
+  let lookbackMs = preEntryLookbackMs(timeframe)
 
   if (p1Param && p2Param) {
     // Explicit range from the Charting Library datafeed
@@ -89,6 +103,7 @@ export async function GET(request: Request) {
     entryMs = (Number(p1Param) + Number(p2Param)) / 2 * 1000 // midpoint (used only for interval picking)
     exitMs  = entryMs
     spanMs  = (Number(p2Param) - Number(p1Param)) * 1000
+    lookbackMs = Math.max(lookbackMs, Math.floor(spanMs * 0.5))
   } else {
     if (!entryTime) {
       return NextResponse.json({ error: 'entryTime or period1/period2 are required' }, { status: 400 })
@@ -103,7 +118,7 @@ export async function GET(request: Request) {
     const toMs    = Math.max(entryMs, exitMs)
     spanMs        = Math.max(toMs - fromMs, 30 * 60_000)
     const padding = Math.max(spanMs * 0.5, 4 * 60 * 60_000)
-    period1 = Math.floor((fromMs - padding) / 1000)
+    period1 = Math.floor((fromMs - Math.max(padding, lookbackMs)) / 1000)
     period2 = Math.ceil(Math.max(toMs + padding, Date.now()) / 1000)
   }
 
@@ -145,9 +160,10 @@ export async function GET(request: Request) {
     })
     .filter((c): c is NonNullable<typeof c> => c != null)
 
-  const visiblePaddingMs = Math.max(spanMs * 0.4, 2 * 60 * 60_000)
-  const visibleFrom = Math.floor((entryMs - visiblePaddingMs) / 1000)
-  const visibleTo   = Math.ceil((exitMs   + visiblePaddingMs) / 1000)
+  const visiblePreMs = Math.max(spanMs * 0.8, Math.floor(lookbackMs * 0.6))
+  const visiblePostMs = Math.max(spanMs * 0.4, 2 * 60 * 60_000)
+  const visibleFrom = Math.floor((entryMs - visiblePreMs) / 1000)
+  const visibleTo   = Math.ceil((exitMs   + visiblePostMs) / 1000)
 
   return NextResponse.json({
     symbol, interval, timeframe, candles,

@@ -5,6 +5,7 @@ import { KpiCard } from '@/components/kpi/kpi-card'
 import { EquityCurve } from '@/components/charts/equity-curve'
 import { DailyPnlByTimezone } from '@/components/charts/daily-pnl-by-timezone'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { OverviewSyncButton } from '@/components/overview/overview-sync-button'
 
 function fmtMoney(n: number) {
   const abs = Math.abs(n)
@@ -70,7 +71,10 @@ export default async function OverviewPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">Overview</h1>
+      <div className="flex items-start justify-between gap-3">
+        <h1 className="text-xl font-semibold">Overview</h1>
+        <OverviewSyncButton />
+      </div>
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
         <KpiCard

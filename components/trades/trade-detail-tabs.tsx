@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { LocalTime } from '@/components/ui/local-time'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { TradeSummaryCard } from '@/components/trades/trade-summary-card'
+import { TradeAiAnalyzer } from '@/components/trades/trade-ai-analyzer'
 import type { ExecutionLeg } from '@/types/trade'
 
 type Side = 'long' | 'short' | null
@@ -113,6 +114,7 @@ function computeR(side: Side, entry: number, exit: number, stop: number): number
 }
 
 export function TradeDetailTabs(props: Props) {
+  const [activeTab, setActiveTab] = useState<'summary' | 'executions' | 'ai'>('summary')
   const mergedExecutionLegs = mergeExecutionLegs(props.executionLegs)
   const [liveStopLoss, setLiveStopLoss] = useState<number | null>(props.initialStopLoss)
   const [liveRMultiple, setLiveRMultiple] = useState<number | null>(props.initialRMultiple)
@@ -124,10 +126,11 @@ export function TradeDetailTabs(props: Props) {
   )
 
   return (
-    <Tabs defaultValue="summary" className="w-full">
-      <TabsList className="grid w-full grid-cols-2">
+    <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'summary' | 'executions' | 'ai')} className="w-full">
+      <TabsList className="grid w-full grid-cols-3">
         <TabsTrigger value="summary">Summary</TabsTrigger>
         <TabsTrigger value="executions">Executions</TabsTrigger>
+        <TabsTrigger value="ai">AI Analyze</TabsTrigger>
       </TabsList>
 
       <TabsContent value="summary">
@@ -220,6 +223,10 @@ export function TradeDetailTabs(props: Props) {
             </div>
           </CardContent>
         </Card>
+      </TabsContent>
+
+      <TabsContent value="ai">
+        {activeTab === 'ai' && <TradeAiAnalyzer tradeId={props.tradeId} />}
       </TabsContent>
     </Tabs>
   )

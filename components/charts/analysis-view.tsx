@@ -365,7 +365,7 @@ function SummaryGrid({
               {col.map((item) => (
                 <div key={item.label}>
                   <div className="text-muted-foreground text-sm">{item.label}</div>
-                  <div className="text-4 leading-tight text-4xl font-semibold tracking-tight sm:text-3xl lg:text-4xl">
+                  <div className="text-xl leading-tight font-semibold tracking-tight sm:text-2xl lg:text-[1.6rem]">
                     {item.value}
                   </div>
                 </div>

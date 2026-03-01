@@ -97,6 +97,7 @@ export default async function TradeDetailsPage({
           side={trade.side}
           entryPrice={trade.entryPrice}
           exitPrice={trade.exitPrice}
+          executionLegs={trade.executionLegs}
         />
       </div>
     </div>
