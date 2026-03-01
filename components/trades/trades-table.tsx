@@ -40,6 +40,8 @@ type SortKey =
   | 'initialAmount'
   | 'initialRisk'
   | 'initialRiskPct'
+  | 'currentAmount'
+  | 'currentRemainShares'
   | 'rMultiple'
   | 'outcome'
 type SortDir = 'asc' | 'desc'
@@ -58,6 +60,8 @@ type ColumnId =
   | 'initialAmount'
   | 'initialRisk'
   | 'initialRiskPct'
+  | 'currentAmount'
+  | 'currentRemainShares'
   | 'rMultiple'
   | 'outcome'
   | 'setupTag'
@@ -87,6 +91,8 @@ const DEFAULT_COLUMN_ORDER: ColumnId[] = [
   // New columns are appended so existing/default order stays intact.
   'holdDays',
   'initialRiskPct',
+  'currentAmount',
+  'currentRemainShares',
 ]
 const SORT_KEYS: SortKey[] = [
   'symbol',
@@ -103,6 +109,8 @@ const SORT_KEYS: SortKey[] = [
   'initialAmount',
   'initialRisk',
   'initialRiskPct',
+  'currentAmount',
+  'currentRemainShares',
   'rMultiple',
   'outcome',
 ]
@@ -110,6 +118,13 @@ const SORT_KEYS: SortKey[] = [
 function pnlClass(outcome: string | null) {
   if (outcome === 'win') return 'text-emerald-600'
   if (outcome === 'loss') return 'text-red-600'
+  return ''
+}
+
+function signedValueClass(value: number | null | undefined) {
+  if (value == null) return ''
+  if (value > 0) return 'text-emerald-600'
+  if (value < 0) return 'text-red-600'
   return ''
 }
 
@@ -124,13 +139,11 @@ function fmtMoney(n: number) {
 
 function fmtHoldDuration(holdTimeMin: number | null, holdDays: number | null) {
   if (holdTimeMin != null) {
-    if (holdTimeMin < 60) return `${holdTimeMin.toFixed(2)} min`
+    if (holdTimeMin < 60) return `${Math.round(holdTimeMin)} min`
     const totalMinutes = Math.round(holdTimeMin)
     const days = Math.floor(totalMinutes / 1440)
-    const hours = Math.floor((totalMinutes % 1440) / 60)
-    const minutes = totalMinutes % 60
-    if (days > 0) return `${days}d ${hours}h ${minutes}m`
-    return `${hours}h ${minutes}m`
+    if (days >= 1) return `${days}d`
+    return `${(totalMinutes / 60).toFixed(1)}h`
   }
   if (holdDays != null) return `${holdDays}d`
   return '—'
@@ -200,6 +213,18 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
     return trades.filter((t) => t.outcome === filter)
   }, [trades, filter])
 
+  const visibleColumnOrder = useMemo(() => {
+    const openOnlyColumns: ColumnId[] = ['currentAmount', 'currentRemainShares']
+    if (filter === 'open') {
+      const next = [...columnOrder]
+      for (const col of openOnlyColumns) {
+        if (!next.includes(col)) next.push(col)
+      }
+      return next
+    }
+    return columnOrder.filter((col) => !openOnlyColumns.includes(col))
+  }, [columnOrder, filter])
+
   useEffect(() => {
     setFilter(initialFilter)
   }, [initialFilter])
@@ -245,8 +270,34 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
         : 'Open Trades'
 
   function initialAmount(t: Trade) {
-    if (t.entryPrice == null || t.shares == null) return null
-    return Math.abs(t.entryPrice * t.shares)
+    const shares = displayShares(t)
+    if (t.entryPrice == null || shares == null) return null
+    return Math.abs(t.entryPrice * shares)
+  }
+
+  function displayShares(t: Trade) {
+    const openingShares = riskShares(t)
+    return openingShares ?? t.shares ?? null
+  }
+
+  function currentRemainShares(t: Trade) {
+    if (t.exitTime != null && t.outcome !== 'open') return null
+    return t.shares != null ? Math.abs(t.shares) : null
+  }
+
+  function currentPrice(t: Trade) {
+    const remain = currentRemainShares(t)
+    if (!t.side || t.entryPrice == null || t.pnl == null || !remain || remain <= 0) return null
+    return t.side === 'long'
+      ? t.entryPrice + (t.pnl / remain)
+      : t.entryPrice - (t.pnl / remain)
+  }
+
+  function currentAmount(t: Trade) {
+    const remain = currentRemainShares(t)
+    const price = currentPrice(t)
+    if (remain == null || price == null) return null
+    return Math.abs(remain * price)
   }
 
   function riskShares(t: Trade): number | null {
@@ -279,12 +330,27 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
 
   function computedR(t: Trade, stopLossOverride?: number | null) {
     const stopLoss = stopLossOverride ?? t.stopLoss
-    if (!t.side || t.entryPrice == null || t.exitPrice == null || stopLoss == null) return null
+    const effectiveExitPrice =
+      t.exitTime == null || t.outcome === 'open'
+        ? currentPrice(t)
+        : t.exitPrice
+    if (!t.side || t.entryPrice == null || effectiveExitPrice == null || stopLoss == null) return null
     const riskPerShare = t.side === 'long' ? t.entryPrice - stopLoss : stopLoss - t.entryPrice
     if (!Number.isFinite(riskPerShare) || riskPerShare <= 0) return null
-    const rewardPerShare = t.side === 'long' ? t.exitPrice - t.entryPrice : t.entryPrice - t.exitPrice
+    const rewardPerShare = t.side === 'long' ? effectiveExitPrice - t.entryPrice : t.entryPrice - effectiveExitPrice
     const r = rewardPerShare / riskPerShare
     return Number.isFinite(r) ? r : null
+  }
+
+  function effectiveHoldTimeMin(t: Trade) {
+    if (t.holdTimeMin != null) return t.holdTimeMin
+    if ((t.exitTime == null || t.outcome === 'open') && t.entryTime) {
+      const entryMs = Date.parse(t.entryTime)
+      if (!Number.isNaN(entryMs)) {
+        return Math.max(0, (Date.now() - entryMs) / 60000)
+      }
+    }
+    return null
   }
 
   function valueForSort(t: Trade, key: SortKey): string | number | null {
@@ -304,9 +370,9 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
       case 'exitTime':
         return t.exitTime ? new Date(t.exitTime).getTime() : null
       case 'holdDays':
-        return t.holdDays ?? null
+        return effectiveHoldTimeMin(t) ?? t.holdDays ?? null
       case 'shares':
-        return t.shares ?? null
+        return displayShares(t)
       case 'entryPrice':
         return t.entryPrice ?? null
       case 'exitPrice':
@@ -323,6 +389,10 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
         return initialRisk(t, effectiveStopLoss)
       case 'initialRiskPct':
         return initialRiskPct(t, effectiveStopLoss)
+      case 'currentAmount':
+        return currentAmount(t)
+      case 'currentRemainShares':
+        return currentRemainShares(t)
       case 'rMultiple':
         return computedR(t, effectiveStopLoss) ?? t.rMultiple ?? null
       case 'outcome':
@@ -674,11 +744,11 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
       </div>
       {error && <div className="text-sm text-red-700">{error}</div>}
 
-      <div className="rounded-lg border">
-        <Table>
+      <div className="rounded-lg border overflow-x-auto">
+        <Table className="min-w-full w-max">
           <TableHeader>
             <TableRow>
-              {columnOrder.map((col) => {
+              {visibleColumnOrder.map((col) => {
                 const rightAligned =
                   col === 'holdDays' ||
                   col === 'shares' ||
@@ -690,6 +760,8 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                   col === 'initialAmount' ||
                   col === 'initialRisk' ||
                   col === 'initialRiskPct' ||
+                  col === 'currentAmount' ||
+                  col === 'currentRemainShares' ||
                   col === 'rMultiple'
                 const headerContent: Record<ColumnId, React.ReactNode> = {
                   symbol: sortableHeader('Symbol', 'symbol'),
@@ -706,6 +778,8 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                   initialAmount: sortableHeader('Initial Amount', 'initialAmount'),
                   initialRisk: sortableHeader('Initial Risk', 'initialRisk'),
                   initialRiskPct: sortableHeader('Initial Risk %', 'initialRiskPct'),
+                  currentAmount: sortableHeader('Current Amount', 'currentAmount'),
+                  currentRemainShares: sortableHeader('Current Shares', 'currentRemainShares'),
                   rMultiple: sortableHeader('R Multiple', 'rMultiple'),
                   outcome: sortableHeader('Outcome', 'outcome'),
                   setupTag: 'Setup',
@@ -736,7 +810,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
           <TableBody>
             {filtered.length === 0 && (
               <TableRow>
-                <TableCell colSpan={columnOrder.length} className="py-10 text-center text-muted-foreground">
+                <TableCell colSpan={visibleColumnOrder.length} className="py-10 text-center text-muted-foreground">
                   No trades for this filter.
                 </TableCell>
               </TableRow>
@@ -751,7 +825,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
 
               return (
               <TableRow key={t.id} className="hover:bg-muted/40">
-                {columnOrder.map((col) => {
+                {visibleColumnOrder.map((col) => {
                   const detailsHref = `/trades/${t.id}?${(() => {
                     const params = new URLSearchParams(searchParams.toString())
                     params.set('view', filter)
@@ -770,8 +844,8 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                   if (col === 'side') return <TableCell key={col} className="capitalize">{t.side ?? '—'}</TableCell>
                   if (col === 'entryTime') return <TableCell key={col}><LocalTime date={t.entryTime} dateOnly className="font-mono text-xs text-muted-foreground" /></TableCell>
                   if (col === 'exitTime') return <TableCell key={col}><LocalTime date={t.exitTime} dateOnly className="font-mono text-xs text-muted-foreground" /></TableCell>
-                  if (col === 'holdDays') return <TableCell key={col} className="text-right">{fmtHoldDuration(t.holdTimeMin, t.holdDays)}</TableCell>
-                  if (col === 'shares') return <TableCell key={col} className="text-right">{t.shares ?? '—'}</TableCell>
+                  if (col === 'holdDays') return <TableCell key={col} className="text-right">{fmtHoldDuration(effectiveHoldTimeMin(t), t.holdDays)}</TableCell>
+                  if (col === 'shares') return <TableCell key={col} className="text-right">{displayShares(t) ?? '—'}</TableCell>
                   if (col === 'entryPrice') return <TableCell key={col} className="text-right">{fmtPrice(t.entryPrice)}</TableCell>
                   if (col === 'exitPrice') return <TableCell key={col} className="text-right">{fmtPrice(t.exitPrice)}</TableCell>
                   if (col === 'stopLoss') {
@@ -787,14 +861,16 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                       </TableCell>
                     )
                   }
-                  if (col === 'pnl') return <TableCell key={col} className={`text-right font-medium ${pnlClass(t.outcome)}`}>{t.pnl != null ? `${t.pnl >= 0 ? '+' : ''}$${t.pnl.toFixed(2)}` : '—'}</TableCell>
-                  if (col === 'pnlPct') return <TableCell key={col} className={`text-right ${pnlClass(t.outcome)}`}>{t.pnlPct != null ? `${(t.pnlPct * 100).toFixed(2)}%` : '—'}</TableCell>
+                  if (col === 'pnl') return <TableCell key={col} className={`text-right font-medium ${signedValueClass(t.pnl) || pnlClass(t.outcome)}`}>{t.pnl != null ? `${t.pnl >= 0 ? '+' : ''}$${t.pnl.toFixed(2)}` : '—'}</TableCell>
+                  if (col === 'pnlPct') return <TableCell key={col} className={`text-right ${signedValueClass(t.pnlPct) || pnlClass(t.outcome)}`}>{t.pnlPct != null ? `${(t.pnlPct * 100).toFixed(2)}%` : '—'}</TableCell>
                   if (col === 'initialAmount') return <TableCell key={col} className="text-right">{initialAmount(t) != null ? fmtMoney(initialAmount(t) as number) : '—'}</TableCell>
                   if (col === 'initialRisk') return <TableCell key={col} className="text-right">{initialRisk(t, effectiveStopLoss) != null ? fmtMoney(initialRisk(t, effectiveStopLoss) as number) : '—'}</TableCell>
                   if (col === 'initialRiskPct') return <TableCell key={col} className="text-right">{initialRiskPct(t, effectiveStopLoss) != null ? `${initialRiskPct(t, effectiveStopLoss)?.toFixed(2)}%` : '—'}</TableCell>
+                  if (col === 'currentAmount') return <TableCell key={col} className="text-right">{currentAmount(t) != null ? fmtMoney(currentAmount(t) as number) : '—'}</TableCell>
+                  if (col === 'currentRemainShares') return <TableCell key={col} className="text-right">{currentRemainShares(t) != null ? currentRemainShares(t) : '—'}</TableCell>
                   if (col === 'rMultiple') {
                     const r = computedR(t, effectiveStopLoss) ?? t.rMultiple
-                    const rClass = r != null ? (r >= 0 ? 'text-emerald-600' : 'text-red-600') : ''
+                    const rClass = signedValueClass(r)
                     return (
                       <TableCell key={col} className={`text-right font-medium ${rClass}`}>
                         {r != null ? r.toFixed(2) : '—'}
@@ -806,7 +882,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                     return (
                       <TableCell key={col}>
                         <input
-                          className="h-8 w-[120px] rounded-md border px-2 text-xs"
+                          className="h-8 w-[140px] rounded-md border px-2 text-xs"
                           value={drafts[t.id]?.setupTag ?? t.setupTag}
                           onChange={(e) => updateDraft(t.id, 'setupTag', e.target.value)}
                         />
@@ -816,7 +892,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                   return (
                     <TableCell key={col}>
                       <input
-                        className="h-8 w-[140px] rounded-md border px-2 text-xs"
+                        className="h-8 w-[320px] rounded-md border px-2 text-xs"
                         value={drafts[t.id]?.notes ?? t.notes}
                         onChange={(e) => updateDraft(t.id, 'notes', e.target.value)}
                         placeholder="Add notes"

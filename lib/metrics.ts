@@ -74,7 +74,7 @@ export function computeSummary(trades: Trade[]): SummaryStats {
 
   // Date range
   const times = closed
-    .map(t => t.entryTime ?? t.exitTime)
+    .map(t => t.exitTime ?? t.entryTime)
     .filter((v): v is string => v != null)
     .sort()
   const dateRange = times.length >= 2
