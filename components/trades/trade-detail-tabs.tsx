@@ -27,6 +27,8 @@ interface Props {
   source: string
   initialStopLoss: number | null
   initialRMultiple: number | null
+  initialMfe: number | null
+  initialMae: number | null
   executionLegs: ExecutionLeg[] | null
 }
 
@@ -116,6 +118,7 @@ function computeR(side: Side, entry: number, exit: number, stop: number): number
 export function TradeDetailTabs(props: Props) {
   const [activeTab, setActiveTab] = useState<'summary' | 'executions' | 'ai'>('summary')
   const mergedExecutionLegs = mergeExecutionLegs(props.executionLegs)
+
   const [liveStopLoss, setLiveStopLoss] = useState<number | null>(props.initialStopLoss)
   const [liveRMultiple, setLiveRMultiple] = useState<number | null>(props.initialRMultiple)
 
@@ -140,6 +143,7 @@ export function TradeDetailTabs(props: Props) {
           side={props.side}
           shares={props.shares}
           entryTime={props.entryTime}
+          exitTime={props.exitTime}
           entryPrice={props.entryPrice}
           exitPrice={props.exitPrice}
           pnl={props.pnl}
@@ -148,6 +152,8 @@ export function TradeDetailTabs(props: Props) {
           source={props.source}
           initialStopLoss={props.initialStopLoss}
           initialRMultiple={props.initialRMultiple}
+          initialMfe={props.initialMfe}
+          initialMae={props.initialMae}
           onStopLossSaved={(sl, r) => { setLiveStopLoss(sl); setLiveRMultiple(r) }}
         />
       </TabsContent>

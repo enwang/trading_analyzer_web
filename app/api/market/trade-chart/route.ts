@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { deduplicateDailyCandles } from '@/lib/market/chart-utils'
 
 interface YahooChartResponse {
   chart?: {
@@ -114,15 +115,27 @@ export async function GET(request: Request) {
     }
     const exitMsRaw = exitTime ? Date.parse(exitTime) : Number.NaN
     exitMs  = Number.isNaN(exitMsRaw) ? entryMs : exitMsRaw
+    const hasExit   = exitTime && !Number.isNaN(exitMsRaw)
     const fromMs  = Math.min(entryMs, exitMs)
     const toMs    = Math.max(entryMs, exitMs)
     spanMs        = Math.max(toMs - fromMs, 30 * 60_000)
     const padding = Math.max(spanMs * 0.5, 4 * 60 * 60_000)
     period1 = Math.floor((fromMs - Math.max(padding, lookbackMs)) / 1000)
-    period2 = Math.ceil(Math.max(toMs + padding, Date.now()) / 1000)
+    // For open trades (no exit), extend to now so live data is included.
+    // For closed trades, cap at exit + padding to avoid today's partial data bleeding in.
+    period2 = Math.ceil((hasExit ? toMs + padding : Math.max(toMs + padding, Date.now())) / 1000)
   }
 
   const interval = pickInterval(spanMs, period1 * 1000, timeframe)
+
+  // For 1D charts on closed trades: cap period2 at end of exit calendar day + 2 extra days.
+  // This prevents large spanMs padding from reaching today's partial candle while still
+  // providing post-trade context.
+  if (interval === '1d' && exitTime && !Number.isNaN(exitMs)) {
+    const exitDayEndSec = Math.ceil(exitMs / 86_400_000) * 86400 // midnight UTC after exit day
+    period2 = Math.min(period2, exitDayEndSec + 2 * 86400) // at most 2 extra days after exit
+  }
+
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&period1=${period1}&period2=${period2}&includePrePost=false`
 
   let response: Response
@@ -151,7 +164,7 @@ export async function GET(request: Request) {
   const closes  = quote?.close  ?? []
   const volumes = quote?.volume ?? []
 
-  const candles = timestamps
+  let candles = timestamps
     .map((tsSec, i) => {
       const open  = opens[i];  const high = highs[i]
       const low   = lows[i];   const close = closes[i]
@@ -160,8 +173,17 @@ export async function GET(request: Request) {
     })
     .filter((c): c is NonNullable<typeof c> => c != null)
 
+  // Yahoo Finance sometimes returns two entries for the same calendar day on 1D charts
+  // (e.g. one at midnight UTC and one at market open). Deduplicate by date.
+  if (interval === '1d') {
+    candles = deduplicateDailyCandles(candles)
+  }
+
   const visiblePreMs = Math.max(spanMs * 0.8, Math.floor(lookbackMs * 0.6))
-  const visiblePostMs = Math.max(spanMs * 0.4, 2 * 60 * 60_000)
+  // For 1D charts, show 2 calendar days of context after exit so the outcome is easy to judge
+  const visiblePostMs = interval === '1d'
+    ? 2 * 86_400_000
+    : Math.max(spanMs * 0.4, 2 * 60 * 60_000)
   const visibleFrom = Math.floor((entryMs - visiblePreMs) / 1000)
   const visibleTo   = Math.ceil((exitMs   + visiblePostMs) / 1000)
 
