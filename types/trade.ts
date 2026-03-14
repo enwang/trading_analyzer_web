@@ -27,6 +27,8 @@ export interface Trade {
   setupTag: string
   notes: string
   executionLegs: ExecutionLeg[] | null
+  mfe: number | null   // Maximum Favorable Excursion ($)
+  mae: number | null   // Maximum Adverse Excursion ($)
   source: 'ibkr' | 'csv'
   createdAt: string
 }
@@ -54,6 +56,8 @@ export interface TradeRow {
   setup_tag: string
   notes?: string | null
   execution_legs?: ExecutionLeg[] | null
+  mfe?: number | null
+  mae?: number | null
   source: string
   created_at: string
 }
@@ -81,6 +85,8 @@ export function rowToTrade(r: TradeRow): Trade {
     setupTag: r.setup_tag ?? 'untagged',
     notes: r.notes ?? '',
     executionLegs: r.execution_legs ?? null,
+    mfe: r.mfe ?? null,
+    mae: r.mae ?? null,
     source: r.source as Trade['source'],
     createdAt: r.created_at,
   }

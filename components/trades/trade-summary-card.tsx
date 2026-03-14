@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react'
 
+import { Info } from 'lucide-react'
+
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 
@@ -13,6 +15,7 @@ interface Props {
   side: Side
   shares: number | null
   entryTime: string | null
+  exitTime: string | null
   entryPrice: number | null
   exitPrice: number | null
   pnl: number | null
@@ -21,6 +24,8 @@ interface Props {
   source: string
   initialStopLoss: number | null
   initialRMultiple: number | null
+  initialMfe: number | null
+  initialMae: number | null
   onStopLossSaved?: (stopLoss: number | null, rMultiple: number | null) => void
 }
 
@@ -85,12 +90,24 @@ function Row({
   )
 }
 
+function InfoTooltip({ text }: { text: string }) {
+  return (
+    <span className="group relative ml-1 inline-flex items-center">
+      <Info className="h-3 w-3 cursor-help text-muted-foreground/60" />
+      <span className="pointer-events-none absolute left-full top-1/2 z-50 ml-1.5 w-56 -translate-y-1/2 rounded-md bg-popover px-3 py-2 text-xs text-popover-foreground shadow-md opacity-0 transition-opacity group-hover:opacity-100">
+        {text}
+      </span>
+    </span>
+  )
+}
+
 export function TradeSummaryCard({
   tradeId,
   symbol,
   side,
   shares,
   entryTime,
+  exitTime,
   entryPrice,
   exitPrice,
   pnl,
@@ -99,11 +116,19 @@ export function TradeSummaryCard({
   source,
   initialStopLoss,
   initialRMultiple,
+  initialMfe,
+  initialMae,
   onStopLossSaved,
 }: Props) {
   const [stopLossInput, setStopLossInput] = useState(initialStopLoss?.toFixed(2) ?? '')
   const [savedR, setSavedR] = useState<number | null>(initialRMultiple)
   const [error, setError] = useState<string | null>(null)
+  const [mfe, setMfe] = useState<number | null>(initialMfe)
+  const [mae, setMae] = useState<number | null>(initialMae)
+  const [mfePct, setMfePct] = useState<number | null>(null)
+  const [maePct, setMaePct] = useState<number | null>(null)
+  const [mfeMaeDebug, setMfeMaeDebug] = useState<{ maxHigh: number; minLow: number; interval: string; maxHighTime: string; minLowTime: string } | null>(null)
+  const [mfeMaeLoading, setMfeMaeLoading] = useState(false)
   const [lastSavedKey, setLastSavedKey] = useState(
     JSON.stringify({ stopLoss: initialStopLoss, rMultiple: initialRMultiple })
   )
@@ -143,6 +168,52 @@ export function TradeSummaryCard({
       canceled = true
     }
   }, [entryTime, symbol, side, initialStopLoss])
+
+  // Always fetch fresh MFE/MAE from market data so stale stored values are corrected.
+  // Display is always from the fresh fetch; DB is updated whenever the value changes.
+  useEffect(() => {
+    if (!entryTime || !exitTime || !side || entryPrice == null || shares == null) return
+
+    let canceled = false
+    async function fetchMfeMae() {
+      setMfeMaeLoading(true)
+      try {
+        const params = new URLSearchParams({
+          symbol,
+          entryTime: entryTime!,
+          exitTime: exitTime!,
+          side: side!,
+          entryPrice: String(entryPrice),
+          shares: String(shares),
+        })
+        const res = await fetch(`/api/market/mfe-mae?${params}`)
+        if (canceled) return
+        if (!res.ok) return
+        const json = await res.json() as { mfe: number; mae: number; mfePct: number; maePct: number; maxHigh: number; minLow: number; interval: string; maxHighTime: string; minLowTime: string }
+        if (canceled) return
+        setMfe(json.mfe)
+        setMae(json.mae)
+        setMfePct(json.mfePct)
+        setMaePct(json.maePct)
+        setMfeMaeDebug({ maxHigh: json.maxHigh, minLow: json.minLow, interval: json.interval, maxHighTime: json.maxHighTime, minLowTime: json.minLowTime })
+        // Persist to DB if value changed
+        if (json.mfe !== initialMfe || json.mae !== initialMae) {
+          await fetch(`/api/trades/${tradeId}/mfe-mae`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mfe: json.mfe, mae: json.mae }),
+          })
+        }
+      } catch {
+        // Non-critical — silently ignore
+      } finally {
+        if (!canceled) setMfeMaeLoading(false)
+      }
+    }
+
+    void fetchMfeMae()
+    return () => { canceled = true }
+  }, [tradeId, symbol, entryTime, exitTime, side, entryPrice, shares])
 
   const stopLoss = useMemo(() => {
     if (stopLossInput.trim() === '') return null
@@ -246,6 +317,50 @@ export function TradeSummaryCard({
         <Row label="Initial Risk" value={initialRiskAmount != null ? fmtMoney(initialRiskAmount) : '—'} />
         <Row label="Initial Risk %" value={initialRiskPct != null ? `${initialRiskPct.toFixed(2)}%` : '—'} />
         <Row label="R Multiple" value={liveR != null ? liveR.toFixed(2) : savedR != null ? savedR.toFixed(2) : '—'} />
+
+        <div className="border-b py-2">
+          <div className="flex items-center justify-between">
+            <span className="flex items-center text-sm text-muted-foreground">
+              MFE
+              <InfoTooltip text="Maximum Favorable Excursion — the largest unrealized gain the trade reached from entry to exit." />
+            </span>
+            <span className="text-sm font-medium text-emerald-600">
+              {mfeMaeLoading ? '…' : mfe != null ? `$${mfe.toFixed(2)}${mfePct != null ? ` (${(mfePct * 100).toFixed(1)}%)` : ''}` : '—'}
+            </span>
+          </div>
+          {mfeMaeDebug && entryPrice != null && (
+            <div className="mt-0.5 text-right text-[11px] text-muted-foreground/70">
+              peak&nbsp;{mfeMaeDebug.maxHigh.toFixed(2)} @ {new Date(mfeMaeDebug.maxHighTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} − entry&nbsp;{entryPrice.toFixed(2)} = {(mfeMaeDebug.maxHigh - entryPrice).toFixed(2)}/sh · {mfeMaeDebug.interval}
+            </div>
+          )}
+        </div>
+        <div className="border-b py-2">
+          <div className="flex items-center justify-between">
+            <span className="flex items-center text-sm text-muted-foreground">
+              MAE
+              <InfoTooltip text="Maximum Adverse Excursion — the largest unrealized loss the trade experienced from entry to exit." />
+            </span>
+            <span className="text-sm font-medium text-red-600">
+              {mfeMaeLoading ? '…' : mae != null ? `$${mae.toFixed(2)}${maePct != null ? ` (${(maePct * 100).toFixed(1)}%)` : ''}` : '—'}
+            </span>
+          </div>
+          {mfeMaeDebug && entryPrice != null && (
+            <div className="mt-0.5 text-right text-[11px] text-muted-foreground/70">
+              entry&nbsp;{entryPrice.toFixed(2)} − trough&nbsp;{mfeMaeDebug.minLow.toFixed(2)} @ {new Date(mfeMaeDebug.minLowTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} = {(entryPrice - mfeMaeDebug.minLow).toFixed(2)}/sh · {mfeMaeDebug.interval}
+            </div>
+          )}
+        </div>
+        {mfe != null && pnl != null && mfe > 0 && (
+          <div className="border-b py-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Capture %</span>
+              <span className="text-sm font-medium">
+                {`${((pnl / mfe) * 100).toFixed(1)}%`}
+              </span>
+            </div>
+          </div>
+        )}
+
         <Row label="Setup Tag" value={setupTag || 'untagged'} />
         <Row label="Source" value={source} />
       </CardContent>

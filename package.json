@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "test:parser-regression": "node --experimental-strip-types scripts/parser-regression.mjs",
+    "test:chart-regression": "node --experimental-strip-types scripts/chart-regression.mjs",
     "rag:transcribe": "node scripts/batch-transcribe.mjs",
     "rag:build": "node scripts/rag-build.mjs",
     "rag:query": "node scripts/rag-query.mjs"

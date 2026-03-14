@@ -84,14 +84,7 @@ const CHART_STYLE_STORAGE_KEY = 'trade-chart-style-v1'
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-function getDefaultTimeframe(entryTime: string | null, exitTime: string | null): Timeframe {
-  if (!entryTime || !exitTime) return '15'
-  const diffMin = (Date.parse(exitTime) - Date.parse(entryTime)) / 60_000
-  if (Number.isNaN(diffMin) || diffMin <= 0) return '15'
-  if (diffMin <=  90) return '5'
-  if (diffMin <=  8 * 60) return '15'
-  if (diffMin <= 24 * 60) return '30'
-  if (diffMin <=  3 * 24 * 60) return '60'
+function getDefaultTimeframe(_entryTime: string | null, _exitTime: string | null): Timeframe {
   return '1D'
 }
 
@@ -195,7 +188,7 @@ function compactMarkerText(text: string, max = 18) {
   return `${text.slice(0, max - 1)}…`
 }
 
-function resolveMarkerCollisions(markers: PendingMarker[], candles: Candle[]): SeriesMarker<UTCTimestamp>[] {
+function resolveMarkerCollisions(markers: PendingMarker[]): SeriesMarker<UTCTimestamp>[] {
   const byTime = new Map<number, PendingMarker[]>()
   for (const m of markers) {
     const t = Number(m.time)
@@ -207,40 +200,20 @@ function resolveMarkerCollisions(markers: PendingMarker[], candles: Candle[]): S
   const out: SeriesMarker<UTCTimestamp>[] = []
   const cycle: Array<'aboveBar' | 'belowBar'> = ['aboveBar', 'belowBar']
   const orderedTimes = Array.from(byTime.keys()).sort((a, b) => a - b)
-  const candleIndexByTime = new Map<number, number>(candles.map((c, i) => [c.time, i]))
-  const offsets = [0, -1, 1, -2, 2, -3, 3, -4, 4]
 
   for (const t of orderedTimes) {
     const group = byTime.get(t) ?? []
-    if (group.length === 1) {
-      const only = group[0]
-      out.push({
-        time: only.time,
-        position: only.basePosition,
-        color: only.color,
-        shape: only.shape,
-        text: compactMarkerText(only.text),
-        size: 1,
-      })
-      continue
-    }
-
-    const baseIdx = candleIndexByTime.get(t)
+    // Place all markers on the same candle — alternate aboveBar/belowBar.
+    // Never shift to adjacent candles; that causes wrong placement on 1D charts
+    // when entry and exit happen on the same day.
     for (let i = 0; i < group.length; i++) {
       const m = group[i]
-      let markerTime = m.time
-      if (baseIdx != null) {
-        const offset = offsets[i] ?? (i % 2 === 0 ? Math.floor(i / 2) : -Math.floor(i / 2))
-        const idx = Math.max(0, Math.min(candles.length - 1, baseIdx + offset))
-        markerTime = candles[idx].time as UTCTimestamp
-      }
       out.push({
-        time: markerTime,
-        position: cycle[i % cycle.length],
+        time: m.time,
+        position: i === 0 ? m.basePosition : cycle[i % cycle.length],
         color: m.color,
         shape: m.shape,
-        // Always keep only one label for markers on the same candle time.
-        text: i === 0 ? compactMarkerText(m.text) : '',
+        text: compactMarkerText(m.text),
         size: 1,
       })
     }
@@ -253,7 +226,8 @@ function resolveMarkerCollisions(markers: PendingMarker[], candles: Candle[]): S
 // Component
 // ---------------------------------------------------------------------------
 export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exitPrice, executionLegs }: Props) {
-  const containerRef = useRef<HTMLDivElement>(null)
+  const containerRef   = useRef<HTMLDivElement>(null)
+  const ohlcOverlayRef = useRef<HTMLDivElement>(null)
 
   const [topTab,    setTopTab]    = useState<'chart' | 'notes' | 'running'>('chart')
   const [timeframe, setTimeframe] = useState<Timeframe>(() => getDefaultTimeframe(entryTime, exitTime))
@@ -572,7 +546,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
       }
     }
 
-    const baseMarkers = resolveMarkerCollisions(pendingMarkers, candles).sort(
+    const baseMarkers = resolveMarkerCollisions(pendingMarkers).sort(
       (a, b) => Number(a.time) - Number(b.time)
     )
     const applyAdaptiveMarkers = () => {
@@ -602,6 +576,43 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
       main.setMarkers(markers)
     }
 
+    // --- OHLC overlay on crosshair move ---
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handleCrosshair = (param: any) => {
+      const overlay = ohlcOverlayRef.current
+      if (!overlay) return
+      if (!param.time) {
+        overlay.style.opacity = '0'
+        return
+      }
+      const idx = candles.findIndex((c) => c.time === Number(param.time))
+      const candle = idx >= 0 ? candles[idx] : null
+      if (!candle) {
+        overlay.style.opacity = '0'
+        return
+      }
+      const prevClose = idx > 0 ? candles[idx - 1].close : null
+      const base = prevClose ?? candle.open
+      const isUp = candle.close >= base
+      const change = candle.close - base
+      const changePct = base > 0 ? (change / base) * 100 : 0
+      const fmtVol = (v: number) =>
+        v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M`
+        : v >= 1_000   ? `${(v / 1_000).toFixed(0)}K`
+        : String(v)
+      const color = isUp ? '#16a34a' : '#dc2626'
+      overlay.innerHTML = [
+        `O&nbsp;<b>${candle.open.toFixed(2)}</b>`,
+        `H&nbsp;<b>${candle.high.toFixed(2)}</b>`,
+        `L&nbsp;<b>${candle.low.toFixed(2)}</b>`,
+        `C&nbsp;<b style="color:${color}">${candle.close.toFixed(2)}</b>`,
+        `<span style="color:${color}">${change >= 0 ? '+' : ''}${change.toFixed(2)}&nbsp;(${changePct.toFixed(2)}%)</span>`,
+        candle.volume != null ? `Vol&nbsp;<b>${fmtVol(candle.volume)}</b>` : '',
+      ].filter(Boolean).join('<span style="opacity:.35">&nbsp;│&nbsp;</span>')
+      overlay.style.opacity = '1'
+    }
+    chart.subscribeCrosshairMove(handleCrosshair)
+
     // --- Visible range ---
     if (meta.visibleRange) {
       try {
@@ -621,6 +632,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
     chart.timeScale().subscribeVisibleLogicalRangeChange(handleVisibleRangeChange)
 
     return () => {
+      chart.unsubscribeCrosshairMove(handleCrosshair)
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleVisibleRangeChange)
       ro.disconnect()
       chart.remove()
@@ -769,6 +781,13 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
               <div
                 ref={containerRef}
                 className={`h-full w-full ${(loading || !candles) && !error ? 'invisible' : ''}`}
+              />
+
+              {/* OHLC crosshair overlay — updated directly via DOM to avoid re-renders */}
+              <div
+                ref={ohlcOverlayRef}
+                className="pointer-events-none absolute left-2 top-2 z-10 flex items-center gap-1 rounded bg-white/85 px-2 py-1 text-[11px] text-[#374151] opacity-0 shadow-sm backdrop-blur-sm transition-opacity"
+                style={{ fontVariantNumeric: 'tabular-nums' }}
               />
 
               {/* Loading overlay */}
