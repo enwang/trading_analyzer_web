@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { parseFlexCsv } from '@/lib/ibkr/flex'
+import { enrichOpenTradesWithStopLosses } from '@/lib/market/stop-loss'
 import { NextRequest, NextResponse } from 'next/server'
 
 type UpsertRow = {
@@ -7,6 +8,7 @@ type UpsertRow = {
   symbol: string
   entry_time: string | null
   exit_time: string | null
+  side: string | null
   setup_tag: string
   notes?: string | null
   stop_loss?: number | null
@@ -62,6 +64,9 @@ export async function POST(request: NextRequest) {
         if (row.stop_loss == null && existing.stop_loss != null) row.stop_loss = existing.stop_loss
         if (row.r_multiple == null && existing.r_multiple != null) row.r_multiple = existing.r_multiple
       }
+
+      const enrichedRows = await enrichOpenTradesWithStopLosses(rows)
+      rows.splice(0, rows.length, ...enrichedRows)
 
       await supabase
         .from('trades')
