@@ -465,9 +465,10 @@ function parseCsv(csvStr: string): NormalizedTrade[] {
   }
 
   appendOpenPositions(merged, openLotsBySymbol, openLegsByEntry)
+  const normalizedOpenRows = mergeOpenPositionsBySymbol(merged)
 
   const normalized: NormalizedTrade[] = []
-  for (const t of merged) {
+  for (const t of normalizedOpenRows) {
     const withDerived = computeDerived(t)
     if (withDerived.outcome !== 'open') {
       if (!withDerived.entry_time) continue
@@ -556,6 +557,48 @@ function dedupByConstraintKey(trades: NormalizedTrade[]): NormalizedTrade[] {
     }
   }
   return [...map.values()]
+}
+
+function mergeOpenPositionsBySymbol(trades: NormalizedTrade[]): NormalizedTrade[] {
+  const closed = trades.filter((t) => t.exit_time != null || t.outcome !== 'open')
+  const open = trades.filter((t) => t.exit_time == null && t.outcome === 'open')
+
+  const groups = new Map<string, NormalizedTrade[]>()
+  for (const trade of open) {
+    const key = `${trade.symbol}|${trade.side ?? ''}`
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push(trade)
+  }
+
+  const mergedOpen: NormalizedTrade[] = []
+  for (const [, group] of groups) {
+    if (group.length === 1) {
+      mergedOpen.push(group[0])
+      continue
+    }
+
+    const base = { ...group[0] }
+    const totalShares = group.reduce((sum, trade) => sum + Math.abs(trade.shares ?? 0), 0)
+    const weightedEntryCost = group.reduce(
+      (sum, trade) => sum + Math.abs(trade.shares ?? 0) * (trade.entry_price ?? 0),
+      0
+    )
+    const executionLegs = group
+      .flatMap((trade) => trade.execution_legs ?? [])
+      .sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0))
+
+    base.entry_time = group
+      .map((trade) => trade.entry_time)
+      .filter((value): value is string => value != null)
+      .sort()[0] ?? null
+    base.shares = totalShares > 0 ? totalShares : null
+    base.entry_price = totalShares > 0 ? weightedEntryCost / totalShares : base.entry_price
+    base.pnl = group.reduce((sum, trade) => sum + (trade.pnl ?? 0), 0)
+    base.execution_legs = executionLegs.length > 0 ? executionLegs : null
+    mergedOpen.push(base)
+  }
+
+  return [...closed, ...mergedOpen]
 }
 
 // ---------------------------------------------------------------------------

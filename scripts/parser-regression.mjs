@@ -109,4 +109,25 @@ if ((asmlOpen.shares ?? 0) !== 30) {
   fail(`expected open ASML shares = 30, got ${asmlOpen.shares}`)
 }
 
+const multiLotOpenCsv = `Open/CloseIndicator,Symbol,Quantity,Date/Time,Open Date/Time,Buy/Sell,T. Price,Basis
+O,AAOI,100,2026-03-01 09:30:00,,BUY,10,
+O,AAOI,50,2026-03-02 09:30:00,,BUY,12,
+O,XYZ,10,2026-03-01 10:00:00,,BUY,20,
+C,XYZ,10,2026-03-03 10:00:00,2026-03-01 10:00:00,SELL,21,200
+`
+const multiLotTrades = parseFlexCsv(multiLotOpenCsv)
+const aaoi = multiLotTrades.filter((t) => t.symbol === 'AAOI')
+if (aaoi.length !== 1) {
+  fail(`expected 1 aggregated AAOI open trade, got ${aaoi.length}`)
+}
+if (aaoi[0].outcome !== 'open') {
+  fail(`expected aggregated AAOI row to stay open, got ${aaoi[0].outcome}`)
+}
+if ((aaoi[0].shares ?? 0) !== 150) {
+  fail(`expected aggregated AAOI shares = 150, got ${aaoi[0].shares}`)
+}
+if (Math.abs((aaoi[0].entry_price ?? 0) - (1600 / 150)) > 1e-9) {
+  fail(`expected aggregated AAOI entry price = ${1600 / 150}, got ${aaoi[0].entry_price}`)
+}
+
 console.log('parser-regression: PASS')
