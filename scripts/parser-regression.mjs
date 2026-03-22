@@ -130,4 +130,28 @@ if (Math.abs((aaoi[0].entry_price ?? 0) - (1600 / 150)) > 1e-9) {
   fail(`expected aggregated AAOI entry price = ${1600 / 150}, got ${aaoi[0].entry_price}`)
 }
 
+const multiSellOpenCsv = `Open/CloseIndicator,Symbol,Quantity,Date/Time,Open Date/Time,Buy/Sell,T. Price,Basis
+O,FSLY,2500,2026-03-09 09:48:00,,BUY,20.315,
+O,XYZ,10,2026-03-01 10:00:00,,BUY,20,
+C,FSLY,500,2026-03-18 14:36:00,2026-03-09 09:48:00,SELL,23.38,10157.5
+C,FSLY,500,2026-03-18 14:37:00,2026-03-09 09:48:00,SELL,23.40,10157.5
+C,FSLY,500,2026-03-18 14:38:00,2026-03-09 09:48:00,SELL,23.36,10157.5
+C,XYZ,10,2026-03-03 10:00:00,2026-03-01 10:00:00,SELL,21,200
+`
+const multiSellTrades = parseFlexCsv(multiSellOpenCsv)
+const fsly = multiSellTrades.find((t) => t.symbol === 'FSLY' && t.outcome === 'open')
+if (!fsly) {
+  fail('missing FSLY open trade with partial sells')
+}
+if ((fsly.shares ?? 0) !== 1000) {
+  fail(`expected FSLY remaining shares = 1000, got ${fsly.shares}`)
+}
+if ((fsly.execution_legs?.length ?? 0) !== 4) {
+  fail(`expected FSLY execution legs to preserve 1 buy + 3 sells, got ${fsly.execution_legs?.length ?? 0}`)
+}
+const fslySellLegs = (fsly.execution_legs ?? []).filter((leg) => leg.action === 'SELL')
+if (fslySellLegs.length !== 3) {
+  fail(`expected FSLY to keep 3 sell legs, got ${fslySellLegs.length}`)
+}
+
 console.log('parser-regression: PASS')
