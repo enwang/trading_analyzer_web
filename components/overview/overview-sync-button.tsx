@@ -11,6 +11,7 @@ export function OverviewSyncButton() {
   const router = useRouter()
   const supabase = createClient()
   const [syncing, setSyncing] = useState(false)
+  const [cleaning, setCleaning] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
 
   async function syncNow() {
@@ -60,12 +61,39 @@ export function OverviewSyncButton() {
     }
   }
 
+  async function cleanupDuplicateTrades() {
+    setCleaning(true)
+    setMessage(null)
+    try {
+      const res = await fetch('/api/trades/cleanup-open-duplicates', {
+        method: 'POST',
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        setMessage(json?.error ?? 'Cleanup failed')
+        return
+      }
+
+      setMessage(`Cleaned ${json.deleted} duplicate rows across ${json.groups} groups`)
+      router.refresh()
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : String(e))
+    } finally {
+      setCleaning(false)
+    }
+  }
+
   return (
     <div className="flex flex-col items-end gap-1">
-      <Button size="sm" onClick={syncNow} disabled={syncing}>
-        <RefreshCw className={`size-4 ${syncing ? 'animate-spin' : ''}`} />
-        {syncing ? 'Syncing…' : 'Sync now'}
-      </Button>
+      <div className="flex gap-2">
+        <Button size="sm" variant="outline" onClick={cleanupDuplicateTrades} disabled={cleaning || syncing}>
+          {cleaning ? 'Cleaning…' : 'Clean duplicates'}
+        </Button>
+        <Button size="sm" onClick={syncNow} disabled={syncing || cleaning}>
+          <RefreshCw className={`size-4 ${syncing ? 'animate-spin' : ''}`} />
+          {syncing ? 'Syncing…' : 'Sync now'}
+        </Button>
+      </div>
       {message && <div className="text-xs text-muted-foreground">{message}</div>}
     </div>
   )

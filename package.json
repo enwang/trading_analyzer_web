@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "test:parser-regression": "node --experimental-strip-types scripts/parser-regression.mjs",
+    "test:trade-dedup-regression": "node --experimental-strip-types scripts/trade-dedup-regression.mjs",
     "test:chart-regression": "node --experimental-strip-types scripts/chart-regression.mjs",
     "rag:transcribe": "node scripts/batch-transcribe.mjs",
     "rag:build": "node scripts/rag-build.mjs",

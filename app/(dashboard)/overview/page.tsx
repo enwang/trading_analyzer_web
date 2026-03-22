@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { rowToTrade } from '@/types/trade'
 import { computeSummary, equityCurve } from '@/lib/metrics'
+import { normalizeTradesForDisplay } from '@/lib/trades'
 import { KpiCard } from '@/components/kpi/kpi-card'
 import { EquityCurve } from '@/components/charts/equity-curve'
 import { DailyPnlByTimezone } from '@/components/charts/daily-pnl-by-timezone'
@@ -57,7 +58,7 @@ export default async function OverviewPage() {
     .eq('user_id', user!.id)
     .order('entry_time', { ascending: true })
 
-  const trades = (rows ?? []).map(rowToTrade)
+  const trades = normalizeTradesForDisplay((rows ?? []).map(rowToTrade))
   const stats = computeSummary(trades)
   const equity = equityCurve(trades)
   const closedTrades = trades.filter((t) => t.exitTime && t.pnl != null)

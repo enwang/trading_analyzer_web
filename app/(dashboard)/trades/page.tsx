@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { rowToTrade } from '@/types/trade'
+import { normalizeTradesForDisplay } from '@/lib/trades'
 import { TradesTable } from '@/components/trades/trades-table'
 
 export default async function TradesPage({
@@ -22,8 +23,8 @@ export default async function TradesPage({
     .order('entry_time', { ascending: false })
     .limit(1000)
 
-  const trades = (rows ?? [])
-    .map(rowToTrade)
+  const trades = normalizeTradesForDisplay((rows ?? [])
+    .map(rowToTrade))
     .filter((t) => {
       if (!safeDate) return true
       const tradeDate = t.exitTime
