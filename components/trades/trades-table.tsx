@@ -1133,13 +1133,20 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                   }
                   return (
                     <TableCell key={col}>
-                      <input
-                        className="h-8 w-[160px] rounded-md border px-2 text-xs"
-                        value={drafts[t.id]?.notes ?? t.notes}
-                        onChange={(e) => updateDraft(t.id, 'notes', e.target.value)}
-                        placeholder="Add notes"
-                        title={drafts[t.id]?.notes ?? t.notes ?? ''}
-                      />
+                      <div className="group relative">
+                        <input
+                          className="h-8 w-[160px] rounded-md border px-2 text-xs"
+                          value={drafts[t.id]?.notes ?? t.notes}
+                          onChange={(e) => updateDraft(t.id, 'notes', e.target.value)}
+                          placeholder="Add notes"
+                          title={drafts[t.id]?.notes ?? t.notes ?? ''}
+                        />
+                        {(drafts[t.id]?.notes ?? t.notes ?? '').trim() && (
+                          <div className="pointer-events-none absolute right-0 top-full z-30 mt-1 hidden w-72 max-w-[calc(100vw-2rem)] whitespace-pre-wrap rounded-md border bg-background p-2 text-xs leading-relaxed shadow-md group-hover:block group-focus-within:block">
+                            {drafts[t.id]?.notes ?? t.notes}
+                          </div>
+                        )}
+                      </div>
                     </TableCell>
                   )
                 })}

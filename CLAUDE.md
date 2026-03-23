@@ -14,3 +14,7 @@ Minimum required check (for current `mytrade.csv`):
 ## UI Verification Rule
 
 For UI-related fixes or regressions, verify the actual behavior with browser MCP before claiming the issue is fixed.
+
+## Overlay Boundary Rule
+
+For hovercards, tooltips, popovers, or any absolute-positioned UI near table edges or viewport edges, verify the overlay stays fully visible and is not clipped by the right boundary of the page.
