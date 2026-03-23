@@ -24,6 +24,7 @@ export interface Trade {
   dayOfWeek: string | null
   stopLoss: number | null
   rMultiple: number | null
+  needsReview: boolean
   setupTag: string
   notes: string
   executionLegs: ExecutionLeg[] | null
@@ -53,6 +54,7 @@ export interface TradeRow {
   day_of_week: string | null
   stop_loss?: number | null
   r_multiple: number | null
+  needs_review?: boolean | null
   setup_tag: string
   notes?: string | null
   execution_legs?: ExecutionLeg[] | null
@@ -82,6 +84,7 @@ export function rowToTrade(r: TradeRow): Trade {
     dayOfWeek: r.day_of_week,
     stopLoss: r.stop_loss ?? null,
     rMultiple: r.r_multiple,
+    needsReview: r.needs_review ?? false,
     setupTag: r.setup_tag ?? 'untagged',
     notes: r.notes ?? '',
     executionLegs: r.execution_legs ?? null,

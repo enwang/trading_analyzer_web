@@ -53,6 +53,7 @@ export async function POST() {
         hour_of_day: mergedTrade.hourOfDay,
         day_of_week: mergedTrade.dayOfWeek,
         execution_legs: mergedTrade.executionLegs,
+        needs_review: metadata.needsReview,
         setup_tag: metadata.setupTag,
         notes: metadata.notes,
         stop_loss: metadata.stopLoss,

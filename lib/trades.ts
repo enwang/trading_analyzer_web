@@ -235,6 +235,7 @@ export function dedupeTradeRowsForCleanup(trades: Trade[]) {
 
 export function pickTradeMetadata(group: Trade[], fallback: Trade) {
   return {
+    needsReview: firstNonEmpty(group.map((trade) => trade.needsReview)) ?? fallback.needsReview,
     setupTag: firstNonEmpty(group.map((trade) => trade.setupTag), (value) => value === 'untagged') ?? fallback.setupTag,
     notes: firstNonEmpty(group.map((trade) => trade.notes), (value) => value.trim() === '') ?? fallback.notes,
     stopLoss: firstNonEmpty(group.map((trade) => trade.stopLoss)) ?? fallback.stopLoss,
