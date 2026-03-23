@@ -11,6 +11,7 @@ type UpsertRow = {
   side: string | null
   setup_tag: string
   notes?: string | null
+  needs_review?: boolean | null
   stop_loss?: number | null
   r_multiple?: number | null
 } & Record<string, unknown>
@@ -49,12 +50,12 @@ export async function POST(request: NextRequest) {
     if (touchedSymbols.length > 0) {
       const { data: existingOpenRows } = await supabase
         .from('trades')
-        .select('symbol, entry_time, stop_loss, r_multiple, setup_tag, notes')
+        .select('symbol, entry_time, stop_loss, r_multiple, setup_tag, notes, needs_review')
         .eq('user_id', user.id)
         .is('exit_time', null)
         .in('symbol', touchedSymbols)
 
-      const openByKey = new Map<string, { symbol: string; entry_time: string | null; stop_loss: number | null; r_multiple: number | null; setup_tag: string | null; notes: string | null }>(
+      const openByKey = new Map<string, { symbol: string; entry_time: string | null; stop_loss: number | null; r_multiple: number | null; setup_tag: string | null; notes: string | null; needs_review: boolean | null }>(
         (existingOpenRows ?? []).map((r) => [`${r.symbol}|${r.entry_time ?? ''}`, r] as const)
       )
 
@@ -64,6 +65,7 @@ export async function POST(request: NextRequest) {
         if (!existing) continue
         if (row.setup_tag === 'untagged' && existing.setup_tag) row.setup_tag = existing.setup_tag
         if (!row.notes && existing.notes) row.notes = existing.notes
+        if (!row.needs_review && existing.needs_review) row.needs_review = existing.needs_review
         if (row.stop_loss == null && existing.stop_loss != null) row.stop_loss = existing.stop_loss
         if (row.r_multiple == null && existing.r_multiple != null) row.r_multiple = existing.r_multiple
       }

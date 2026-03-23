@@ -1,11 +1,9 @@
-import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { ArrowLeft } from 'lucide-react'
 
 import { createClient } from '@/lib/supabase/server'
 import { rowToTrade } from '@/types/trade'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { BackToTradesButton } from '@/components/trades/back-to-trades-button'
 import { TradeDetailTabs } from '@/components/trades/trade-detail-tabs'
 import { TradeChart } from '@/components/trades/trade-chart'
 
@@ -25,7 +23,7 @@ export default async function TradeDetailsPage({
   const { id } = await params
   const { view, date, sort, dir, from } = await searchParams
   const fromOverview = from === 'overview'
-  const safeView = view === 'all' || view === 'win' || view === 'loss' || view === 'open'
+  const safeView = view === 'all' || view === 'win' || view === 'loss' || view === 'open' || view === 'marked'
     ? view
     : null
   const safeDate = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null
@@ -57,12 +55,7 @@ export default async function TradeDetailsPage({
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <Button variant="outline" size="sm" asChild>
-            <Link href={backHref}>
-              <ArrowLeft className="size-4" />
-              Back to Trades
-            </Link>
-          </Button>
+          <BackToTradesButton href={backHref} />
           <h1 className="text-xl font-semibold">
             {trade.symbol} Trade Details
           </h1>
@@ -83,7 +76,9 @@ export default async function TradeDetailsPage({
           pnl={trade.pnl}
           pnlPct={trade.pnlPct}
           holdTimeMin={trade.holdTimeMin}
+          needsReview={trade.needsReview}
           setupTag={trade.setupTag}
+          notes={trade.notes}
           source={trade.source}
           initialStopLoss={trade.stopLoss}
           initialRMultiple={trade.rMultiple}

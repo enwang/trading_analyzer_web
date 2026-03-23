@@ -25,7 +25,7 @@ import {
 } from '@/components/ui/table'
 import { createClient } from '@/lib/supabase/client'
 
-type OutcomeFilter = 'all' | 'win' | 'loss' | 'open'
+type OutcomeFilter = 'all' | 'win' | 'loss' | 'open' | 'marked'
 type SortKey =
   | 'symbol'
   | 'side'
@@ -69,6 +69,9 @@ type ColumnId =
   | 'notes'
 
 const COLUMN_ORDER_STORAGE_KEY = 'trades-table-column-order-v1'
+const TRADES_LAST_URL_STORAGE_KEY = 'trades-table-last-url'
+const TRADES_LAST_SCROLL_STORAGE_KEY = 'trades-table-last-scroll'
+const DASHBOARD_SCROLL_CONTAINER_ID = 'dashboard-scroll-container'
 const LEGACY_COLUMN_MAP: Record<string, ColumnId> = {
   initialStopPct: 'notes',
 }
@@ -174,21 +177,26 @@ function OutcomeBadge({ outcome }: { outcome: string | null }) {
   return <Badge variant="outline">{outcome ?? '—'}</Badge>
 }
 
+function getDashboardScrollContainer() {
+  return document.getElementById(DASHBOARD_SCROLL_CONTAINER_ID)
+}
+
 export function TradesTable({ trades }: { trades: Trade[] }) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
+  const searchParamsString = searchParams.toString()
   const supabase = useMemo(() => createClient(), [])
   const viewParam = searchParams.get('view')
   const sortParam = searchParams.get('sort')
   const dirParam = searchParams.get('dir')
   const initialFilter: OutcomeFilter =
-    viewParam === 'win' || viewParam === 'loss' || viewParam === 'open' || viewParam === 'all'
+    viewParam === 'win' || viewParam === 'loss' || viewParam === 'open' || viewParam === 'all' || viewParam === 'marked'
       ? viewParam
       : 'all'
   const initialSortKey: SortKey = sortParam && SORT_KEYS.includes(sortParam as SortKey)
     ? (sortParam as SortKey)
-    : 'entryTime'
+    : 'exitTime'
   const initialSortDir: SortDir = dirParam === 'asc' || dirParam === 'desc' ? dirParam : 'desc'
   const [filter, setFilter] = useState<OutcomeFilter>(initialFilter)
   const initialDrafts = useMemo(
@@ -225,9 +233,14 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
   const autoStopFetchedRef = useRef<Set<string>>(new Set())
   const sheetAppliedRef = useRef(false)
   const tradeById = useMemo(() => new Map(trades.map((t) => [t.id, t])), [trades])
+  const currentListUrl = useMemo(
+    () => `${pathname}${searchParamsString ? `?${searchParamsString}` : ''}`,
+    [pathname, searchParamsString]
+  )
 
   const filtered = useMemo(() => {
     if (filter === 'all') return trades
+    if (filter === 'marked') return trades.filter((t) => t.needsReview)
     return trades.filter((t) => t.outcome === filter)
   }, [trades, filter])
 
@@ -251,6 +264,43 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
     setSortKey(initialSortKey)
     setSortDir(initialSortDir)
   }, [initialSortKey, initialSortDir])
+
+  useEffect(() => {
+    const restoreUrl = window.sessionStorage.getItem(TRADES_LAST_URL_STORAGE_KEY)
+    if (restoreUrl !== currentListUrl) return
+
+    const raw = window.sessionStorage.getItem(TRADES_LAST_SCROLL_STORAGE_KEY)
+    if (!raw) return
+
+    const scrollY = Number(raw)
+    if (!Number.isFinite(scrollY)) return
+
+    const restore = () => {
+      const container = getDashboardScrollContainer()
+      if (!container) return false
+      container.scrollTop = scrollY
+      return true
+    }
+
+    const timers: Array<ReturnType<typeof setTimeout>> = []
+    const attemptDelays = [0, 50, 150, 300, 600]
+
+    for (const delay of attemptDelays) {
+      timers.push(setTimeout(() => {
+        restore()
+      }, delay))
+    }
+
+    timers.push(setTimeout(() => {
+      if (restore()) {
+        window.sessionStorage.removeItem(TRADES_LAST_SCROLL_STORAGE_KEY)
+      }
+    }, 900))
+
+    return () => {
+      for (const timer of timers) clearTimeout(timer)
+    }
+  }, [currentListUrl, filtered.length])
 
   useEffect(() => {
     const raw = window.localStorage.getItem(COLUMN_ORDER_STORAGE_KEY)
@@ -555,6 +605,24 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
   }
 
   function compareTrades(a: Trade, b: Trade): number {
+    if (sortKey === 'exitTime') {
+      const aIsOpen = a.exitTime == null || a.outcome === 'open'
+      const bIsOpen = b.exitTime == null || b.outcome === 'open'
+
+      if (aIsOpen && !bIsOpen) return -1
+      if (!aIsOpen && bIsOpen) return 1
+
+      if (aIsOpen && bIsOpen) {
+        const entryA = a.entryTime ? new Date(a.entryTime).getTime() : null
+        const entryB = b.entryTime ? new Date(b.entryTime).getTime() : null
+        const openDir = sortDir === 'asc' ? 1 : -1
+        if (entryA == null && entryB == null) return 0
+        if (entryA == null) return 1
+        if (entryB == null) return -1
+        return (entryA - entryB) * openDir
+      }
+    }
+
     const va = valueForSort(a, sortKey)
     const vb = valueForSort(b, sortKey)
     const dir = sortDir === 'asc' ? 1 : -1
@@ -606,7 +674,11 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
     return [...filtered].sort(compareTrades)
   }, [filtered, sortKey, sortDir, drafts])
 
-  function updateDraft(id: string, key: 'setupTag' | 'notes' | 'stopLoss', value: string) {
+  function updateDraft(
+    id: string,
+    key: 'setupTag' | 'notes' | 'stopLoss',
+    value: string
+  ) {
     setDrafts((prev) => ({
       ...prev,
       [id]: {
@@ -887,6 +959,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Trades</SelectItem>
+              <SelectItem value="marked">Marked to Revisit</SelectItem>
               <SelectItem value="win">Winners</SelectItem>
               <SelectItem value="loss">Losers</SelectItem>
               <SelectItem value="open">Open Trades</SelectItem>
@@ -974,22 +1047,39 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                 parsedDraftStopLoss != null && Number.isFinite(parsedDraftStopLoss)
                   ? parsedDraftStopLoss
                   : t.stopLoss
+              const isMarkedForReview = t.needsReview
 
               return (
-              <TableRow key={t.id} className="hover:bg-muted/40">
+              <TableRow
+                key={t.id}
+                className={isMarkedForReview ? 'bg-amber-50/80 hover:bg-amber-100/80' : 'hover:bg-muted/40'}
+              >
                 {visibleColumnOrder.map((col) => {
                   const detailsHref = `/trades/${t.id}?${(() => {
-                    const params = new URLSearchParams(searchParams.toString())
+                    const params = new URLSearchParams(searchParamsString)
                     params.set('view', filter)
                     return params.toString()
                   })()}`
-
                   if (col === 'symbol') {
                     return (
                       <TableCell key={col} className="font-medium">
-                        <Link href={detailsHref} className="underline-offset-4 hover:underline">
-                          {t.symbol}
-                        </Link>
+                        <div className="flex items-center gap-2">
+                          <Link
+                            href={detailsHref}
+                            scroll={false}
+                            className="underline-offset-4 hover:underline"
+                            onClick={() => {
+                              const container = getDashboardScrollContainer()
+                              window.sessionStorage.setItem(TRADES_LAST_URL_STORAGE_KEY, currentListUrl)
+                              window.sessionStorage.setItem(TRADES_LAST_SCROLL_STORAGE_KEY, String(container?.scrollTop ?? 0))
+                            }}
+                          >
+                            {t.symbol}
+                          </Link>
+                          {isMarkedForReview && (
+                            <Badge className="border border-amber-200 bg-amber-100 text-amber-800">Revisit</Badge>
+                          )}
+                        </div>
                       </TableCell>
                     )
                   }
@@ -1048,6 +1138,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                         value={drafts[t.id]?.notes ?? t.notes}
                         onChange={(e) => updateDraft(t.id, 'notes', e.target.value)}
                         placeholder="Add notes"
+                        title={drafts[t.id]?.notes ?? t.notes ?? ''}
                       />
                     </TableCell>
                   )

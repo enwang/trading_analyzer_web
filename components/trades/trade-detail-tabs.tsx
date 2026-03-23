@@ -23,7 +23,9 @@ interface Props {
   pnl: number | null
   pnlPct: number | null
   holdTimeMin: number | null
+  needsReview: boolean
   setupTag: string
+  notes: string
   source: string
   initialStopLoss: number | null
   initialRMultiple: number | null
@@ -148,7 +150,9 @@ export function TradeDetailTabs(props: Props) {
           exitPrice={props.exitPrice}
           pnl={props.pnl}
           pnlPct={props.pnlPct}
+          needsReview={props.needsReview}
           setupTag={props.setupTag}
+          notes={props.notes}
           source={props.source}
           initialStopLoss={props.initialStopLoss}
           initialRMultiple={props.initialRMultiple}

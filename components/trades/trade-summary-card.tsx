@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { Info } from 'lucide-react'
 
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 
@@ -20,7 +21,9 @@ interface Props {
   exitPrice: number | null
   pnl: number | null
   pnlPct: number | null
+  needsReview: boolean
   setupTag: string
+  notes: string
   source: string
   initialStopLoss: number | null
   initialRMultiple: number | null
@@ -112,7 +115,9 @@ export function TradeSummaryCard({
   exitPrice,
   pnl,
   pnlPct,
+  needsReview,
   setupTag,
+  notes,
   source,
   initialStopLoss,
   initialRMultiple,
@@ -122,6 +127,7 @@ export function TradeSummaryCard({
 }: Props) {
   const [stopLossInput, setStopLossInput] = useState(initialStopLoss?.toFixed(2) ?? '')
   const [savedR, setSavedR] = useState<number | null>(initialRMultiple)
+  const [markedForReview, setMarkedForReview] = useState<boolean>(needsReview)
   const [error, setError] = useState<string | null>(null)
   const [mfe, setMfe] = useState<number | null>(initialMfe)
   const [mae, setMae] = useState<number | null>(initialMae)
@@ -243,6 +249,29 @@ export function TradeSummaryCard({
     return computeR(side, entryPrice, exitPrice, stopLoss)
   }, [side, entryPrice, exitPrice, stopLoss])
 
+  async function saveReviewState(nextNeedsReview: boolean) {
+    setError(null)
+    try {
+      const res = await fetch(`/api/trades/${tradeId}/journal`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          setupTag,
+          notes,
+          needsReview: nextNeedsReview,
+        }),
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        setError(json.error ?? 'Failed to save revisit state')
+        setMarkedForReview(!nextNeedsReview)
+      }
+    } catch {
+      setError('Failed to save revisit state')
+      setMarkedForReview(!nextNeedsReview)
+    }
+  }
+
   async function saveRisk(nextStopLoss: number | null, nextR: number | null) {
     setError(null)
     try {
@@ -278,8 +307,20 @@ export function TradeSummaryCard({
 
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
         <CardTitle className="text-sm font-medium">Trade Summary</CardTitle>
+        <Button
+          type="button"
+          variant={markedForReview ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => {
+            const next = !markedForReview
+            setMarkedForReview(next)
+            void saveReviewState(next)
+          }}
+        >
+          {markedForReview ? 'Marked for revisit' : 'Mark for revisit'}
+        </Button>
       </CardHeader>
       <CardContent>
         <Row
@@ -292,6 +333,7 @@ export function TradeSummaryCard({
           value={fmtPct(pnlPct)}
           valueClassName={pnlPct != null ? (pnlPct >= 0 ? 'text-emerald-600' : 'text-red-600') : ''}
         />
+        <Row label="Revisit Later" value={markedForReview ? 'Yes' : 'No'} valueClassName={markedForReview ? 'text-amber-700' : ''} />
         <Row label="Side" value={side ?? '—'} />
         <Row label="Shares" value={shares ?? '—'} />
         <Row label="Entry Price" value={fmtMoney(entryPrice)} />
@@ -362,6 +404,12 @@ export function TradeSummaryCard({
         )}
 
         <Row label="Setup Tag" value={setupTag || 'untagged'} />
+        <div className="border-b py-2">
+          <div className="mb-1 text-sm text-muted-foreground">Notes</div>
+          <div className="whitespace-pre-wrap break-words text-sm font-medium">
+            {notes.trim() || '—'}
+          </div>
+        </div>
         <Row label="Source" value={source} />
       </CardContent>
     </Card>

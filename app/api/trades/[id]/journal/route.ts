@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/server'
 interface JournalPayload {
   setupTag: string
   notes: string
+  needsReview?: boolean
 }
 
 export async function PATCH(
@@ -28,6 +29,7 @@ export async function PATCH(
     .update({
       setup_tag: (payload.setupTag ?? '').trim() || 'untagged',
       notes: payload.notes ?? '',
+      needs_review: Boolean(payload.needsReview),
     })
     .eq('id', id)
     .eq('user_id', user.id)
