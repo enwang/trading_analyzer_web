@@ -28,17 +28,9 @@ function abbrev(day: string) {
 }
 
 export function DayOfWeekChart({ data }: Props) {
-  if (data.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground py-8 text-center">
-        No closed trades to display.
-      </p>
-    )
-  }
-
   return (
-    <ResponsiveContainer width="100%" height={220}>
-      <BarChart data={data} margin={{ top: 8, right: 8, bottom: 4, left: 8 }}>
+    <ResponsiveContainer width="100%" height={200}>
+      <BarChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
         <XAxis
           dataKey="day"
           tickFormatter={abbrev}
@@ -54,7 +46,7 @@ export function DayOfWeekChart({ data }: Props) {
           width={60}
         />
         <Tooltip
-          formatter={(val: number) => [fmtMoney(val), 'Total P&L']}
+          formatter={(val: unknown) => [fmtMoney(Number(val)), 'Total P&L']}
           labelFormatter={(label) => label}
           contentStyle={{ fontSize: 12 }}
         />
