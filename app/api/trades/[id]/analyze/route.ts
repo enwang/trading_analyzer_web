@@ -223,7 +223,7 @@ export async function POST(
   ].join('|')
 
   if (!refresh) {
-    const cached = await getCachedAnalysis(cacheKey)
+    const cached = await getCachedAnalysis(supabase, user.id, cacheKey)
     if (cached) {
       return NextResponse.json({
         ...cached,
@@ -251,7 +251,7 @@ export async function POST(
         snippet: s.snippet,
       })),
     }
-    await setCachedAnalysis(cacheKey, payload)
+    await setCachedAnalysis(supabase, user.id, cacheKey, payload)
 
     return NextResponse.json({
       ...payload,

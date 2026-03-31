@@ -32,7 +32,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const recap = await buildReportRecap((rows ?? []).map(rowToTrade), { refresh })
+    const recap = await buildReportRecap((rows ?? []).map(rowToTrade), { refresh, supabase, userId: user.id })
     return NextResponse.json(recap)
   } catch (e) {
     return NextResponse.json(
