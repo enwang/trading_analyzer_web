@@ -1,7 +1,10 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
-const CACHE_FILE = path.resolve(process.cwd(), 'data/rag/analysis-cache.json')
+// Vercel and other serverless runtimes have a read-only filesystem except for /tmp.
+const CACHE_FILE = process.env.VERCEL
+  ? '/tmp/analysis-cache.json'
+  : path.resolve(process.cwd(), 'data/rag/analysis-cache.json')
 
 type CacheEntry = {
   key: string
