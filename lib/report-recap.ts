@@ -1,3 +1,4 @@
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { computeSummary, closedTrades, equityCurve, byDay } from '@/lib/metrics'
 import {
   computeDayOfWeekDetail,
@@ -407,9 +408,13 @@ function selectSpotlightTrades(trades: Trade[]) {
   return uniqueTrades([worst[0], worst[1], best[0], managed[0]])
 }
 
-async function generateInsight(input: InsightInput) {
+async function generateInsight(
+  input: InsightInput,
+  supabase: SupabaseClient,
+  userId: string,
+) {
   const cacheKey = ['report-insight', input.key].join('|')
-  const cached = await getCachedAnalysis<ReportInsight>(cacheKey)
+  const cached = await getCachedAnalysis<ReportInsight>(supabase, userId, cacheKey)
   if (cached) return cached
 
   const llm = await runLlmText(input.prompt)
@@ -427,7 +432,7 @@ async function generateInsight(input: InsightInput) {
         provider: 'fallback',
       }
 
-  await setCachedAnalysis(cacheKey, insight)
+  await setCachedAnalysis(supabase, userId, cacheKey, insight)
   return insight
 }
 
@@ -566,7 +571,7 @@ function buildInsightInputs(args: {
 
 export async function buildReportRecap(
   trades: Trade[],
-  opts?: { now?: Date; refresh?: boolean },
+  opts: { now?: Date; refresh?: boolean; supabase: SupabaseClient; userId: string },
 ): Promise<ReportRecap> {
   const now = opts?.now ?? new Date()
   const year = now.getFullYear()
@@ -594,7 +599,7 @@ export async function buildReportRecap(
     ),
   )
   const cacheKey = `report-recap|${year}|${datasetFingerprint}`
-  const cached = !opts?.refresh ? await getCachedAnalysis<ReportRecap>(cacheKey) : null
+  const cached = !opts?.refresh ? await getCachedAnalysis<ReportRecap>(opts.supabase, opts.userId, cacheKey) : null
   if (cached) {
     return {
       ...cached,
@@ -625,7 +630,7 @@ export async function buildReportRecap(
     extended,
     spotlights: spotlightTrades,
   })
-  const insights = await Promise.all(insightInputs.map((input) => generateInsight(input)))
+  const insights = await Promise.all(insightInputs.map((input) => generateInsight(input, opts.supabase, opts.userId)))
   const insightByIndex = (index: number) => insights[index]
   let insightOffset = 0
 
@@ -732,6 +737,6 @@ export async function buildReportRecap(
     slides,
   }
 
-  await setCachedAnalysis(cacheKey, recap)
+  await setCachedAnalysis(opts.supabase, opts.userId, cacheKey, recap)
   return recap
 }
