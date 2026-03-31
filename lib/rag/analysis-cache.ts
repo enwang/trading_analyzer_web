@@ -6,18 +6,7 @@ const CACHE_FILE = path.resolve(process.cwd(), 'data/rag/analysis-cache.json')
 type CacheEntry = {
   key: string
   updatedAt: string
-  value: {
-    mode: 'llm' | 'fallback'
-    provider: 'claude' | 'openai' | 'fallback'
-    analysis: string
-    query: string
-    sources: Array<{
-      file: string
-      chunkIndex: number
-      score: number
-      snippet: string
-    }>
-  }
+  value: Record<string, unknown>
 }
 
 type CacheStore = {
@@ -49,14 +38,14 @@ export function simpleHash(input: string) {
   return (h >>> 0).toString(16)
 }
 
-export async function getCachedAnalysis(cacheKey: string) {
+export async function getCachedAnalysis<T = Record<string, unknown>>(cacheKey: string) {
   const store = await loadStore()
-  return store.entries[cacheKey]?.value ?? null
+  return (store.entries[cacheKey]?.value as T | undefined) ?? null
 }
 
-export async function setCachedAnalysis(
+export async function setCachedAnalysis<T extends Record<string, unknown>>(
   cacheKey: string,
-  value: CacheEntry['value']
+  value: T
 ) {
   const store = await loadStore()
   store.entries[cacheKey] = {

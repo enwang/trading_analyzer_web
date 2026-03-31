@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 
+import { runLlmText } from '@/lib/ai/llm-analysis'
 import { createClient } from '@/lib/supabase/server'
 import { rowToTrade } from '@/types/trade'
 import { loadLocalRagIndex, queryLocalRag, type RagQueryResult } from '@/lib/rag/local'
@@ -134,140 +135,6 @@ function buildPrompt(trade: ReturnType<typeof rowToTrade>, sources: RagQueryResu
   ].join('\n')
 }
 
-async function runOpenAiAnalysis(prompt: string) {
-  const apiKey = process.env.OPENAI_API_KEY
-  if (!apiKey) return null
-
-  const model = process.env.OPENAI_MODEL ?? 'gpt-4.1-mini'
-  const resp = await fetch('https://api.openai.com/v1/responses', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      input: prompt,
-      max_output_tokens: 800,
-      temperature: 0.3,
-    }),
-  })
-
-  if (!resp.ok) {
-    const text = await resp.text()
-    throw new Error(`OpenAI request failed (${resp.status}): ${text}`)
-  }
-
-  const data = (await resp.json()) as {
-    output_text?: string
-    output?: Array<{ content?: Array<{ type?: string; text?: string }> }>
-  }
-
-  if (data.output_text?.trim()) return data.output_text.trim()
-
-  const parts = (data.output ?? [])
-    .flatMap((item) => item.content ?? [])
-    .filter((c) => c.type === 'output_text' || typeof c.text === 'string')
-    .map((c) => c.text ?? '')
-    .join('\n')
-    .trim()
-
-  return parts || null
-}
-
-async function runClaudeAnalysis(prompt: string) {
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) return null
-
-  const preferredModel = process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5-20250929'
-
-  const makeRequest = async (model: string) =>
-    fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 900,
-        temperature: 0.3,
-        messages: [
-          {
-            role: 'user',
-            content: prompt,
-          },
-        ],
-      }),
-    })
-
-  let resp = await makeRequest(preferredModel)
-
-  if (resp.status === 404) {
-    const modelsResp = await fetch('https://api.anthropic.com/v1/models', {
-      method: 'GET',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-    })
-
-    if (modelsResp.ok) {
-      const modelsJson = (await modelsResp.json()) as {
-        data?: Array<{ id?: string }>
-      }
-      const fallbackModel =
-        (modelsJson.data ?? [])
-          .map((m) => m.id ?? '')
-          .find((id) => id.startsWith('claude-sonnet') || id.startsWith('claude-opus') || id.startsWith('claude-haiku')) ??
-        null
-
-      if (fallbackModel) {
-        resp = await makeRequest(fallbackModel)
-      }
-    }
-  }
-
-  if (!resp.ok) {
-    const text = await resp.text()
-    throw new Error(`Claude request failed (${resp.status}): ${text}`)
-  }
-
-  const data = (await resp.json()) as {
-    content?: Array<{ type?: string; text?: string }>
-  }
-
-  const text = (data.content ?? [])
-    .filter((item) => item.type === 'text' && typeof item.text === 'string')
-    .map((item) => item.text ?? '')
-    .join('\n')
-    .trim()
-
-  return text || null
-}
-
-async function runLlmAnalysis(prompt: string) {
-  const forced = (process.env.RAG_LLM_PROVIDER ?? '').toLowerCase().trim()
-
-  if (forced === 'claude') {
-    const text = await runClaudeAnalysis(prompt)
-    return text ? { provider: 'claude', text } : null
-  }
-  if (forced === 'openai') {
-    const text = await runOpenAiAnalysis(prompt)
-    return text ? { provider: 'openai', text } : null
-  }
-
-  const claude = await runClaudeAnalysis(prompt)
-  if (claude) return { provider: 'claude', text: claude }
-
-  const openai = await runOpenAiAnalysis(prompt)
-  if (openai) return { provider: 'openai', text: openai }
-
-  return null
-}
-
 export async function POST(
   request: Request,
   context: { params: Promise<{ id: string }> }
@@ -369,7 +236,7 @@ export async function POST(
 
   try {
     const prompt = buildPrompt(trade, sources)
-    const llm = await runLlmAnalysis(prompt)
+    const llm = await runLlmText(prompt)
     const analysis = llm?.text || buildFallbackAnalysis(trade, sources)
 
     const payload = {
