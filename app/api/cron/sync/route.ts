@@ -58,12 +58,14 @@ export async function GET(request: Request) {
             .is('exit_time', null)
             .in('symbol', touchedSymbols)
 
+          const normalizeTs = (t: string | null | undefined) => t ? t.slice(0, 19) : ''
+
           const openByKey = new Map<string, { symbol: string; entry_time: string | null; stop_loss: number | null; r_multiple: number | null; setup_tag: string | null; notes: string | null; needs_review: boolean | null }>(
-            (existingOpenRows ?? []).map((r) => [`${r.symbol}|${r.entry_time ?? ''}`, r] as const)
+            (existingOpenRows ?? []).map((r) => [`${r.symbol}|${normalizeTs(r.entry_time)}`, r] as const)
           )
 
           for (const row of rows) {
-            const key = `${row.symbol}|${row.entry_time ?? ''}`
+            const key = `${row.symbol}|${normalizeTs(row.entry_time)}`
             const existing = openByKey.get(key)
             if (!existing) continue
             if (row.setup_tag === 'untagged' && existing.setup_tag) row.setup_tag = existing.setup_tag

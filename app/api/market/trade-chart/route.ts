@@ -185,7 +185,9 @@ export async function GET(request: Request) {
     ? 2 * 86_400_000
     : Math.max(spanMs * 0.4, 2 * 60 * 60_000)
   const visibleFrom = Math.floor((entryMs - visiblePreMs) / 1000)
-  const visibleTo   = Math.ceil((exitMs   + visiblePostMs) / 1000)
+  // For open trades (no exitTime), extend visible range to now so today's candles are visible
+  const visibleToMs = exitTime ? exitMs : Math.max(exitMs, Date.now())
+  const visibleTo   = Math.ceil((visibleToMs + visiblePostMs) / 1000)
 
   return NextResponse.json({
     symbol, interval, timeframe, candles,

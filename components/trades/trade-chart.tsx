@@ -415,16 +415,39 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let main: ISeriesApi<SeriesType>
 
-    if (style === 'candles' || style === 'hollow') {
+    if (style === 'candles') {
       const s = chart.addCandlestickSeries({
-        upColor:          style === 'hollow' ? 'rgba(255,255,255,0)' : '#22c55e',
-        downColor:        '#ef4444',
-        borderUpColor:    '#22c55e',
-        borderDownColor:  '#ef4444',
-        wickUpColor:      '#22c55e',
-        wickDownColor:    '#ef4444',
+        upColor:         '#22c55e',
+        downColor:       '#ef4444',
+        borderUpColor:   '#22c55e',
+        borderDownColor: '#ef4444',
+        wickUpColor:     '#22c55e',
+        wickDownColor:   '#ef4444',
       })
       s.setData(candles.map(c => ({ time: ts(c.time), open: c.open, high: c.high, low: c.low, close: c.close })))
+      main = s
+    } else if (style === 'hollow') {
+      // Hollow candles (TradingView convention):
+      //   color  = green if close >= prevClose, red if close < prevClose
+      //   body   = hollow (transparent) if close >= open, filled with color if close < open
+      const s = chart.addCandlestickSeries({
+        upColor:         'rgba(0,0,0,0)',
+        downColor:       '#ef4444',
+        borderUpColor:   '#22c55e',
+        borderDownColor: '#ef4444',
+        wickUpColor:     '#22c55e',
+        wickDownColor:   '#ef4444',
+      })
+      s.setData(candles.map((c, i) => {
+        const prevClose = i > 0 ? candles[i - 1].close : c.open
+        const isGreen   = c.close >= prevClose
+        const isHollow  = c.close >= c.open
+        const color     = isGreen ? '#22c55e' : '#ef4444'
+        return { time: ts(c.time), open: c.open, high: c.high, low: c.low, close: c.close,
+          color:       isHollow ? 'rgba(0,0,0,0)' : color,
+          borderColor: color,
+          wickColor:   color }
+      }))
       main = s
     } else if (style === 'bars') {
       const s = chart.addBarSeries({ upColor: '#22c55e', downColor: '#ef4444' })

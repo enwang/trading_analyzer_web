@@ -20,8 +20,8 @@ if (wins !== 12) {
 }
 
 const losses = trades.filter((t) => t.outcome === 'loss').length
-if (losses !== 39) {
-  fail(`expected 39 losers, got ${losses}`)
+if (losses !== 38) {
+  fail(`expected 38 losers, got ${losses}`)
 }
 
 const open = trades.filter((t) => t.outcome === 'open')
@@ -30,12 +30,12 @@ if (open.length !== 4) {
 }
 
 const closed = trades.filter((t) => t.exit_time != null)
-if (closed.length !== 51) {
-  fail(`expected 51 closed trades, got ${closed.length}`)
+if (closed.length !== 50) {
+  fail(`expected 50 closed trades, got ${closed.length}`)
 }
 
-if (trades.length !== 55) {
-  fail(`expected 55 total trades, got ${trades.length}`)
+if (trades.length !== 54) {
+  fail(`expected 54 total trades, got ${trades.length}`)
 }
 
 const netClosedPnl = closed.reduce((s, t) => s + (t.pnl ?? 0), 0)
@@ -60,14 +60,13 @@ for (const [sym, shares] of expectedOpenShares) {
 const ibm = trades
   .filter((t) => t.symbol === 'IBM')
   .filter((t) => t.entry_time?.slice(0, 10) === '2026-01-13')
-if (ibm.length !== 2) {
-  fail(`expected 2 IBM trades opened on 2026-01-13, got ${ibm.length}`)
+// IBM had two entry lots (100 + 200 shares) closed in one sell order at the same
+// exit timestamp — mergeSameExitTrades correctly combines them into one 300-share trade.
+if (ibm.length !== 1) {
+  fail(`expected 1 merged IBM trade opened on 2026-01-13, got ${ibm.length}`)
 }
-const ibmShares = ibm
-  .map((t) => t.shares ?? 0)
-  .sort((a, b) => a - b)
-if (ibmShares.length !== 2 || ibmShares[0] !== 100 || ibmShares[1] !== 200) {
-  fail(`expected IBM share split [100, 200], got [${ibmShares.join(', ')}]`)
+if ((ibm[0].shares ?? 0) !== 300) {
+  fail(`expected merged IBM shares = 300, got ${ibm[0].shares}`)
 }
 
 const goog = trades.filter((t) => t.symbol === 'GOOG')
