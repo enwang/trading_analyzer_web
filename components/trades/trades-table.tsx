@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { Trash2 } from 'lucide-react'
 
 import type { Trade } from '@/types/trade'
 import { Badge } from '@/components/ui/badge'
@@ -231,7 +232,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
   const columnOrderDbSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const timersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const autoStopFetchedRef = useRef<Set<string>>(new Set())
-  const sheetAppliedRef = useRef(false)
+  const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set())
   const tradeById = useMemo(() => new Map(trades.map((t) => [t.id, t])), [trades])
   const currentListUrl = useMemo(
     () => `${pathname}${searchParamsString ? `?${searchParamsString}` : ''}`,
@@ -239,10 +240,11 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
   )
 
   const filtered = useMemo(() => {
-    if (filter === 'all') return trades
-    if (filter === 'marked') return trades.filter((t) => t.needsReview)
-    return trades.filter((t) => t.outcome === filter)
-  }, [trades, filter])
+    const visible = trades.filter((t) => !deletedIds.has(t.id))
+    if (filter === 'all') return visible
+    if (filter === 'marked') return visible.filter((t) => t.needsReview)
+    return visible.filter((t) => t.outcome === filter)
+  }, [trades, filter, deletedIds])
 
   const visibleColumnOrder = useMemo(() => {
     const openOnlyColumns: ColumnId[] = ['currentPrice', 'currentAmount', 'currentRemainShares']
@@ -674,6 +676,17 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
     return [...filtered].sort(compareTrades)
   }, [filtered, sortKey, sortDir, drafts])
 
+  async function deleteTrade(id: string) {
+    if (!window.confirm('Delete this trade? This cannot be undone.')) return
+    const res = await fetch(`/api/trades/${id}`, { method: 'DELETE' })
+    if (res.ok) {
+      setDeletedIds((prev) => new Set([...prev, id]))
+    } else {
+      const body = await res.json().catch(() => ({}))
+      setError(body.error ?? 'Failed to delete trade')
+    }
+  }
+
   function updateDraft(
     id: string,
     key: 'setupTag' | 'notes' | 'stopLoss',
@@ -842,6 +855,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
 
           if (cancelled) return
 
+          // Update draft state for UI display
           setDrafts((prev) => {
             const existing = prev[t.id]
             const existingStopLoss = existing?.stopLoss ?? (t.stopLoss != null ? t.stopLoss.toFixed(2) : '')
@@ -855,6 +869,19 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
               },
             }
           })
+
+          // Persist to DB immediately — don't rely on debounced save which can be cancelled
+          const nextR = computedR(t, suggested)
+          await fetch(`/api/trades/${t.id}/risk`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ stopLoss: suggested, rMultiple: nextR }),
+          })
+          if (cancelled) return
+          savedRef.current[t.id] = {
+            ...(savedRef.current[t.id] ?? { setupTag: t.setupTag ?? 'untagged', notes: t.notes ?? '' }),
+            stopLoss: suggested.toFixed(2),
+          }
         } catch {
           // Skip failed suggestions for this row.
         }
@@ -868,70 +895,6 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
     }
   }, [trades, drafts])
 
-  useEffect(() => {
-    if (sheetAppliedRef.current || trades.length === 0) return
-    let cancelled = false
-
-    function keyFor(symbol: string, openDate: string | null, closeDate: string | null) {
-      return `${symbol}|${openDate ?? ''}|${closeDate ?? ''}`
-    }
-
-    async function applyStopsFromSheet() {
-      try {
-        const res = await fetch('/api/trades/sheet', { cache: 'no-store' })
-        if (!res.ok) return
-        const json = await res.json() as {
-          rows: Array<{ symbol: string; openDate: string | null; closeDate: string | null; initialStop: number | null }>
-        }
-        if (cancelled || !json.rows?.length) return
-
-        const exactMap = new Map<string, number>()
-        const openOnlyMap = new Map<string, number>()
-        for (const r of json.rows) {
-          if (r.initialStop == null) continue
-          exactMap.set(keyFor(r.symbol, r.openDate, r.closeDate), r.initialStop)
-          const openKey = `${r.symbol}|${r.openDate ?? ''}`
-          if (!openOnlyMap.has(openKey)) openOnlyMap.set(openKey, r.initialStop)
-        }
-
-        setDrafts((prev) => {
-          const next = { ...prev }
-          let changed = false
-
-          for (const t of trades) {
-            const openDate = t.entryTime?.slice(0, 10) ?? null
-            const closeDate = t.exitTime?.slice(0, 10) ?? null
-            const exact = exactMap.get(keyFor(t.symbol, openDate, closeDate))
-            const fallback = openOnlyMap.get(`${t.symbol}|${openDate ?? ''}`)
-            const sheetStop = exact ?? fallback
-            if (sheetStop == null) continue
-
-            const current = next[t.id] ?? {
-              setupTag: t.setupTag ?? 'untagged',
-              notes: t.notes ?? '',
-              stopLoss: t.stopLoss != null ? t.stopLoss.toFixed(2) : '',
-            }
-            const nextStop = sheetStop.toFixed(2)
-            if (current.stopLoss === nextStop) continue
-            next[t.id] = { ...current, stopLoss: nextStop }
-            changed = true
-          }
-
-          return changed ? next : prev
-        })
-      } catch {
-        // Ignore sheet sync errors.
-      } finally {
-        sheetAppliedRef.current = true
-      }
-    }
-
-    void applyStopsFromSheet()
-
-    return () => {
-      cancelled = true
-    }
-  }, [trades])
 
   return (
     <div className="space-y-4">
@@ -1063,7 +1026,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                   if (col === 'symbol') {
                     return (
                       <TableCell key={col} className="font-medium">
-                        <div className="flex items-center gap-2">
+                        <div className="group/sym flex items-center gap-2">
                           <Link
                             href={detailsHref}
                             scroll={false}
@@ -1079,6 +1042,13 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                           {isMarkedForReview && (
                             <Badge className="border border-amber-200 bg-amber-100 text-amber-800">Revisit</Badge>
                           )}
+                          <button
+                            onClick={() => deleteTrade(t.id)}
+                            className="invisible ml-auto text-muted-foreground hover:text-destructive group-hover/sym:visible"
+                            title="Delete trade"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
                         </div>
                       </TableCell>
                     )

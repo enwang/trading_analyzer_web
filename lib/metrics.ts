@@ -51,8 +51,14 @@ export function computeSummary(trades: Trade[]): SummaryStats {
     if (dd > maxDrawdown) maxDrawdown = dd
   }
 
-  // Consecutive streaks
-  const outcomes = closed.map(t => t.outcome)
+  // Consecutive streaks — must be sorted by exit date so streaks are chronological
+  const outcomes = [...closed]
+    .sort((a, b) => {
+      const ta = a.exitTime ?? a.entryTime ?? ''
+      const tb = b.exitTime ?? b.entryTime ?? ''
+      return ta < tb ? -1 : ta > tb ? 1 : 0
+    })
+    .map(t => t.outcome)
   let maxConsecWins = 0, maxConsecLosses = 0, cur = 0
   let prevOutcome: string | null = ''
   for (const o of outcomes) {

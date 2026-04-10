@@ -478,7 +478,7 @@ function parseCsv(csvStr: string): NormalizedTrade[] {
     normalized.push(withDerived)
   }
 
-  return dedupByConstraintKey(normalized)
+  return dedupByConstraintKey(mergeSameExitTrades(normalized))
 }
 
 // ---------------------------------------------------------------------------
@@ -529,6 +529,46 @@ function mergePartialFills(trades: NormalizedTrade[]): NormalizedTrade[] {
   }
 
   return [...merged, ...withoutEntry]
+}
+
+// ---------------------------------------------------------------------------
+// Merge closed trades that share the same symbol + exit_time.
+// When a position built from multiple entry lots is closed in one order,
+// IBKR emits one C-row per lot with the same exit_time but different
+// entry_times. Combine those into a single trade record.
+// ---------------------------------------------------------------------------
+function mergeSameExitTrades(trades: NormalizedTrade[]): NormalizedTrade[] {
+  const open = trades.filter(t => t.exit_time == null)
+  const closed = trades.filter(t => t.exit_time != null)
+
+  const groups = new Map<string, NormalizedTrade[]>()
+  for (const t of closed) {
+    const pk = `${t.symbol}|${t.exit_time}`
+    if (!groups.has(pk)) groups.set(pk, [])
+    groups.get(pk)!.push(t)
+  }
+
+  const merged: NormalizedTrade[] = []
+  for (const [, grp] of groups) {
+    if (grp.length === 1) { merged.push(grp[0]); continue }
+    const totalShares = grp.reduce((s, t) => s + (t.shares ?? 0), 0)
+    const w = (t: NormalizedTrade) => t.shares ?? 0
+    const base = { ...grp[0] }
+    base.shares = totalShares
+    // Earliest entry time across all lots
+    base.entry_time = grp.map(t => t.entry_time).filter((v): v is string => v != null).sort()[0] ?? null
+    base.pnl = grp.reduce((s, t) => s + (t.pnl ?? 0), 0)
+    if (totalShares > 0) {
+      base.entry_price = grp.reduce((s, t) => s + (t.entry_price ?? 0) * w(t), 0) / totalShares
+      base.exit_price  = grp.reduce((s, t) => s + (t.exit_price  ?? 0) * w(t), 0) / totalShares
+    }
+    const cost = base.entry_price != null && base.shares != null ? base.entry_price * base.shares : null
+    base.pnl_pct = cost && cost > 0 && base.pnl != null ? base.pnl / cost : null
+    base.execution_legs = grp.flatMap(t => t.execution_legs ?? [])
+    merged.push(base)
+  }
+
+  return [...merged, ...open]
 }
 
 // ---------------------------------------------------------------------------
@@ -795,7 +835,7 @@ function parseXml(xml: string): NormalizedTrade[] {
     trades.push(t)
   }
 
-  return dedupByConstraintKey(mergePartialFills(trades))
+  return dedupByConstraintKey(mergeSameExitTrades(mergePartialFills(trades)))
 }
 
 // ---------------------------------------------------------------------------
