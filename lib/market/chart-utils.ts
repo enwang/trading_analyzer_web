@@ -21,3 +21,35 @@ export function deduplicateDailyCandles(candles: Candle[]): Candle[] {
   }
   return Array.from(byDate.values()).sort((a, b) => a.time - b.time)
 }
+
+/**
+ * Yahoo Finance occasionally returns corrupt volume values (e.g. 745) for specific
+ * dates while OHLC data is correct. Detect outliers by comparing each candle's volume
+ * against the median of its neighbours; null out anything below 1% of that median so
+ * the chart shows an empty bar instead of a misleading near-zero spike.
+ */
+export function nullifyCorruptVolume(candles: Candle[]): Candle[] {
+  if (candles.length < 5) return candles
+
+  const volumes = candles.map(c => c.volume ?? 0)
+
+  // Compute a rolling median over a ±10 window for context
+  return candles.map((c, i) => {
+    const vol = c.volume
+    if (vol == null || vol === 0) return c
+
+    const lo = Math.max(0, i - 10)
+    const hi = Math.min(candles.length - 1, i + 10)
+    const window = volumes.slice(lo, hi + 1).filter(v => v > 0)
+    if (window.length < 3) return c
+
+    const sorted = [...window].sort((a, b) => a - b)
+    const median = sorted[Math.floor(sorted.length / 2)]
+
+    // If this candle's volume is less than 1% of the local median, it's corrupt
+    if (median > 0 && vol < median * 0.01) {
+      return { ...c, volume: null }
+    }
+    return c
+  })
+}
