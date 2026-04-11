@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { deduplicateDailyCandles, nullifyCorruptVolume } from '@/lib/market/chart-utils'
+import { deduplicateDailyCandles, repairCorruptVolume } from '@/lib/market/chart-utils'
 
 interface YahooChartResponse {
   chart?: {
@@ -179,8 +179,9 @@ export async function GET(request: Request) {
     candles = deduplicateDailyCandles(candles)
   }
 
-  // Null out corrupt volume values (Yahoo sometimes returns placeholder values like 745)
-  candles = nullifyCorruptVolume(candles)
+  // Repair corrupt volume values (Yahoo sometimes returns placeholder values like 745).
+  // Re-fetches the affected days at 1h resolution and sums hourly volumes.
+  candles = await repairCorruptVolume(symbol, candles)
 
   const visiblePreMs = Math.max(spanMs * 0.8, Math.floor(lookbackMs * 0.6))
   // For 1D charts, show 2 calendar days of context after exit so the outcome is easy to judge
