@@ -231,7 +231,6 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
   const columnOrderDbLoadedRef = useRef(false)
   const columnOrderDbSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const timersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
-  const autoStopFetchedRef = useRef<Set<string>>(new Set())
   const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set())
   const tradeById = useMemo(() => new Map(trades.map((t) => [t.id, t])), [trades])
   const currentListUrl = useMemo(
@@ -819,81 +818,37 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
         void saveTradeFields(id, draft)
       }, 700)
     }
+    // No cleanup here — clearing all timers on every drafts change would cancel
+    // the user's in-flight save when any other draft (e.g. auto-stop) updates.
+  }, [drafts])
 
+  // Separate unmount-only cleanup to avoid memory leaks
+  useEffect(() => {
     return () => {
       for (const timer of Object.values(timersRef.current)) {
         clearTimeout(timer)
       }
       timersRef.current = {}
     }
-  }, [drafts])
+  }, [])
 
+  // On mount: backfill any trades that are missing a stop loss in the DB.
+  // This is a one-time server-side calculation — stop losses are stored permanently
+  // and never recalculated once set. After backfill, refresh to show the new values.
   useEffect(() => {
-    const candidates = trades.filter((t) => {
-      if (!t.side || !t.entryTime) return false
-      if (autoStopFetchedRef.current.has(t.id)) return false
-      const currentDraft = drafts[t.id]?.stopLoss ?? (t.stopLoss != null ? t.stopLoss.toFixed(2) : '')
-      return currentDraft.trim() === ''
-    })
+    const hasMissing = trades.some((t) => t.stopLoss == null && t.side && t.entryTime)
+    if (!hasMissing) return
 
-    if (candidates.length === 0) return
-
-    let cancelled = false
-
-    async function loadDefaults() {
-      for (const t of candidates) {
-        autoStopFetchedRef.current.add(t.id)
-        try {
-          const res = await fetch(
-            `/api/market/pre-entry-extremes?symbol=${encodeURIComponent(t.symbol)}&entryTime=${encodeURIComponent(t.entryTime!)}`
-          )
-          if (!res.ok) continue
-          const json = await res.json() as { preEntry: { low: number; high: number } }
-          const suggested = t.side === 'long'
-            ? Math.round((json.preEntry.low - 0.01) * 100) / 100
-            : Math.round((json.preEntry.high + 0.01) * 100) / 100
-
-          if (cancelled) return
-
-          // Update draft state for UI display
-          setDrafts((prev) => {
-            const existing = prev[t.id]
-            const existingStopLoss = existing?.stopLoss ?? (t.stopLoss != null ? t.stopLoss.toFixed(2) : '')
-            if (existingStopLoss.trim() !== '') return prev
-            return {
-              ...prev,
-              [t.id]: {
-                setupTag: existing?.setupTag ?? t.setupTag ?? 'untagged',
-                notes: existing?.notes ?? t.notes ?? '',
-                stopLoss: suggested.toFixed(2),
-              },
-            }
-          })
-
-          // Persist to DB immediately — don't rely on debounced save which can be cancelled
-          const nextR = computedR(t, suggested)
-          await fetch(`/api/trades/${t.id}/risk`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ stopLoss: suggested, rMultiple: nextR }),
-          })
-          if (cancelled) return
-          savedRef.current[t.id] = {
-            ...(savedRef.current[t.id] ?? { setupTag: t.setupTag ?? 'untagged', notes: t.notes ?? '' }),
-            stopLoss: suggested.toFixed(2),
-          }
-        } catch {
-          // Skip failed suggestions for this row.
+    fetch('/api/trades/backfill-stop-losses', { method: 'POST' })
+      .then((res) => res.json())
+      .then((json: { backfilled?: number }) => {
+        if ((json.backfilled ?? 0) > 0) {
+          router.refresh()
         }
-      }
-    }
-
-    void loadDefaults()
-
-    return () => {
-      cancelled = true
-    }
-  }, [trades, drafts])
+      })
+      .catch(() => {/* silently ignore backfill errors */})
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
 
   return (
