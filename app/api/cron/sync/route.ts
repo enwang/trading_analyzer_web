@@ -51,22 +51,30 @@ export async function GET(request: Request) {
         const touchedSymbols = [...new Set(rows.map(r => r.symbol))]
 
         if (touchedSymbols.length > 0) {
-          const { data: existingOpenRows } = await supabase
-            .from('trades')
-            .select('symbol, entry_time, stop_loss, r_multiple, setup_tag, notes, needs_review')
-            .eq('user_id', s.user_id)
-            .is('exit_time', null)
-            .in('symbol', touchedSymbols)
-
           const normalizeTs = (t: string | null | undefined) => t ? t.slice(0, 19) : ''
 
-          const openByKey = new Map<string, { symbol: string; entry_time: string | null; stop_loss: number | null; r_multiple: number | null; setup_tag: string | null; notes: string | null; needs_review: boolean | null }>(
-            (existingOpenRows ?? []).map((r) => [`${r.symbol}|${normalizeTs(r.entry_time)}`, r] as const)
+          // Fetch ALL existing trades (open and closed) to preserve manual fields
+          const { data: existingRows } = await supabase
+            .from('trades')
+            .select('symbol, entry_time, exit_time, stop_loss, r_multiple, setup_tag, notes, needs_review')
+            .eq('user_id', s.user_id)
+            .in('symbol', touchedSymbols)
+
+          type ExistingRow = { symbol: string; entry_time: string | null; exit_time: string | null; stop_loss: number | null; r_multiple: number | null; setup_tag: string | null; notes: string | null; needs_review: boolean | null }
+          const byKey = new Map<string, ExistingRow>(
+            (existingRows ?? []).map((r) => {
+              const key = r.exit_time
+                ? `${r.symbol}|${normalizeTs(r.entry_time)}|${normalizeTs(r.exit_time)}`
+                : `${r.symbol}|${normalizeTs(r.entry_time)}`
+              return [key, r] as const
+            })
           )
 
           for (const row of rows) {
-            const key = `${row.symbol}|${normalizeTs(row.entry_time)}`
-            const existing = openByKey.get(key)
+            const key = row.exit_time
+              ? `${row.symbol}|${normalizeTs(row.entry_time)}|${normalizeTs(row.exit_time)}`
+              : `${row.symbol}|${normalizeTs(row.entry_time)}`
+            const existing = byKey.get(key)
             if (!existing) continue
             if (row.setup_tag === 'untagged' && existing.setup_tag) row.setup_tag = existing.setup_tag
             if (!row.notes && existing.notes) row.notes = existing.notes
