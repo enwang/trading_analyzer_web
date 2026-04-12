@@ -24,13 +24,17 @@ export async function PATCH(
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const updateFields: Record<string, unknown> = {
+    setup_tag: (payload.setupTag ?? '').trim() || 'untagged',
+    notes: payload.notes ?? '',
+  }
+  if (payload.needsReview !== undefined) {
+    updateFields.needs_review = Boolean(payload.needsReview)
+  }
+
   const { error } = await supabase
     .from('trades')
-    .update({
-      setup_tag: (payload.setupTag ?? '').trim() || 'untagged',
-      notes: payload.notes ?? '',
-      needs_review: Boolean(payload.needsReview),
-    })
+    .update(updateFields)
     .eq('id', id)
     .eq('user_id', user.id)
 

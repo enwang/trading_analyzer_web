@@ -232,6 +232,9 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
   const columnOrderDbSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const timersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set())
+  const [notesSelection, setNotesSelection] = useState<{ id: string; start: number; end: number } | null>(null)
+  const [refining, setRefining] = useState(false)
+  const [notesPreRefine, setNotesPreRefine] = useState<Record<string, string>>({})
   const tradeById = useMemo(() => new Map(trades.map((t) => [t.id, t])), [trades])
   const currentListUrl = useMemo(
     () => `${pathname}${searchParamsString ? `?${searchParamsString}` : ''}`,
@@ -1059,13 +1062,85 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                   return (
                     <TableCell key={col}>
                       <div className="group relative">
-                        <input
-                          className="h-8 w-[160px] rounded-md border px-2 text-xs"
+                        <textarea
+                          className="h-8 w-[160px] resize-none overflow-hidden rounded-md border px-2 py-1 text-xs leading-tight focus:h-20 focus:overflow-y-auto"
                           value={drafts[t.id]?.notes ?? t.notes}
                           onChange={(e) => updateDraft(t.id, 'notes', e.target.value)}
                           placeholder="Add notes"
                           title={drafts[t.id]?.notes ?? t.notes ?? ''}
+                          rows={1}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && e.altKey) {
+                              e.preventDefault()
+                              const el = e.currentTarget
+                              const start = el.selectionStart ?? el.value.length
+                              const end = el.selectionEnd ?? el.value.length
+                              const next = el.value.slice(0, start) + '\n' + el.value.slice(end)
+                              updateDraft(t.id, 'notes', next)
+                              requestAnimationFrame(() => {
+                                el.selectionStart = start + 1
+                                el.selectionEnd = start + 1
+                              })
+                            } else if (e.key === 'Enter') {
+                              e.preventDefault()
+                              e.currentTarget.blur()
+                            } else if ((e.ctrlKey || e.metaKey) && e.key === 'z' && notesPreRefine[t.id] !== undefined) {
+                              e.preventDefault()
+                              updateDraft(t.id, 'notes', notesPreRefine[t.id])
+                              setNotesPreRefine((prev) => { const next = { ...prev }; delete next[t.id]; return next })
+                            }
+                          }}
+                          onMouseUp={(e) => {
+                            const el = e.currentTarget
+                            if (el.selectionStart !== el.selectionEnd) {
+                              setNotesSelection({ id: t.id, start: el.selectionStart, end: el.selectionEnd })
+                            } else {
+                              setNotesSelection(null)
+                            }
+                          }}
+                          onKeyUp={(e) => {
+                            const el = e.currentTarget
+                            if (el.selectionStart !== el.selectionEnd) {
+                              setNotesSelection({ id: t.id, start: el.selectionStart, end: el.selectionEnd })
+                            } else {
+                              setNotesSelection(null)
+                            }
+                          }}
+                          onBlur={() => {
+                            // Delay clear so the Refine button click can fire first
+                            setTimeout(() => setNotesSelection(null), 150)
+                          }}
                         />
+                        {notesSelection?.id === t.id && (
+                          <button
+                            className="absolute left-0 top-full z-40 mt-1 flex items-center gap-1 rounded-md border border-violet-300 bg-white px-2 py-0.5 text-xs font-medium text-violet-700 shadow-md hover:bg-violet-50 disabled:opacity-50"
+                            disabled={refining}
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={async () => {
+                              const current = drafts[t.id]?.notes ?? t.notes ?? ''
+                              const selected = current.slice(notesSelection.start, notesSelection.end)
+                              setRefining(true)
+                              try {
+                                const res = await fetch('/api/trades/refine-notes', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ text: selected }),
+                                })
+                                const json = await res.json() as { refined?: string }
+                                if (json.refined) {
+                                  setNotesPreRefine((prev) => ({ ...prev, [t.id]: current }))
+                                  const next = current.slice(0, notesSelection.start) + json.refined + current.slice(notesSelection.end)
+                                  updateDraft(t.id, 'notes', next)
+                                }
+                              } finally {
+                                setRefining(false)
+                                setNotesSelection(null)
+                              }
+                            }}
+                          >
+                            {refining ? '…' : '✦'} {refining ? 'Refining' : 'Refine'}
+                          </button>
+                        )}
                         {(drafts[t.id]?.notes ?? t.notes ?? '').trim() && (
                           <div className="pointer-events-none absolute right-0 top-full z-30 mt-1 hidden w-72 max-w-[calc(100vw-2rem)] whitespace-pre-wrap rounded-md border bg-background p-2 text-xs leading-relaxed shadow-md group-hover:block group-focus-within:block">
                             {drafts[t.id]?.notes ?? t.notes}
