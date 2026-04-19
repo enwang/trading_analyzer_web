@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ upserted: 0, skipped: 0 })
     }
 
-    const rows: UpsertRow[] = trades.map(t => ({ ...t, user_id: user.id }))
+    const rows: UpsertRow[] = trades.map(t => ({ ...t, user_id: user.id, needs_review: false }))
     const touchedSymbols = [...new Set(rows.map(r => r.symbol))]
 
     if (touchedSymbols.length > 0) {
@@ -83,14 +83,17 @@ export async function POST(request: NextRequest) {
       const enrichedRows = await enrichOpenTradesWithStopLosses(rows)
       rows.splice(0, rows.length, ...enrichedRows)
 
-      // Delete all existing open rows for touched symbols before upserting.
-      // This prevents stale open rows when a previously-open lot has now closed.
-      await supabase
-        .from('trades')
-        .delete()
-        .eq('user_id', user.id)
-        .is('exit_time', null)
-        .in('symbol', touchedSymbols)
+      // Remove stale open rows only for symbols where IBKR returned a new open position.
+      // Symbols present only as closed trades must NOT have their open rows wiped.
+      const symbolsWithNewOpen = [...new Set(rows.filter(r => r.exit_time == null).map(r => r.symbol))]
+      if (symbolsWithNewOpen.length > 0) {
+        await supabase
+          .from('trades')
+          .delete()
+          .eq('user_id', user.id)
+          .is('exit_time', null)
+          .in('symbol', symbolsWithNewOpen)
+      }
     }
 
     const { error, data } = await supabase

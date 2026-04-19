@@ -779,20 +779,26 @@ function computeDerived(t: NormalizedTrade): NormalizedTrade {
 // XML parsing (secondary path)
 // ---------------------------------------------------------------------------
 function parseXml(xml: string): NormalizedTrade[] {
-  const tradeRegex = /<Trade\s([^/]+)\/>/gi
   const attrRegex = /(\w+)="([^"]*)"/g
   const trades: NormalizedTrade[] = []
 
-  let match: RegExpExecArray | null
-  while ((match = tradeRegex.exec(xml)) !== null) {
-    const attrStr = match[1]
+  function parseAttrs(attrStr: string): Record<string, string> {
     const attrs: Record<string, string> = {}
+    attrRegex.lastIndex = 0
     let am: RegExpExecArray | null
     while ((am = attrRegex.exec(attrStr)) !== null) {
       attrs[am[1].toLowerCase()] = am[2]
     }
+    return attrs
+  }
 
-    const oci = (attrs['openindicator'] ?? attrs['opencloseIndicator'] ?? attrs['opencloseindicator'] ?? '').toUpperCase()
+  // Parse closed trades from <Trade> elements
+  const tradeRegex = /<Trade\s([^/]+)\/>/gi
+  let match: RegExpExecArray | null
+  while ((match = tradeRegex.exec(xml)) !== null) {
+    const attrs = parseAttrs(match[1])
+
+    const oci = (attrs['openindicator'] ?? attrs['opencloseindicator'] ?? '').toUpperCase()
     if (!oci.includes('C')) continue
 
     const sym = (attrs['symbol'] ?? '').toUpperCase().trim()
@@ -832,6 +838,41 @@ function parseXml(xml: string): NormalizedTrade[] {
       if (new Date(t.entry_time) < QUERY_START) continue
     }
     if (t.pnl == null && t.outcome !== 'open') continue
+    trades.push(t)
+  }
+
+  // Parse open positions from <OpenPosition> elements
+  const openPosRegex = /<OpenPosition\s([^/]+)\/>/gi
+  while ((match = openPosRegex.exec(xml)) !== null) {
+    const attrs = parseAttrs(match[1])
+
+    const sym = (attrs['symbol'] ?? '').toUpperCase().trim()
+    if (!sym) continue
+
+    const entryDt = attrs['opendatetime'] ?? attrs['opendate'] ?? ''
+    const entryTime = entryDt ? toUtcIso(parseIbkrDatetime(entryDt)) : null
+
+    const sharesRaw = parseNum(attrs['position'])
+    const shares = sharesRaw != null ? Math.abs(sharesRaw) : null
+    const entryPrice = parseNum(
+      attrs['averagecost'] ?? attrs['costbasisprice'] ?? attrs['openprice'] ?? ''
+    )
+
+    const sideStr = (attrs['side'] ?? '').toLowerCase()
+    const side: 'long' | 'short' | null = sideStr.includes('short')
+      ? 'short'
+      : sideStr.includes('long')
+        ? 'long'
+        : null
+
+    const t = computeDerived({
+      symbol: sym, entry_time: entryTime, exit_time: null,
+      side, shares, entry_price: entryPrice, exit_price: null,
+      pnl: null, pnl_pct: null, outcome: 'open',
+      hold_days: null, hold_time_min: null, hour_of_day: null, day_of_week: null,
+      r_multiple: null, setup_tag: 'untagged', source: 'ibkr',
+    })
+
     trades.push(t)
   }
 
