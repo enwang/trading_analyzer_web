@@ -54,13 +54,14 @@ export async function POST(request: NextRequest) {
         .eq('user_id', user.id)
         .in('symbol', touchedSymbols)
 
-      // Key: symbol|entry_time for open trades, symbol|entry_time|exit_time for closed
+      // Closed trades: keyed by symbol|entry_time|exit_time (precise dedup)
+      // Open trades: keyed by symbol only — openDateTime from XML may differ from CSV-stored entry_time
       type ExistingRow = { symbol: string; entry_time: string | null; exit_time: string | null; stop_loss: number | null; r_multiple: number | null; setup_tag: string | null; notes: string | null; needs_review: boolean | null }
       const byKey = new Map<string, ExistingRow>(
         (existingRows ?? []).map((r) => {
           const key = r.exit_time
             ? `${r.symbol}|${normalizeTs(r.entry_time)}|${normalizeTs(r.exit_time)}`
-            : `${r.symbol}|${normalizeTs(r.entry_time)}`
+            : r.symbol
           return [key, r] as const
         })
       )
@@ -68,7 +69,7 @@ export async function POST(request: NextRequest) {
       for (const row of rows) {
         const key = row.exit_time
           ? `${row.symbol}|${normalizeTs(row.entry_time)}|${normalizeTs(row.exit_time)}`
-          : `${row.symbol}|${normalizeTs(row.entry_time)}`
+          : row.symbol
         const existing = byKey.get(key)
         if (!existing) continue
         if (row.setup_tag === 'untagged' && existing.setup_tag) row.setup_tag = existing.setup_tag
