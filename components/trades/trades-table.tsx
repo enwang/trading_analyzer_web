@@ -1126,11 +1126,13 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                                   headers: { 'Content-Type': 'application/json' },
                                   body: JSON.stringify({ text: selected }),
                                 })
-                                const json = await res.json() as { refined?: string }
+                                const json = await res.json() as { refined?: string; error?: string }
                                 if (json.refined) {
                                   setNotesPreRefine((prev) => ({ ...prev, [t.id]: current }))
                                   const next = current.slice(0, notesSelection.start) + json.refined + current.slice(notesSelection.end)
                                   updateDraft(t.id, 'notes', next)
+                                } else {
+                                  setError(json.error ?? 'Refine failed — all models unavailable')
                                 }
                               } finally {
                                 setRefining(false)
