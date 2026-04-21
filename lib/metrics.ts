@@ -9,7 +9,7 @@ export function computeSummary(trades: Trade[]): SummaryStats {
   const closed = closedTrades(trades)
   if (closed.length === 0) {
     return {
-      totalTrades: 0, nWins: 0, nLosses: 0, winRate: 0,
+      totalTrades: 0, nWins: 0, nLosses: 0, nBreakevens: 0, winRate: 0,
       netPnl: 0, grossProfit: 0, grossLoss: 0, profitFactor: 0,
       avgWin: 0, avgLoss: 0, payoffRatio: 0, expectancy: 0,
       largestWin: 0, largestLoss: 0, maxDrawdown: 0,
@@ -22,6 +22,7 @@ export function computeSummary(trades: Trade[]): SummaryStats {
   const losses = closed.filter(t => t.outcome === 'loss')
   const nWins = wins.length
   const nLosses = losses.length
+  const nBreakevens = closed.filter(t => t.outcome === 'breakeven').length
   const total = closed.length
   const winRate = total > 0 ? nWins / total : 0
 
@@ -88,7 +89,7 @@ export function computeSummary(trades: Trade[]): SummaryStats {
     : times.length === 1 ? times[0].slice(0, 10) : 'N/A'
 
   return {
-    totalTrades: total, nWins, nLosses, winRate,
+    totalTrades: total, nWins, nLosses, nBreakevens, winRate,
     netPnl, grossProfit, grossLoss, profitFactor,
     avgWin, avgLoss, payoffRatio, expectancy,
     largestWin, largestLoss, maxDrawdown,

@@ -82,16 +82,20 @@ export async function POST(request: NextRequest) {
       const enrichedRows = await enrichOpenTradesWithStopLosses(rows)
       rows.splice(0, rows.length, ...enrichedRows)
 
-      // Remove stale open rows only for symbols where the new data includes an open position.
-      // Symbols present only as closed trades must NOT have their open rows wiped.
-      const symbolsWithNewOpen = [...new Set(rows.filter(r => r.exit_time == null).map(r => r.symbol))]
-      if (symbolsWithNewOpen.length > 0) {
+      // Delete open rows for symbols with new open data OR symbols that just closed.
+      const symbolsWithNewOpenSet = new Set(rows.filter(r => r.exit_time == null).map(r => r.symbol))
+      const symbolsWithExistingOpen = new Set((existingRows ?? []).filter(r => r.exit_time == null).map(r => r.symbol))
+      const symbolsThatJustClosed = [...new Set(
+        rows.filter(r => r.exit_time != null && symbolsWithExistingOpen.has(r.symbol) && !symbolsWithNewOpenSet.has(r.symbol)).map(r => r.symbol)
+      )]
+      const symbolsToDeleteOpen = [...new Set([...symbolsWithNewOpenSet, ...symbolsThatJustClosed])]
+      if (symbolsToDeleteOpen.length > 0) {
         await supabase
           .from('trades')
           .delete()
           .eq('user_id', user.id)
           .is('exit_time', null)
-          .in('symbol', symbolsWithNewOpen)
+          .in('symbol', symbolsToDeleteOpen)
       }
     }
 

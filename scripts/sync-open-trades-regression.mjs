@@ -143,38 +143,60 @@ if (enrichedAdea.stop_loss !== 24.49) {
 }
 
 // ---------------------------------------------------------------------------
-// 4. Delete scope: only delete open rows for symbols with incoming open trades
+// 4. Delete scope: delete open rows for new open positions AND for positions
+//    that just closed (had an existing open row, got a close, no new open row)
 // ---------------------------------------------------------------------------
-function symbolsToDelete(rows) {
-  return [...new Set(rows.filter(r => r.exit_time == null).map(r => r.symbol))]
+function symbolsToDelete(newRows, existingRows) {
+  const symbolsWithNewOpenSet = new Set(newRows.filter(r => r.exit_time == null).map(r => r.symbol))
+  const symbolsWithExistingOpen = new Set(existingRows.filter(r => r.exit_time == null).map(r => r.symbol))
+  const symbolsThatJustClosed = [...new Set(
+    newRows.filter(r => r.exit_time != null && symbolsWithExistingOpen.has(r.symbol) && !symbolsWithNewOpenSet.has(r.symbol)).map(r => r.symbol)
+  )]
+  return [...new Set([...symbolsWithNewOpenSet, ...symbolsThatJustClosed])]
 }
 
-// All rows are closed — nothing should be deleted
-const scope1 = symbolsToDelete([
-  { symbol: 'LITE', exit_time: '2026-04-15T13:30:00.000Z' },
-  { symbol: 'CAR',  exit_time: '2026-04-15T14:00:00.000Z' },
-])
-if (scope1.length !== 0) {
-  fail(`all-closed response must not delete any open rows, but got scope: ${JSON.stringify(scope1)}`)
-}
-
-// Only GSAT is open — only GSAT should be in delete scope
-const scope2 = symbolsToDelete([
-  { symbol: 'GSAT', exit_time: null },
-  { symbol: 'LITE', exit_time: '2026-04-15T13:30:00.000Z' },
-])
-if (scope2.length !== 1 || scope2[0] !== 'GSAT') {
-  fail(`only GSAT open in response, but delete scope was: ${JSON.stringify(scope2)}`)
-}
-
-// Multiple open symbols
-const scope3 = symbolsToDelete([
+const existingOpen = [
   { symbol: 'GSAT', exit_time: null },
   { symbol: 'ADEA', exit_time: null },
-  { symbol: 'LITE', exit_time: '2026-04-15T13:30:00.000Z' },
-])
+]
+
+// All rows are closed, no existing open rows — nothing deleted
+const scope1 = symbolsToDelete(
+  [{ symbol: 'LITE', exit_time: '2026-04-15T13:30:00.000Z' }],
+  []
+)
+if (scope1.length !== 0) {
+  fail(`no existing open rows, all-closed response must not delete anything, got: ${JSON.stringify(scope1)}`)
+}
+
+// GSAT had an existing open row and just got a close (no new open) — must be deleted
+const scope2 = symbolsToDelete(
+  [{ symbol: 'GSAT', exit_time: '2026-04-20T14:00:00.000Z' }],
+  [{ symbol: 'GSAT', exit_time: null }]
+)
+if (scope2.length !== 1 || !scope2.includes('GSAT')) {
+  fail(`GSAT just closed but open row not in delete scope: ${JSON.stringify(scope2)}`)
+}
+
+// ADEA still open, GSAT just closed — both in delete scope
+const scope3 = symbolsToDelete(
+  [
+    { symbol: 'GSAT', exit_time: '2026-04-20T14:00:00.000Z' },
+    { symbol: 'ADEA', exit_time: null },
+  ],
+  existingOpen
+)
 if (scope3.length !== 2 || !scope3.includes('GSAT') || !scope3.includes('ADEA')) {
-  fail(`expected GSAT and ADEA in delete scope, got: ${JSON.stringify(scope3)}`)
+  fail(`expected GSAT (just closed) and ADEA (still open) in delete scope: ${JSON.stringify(scope3)}`)
+}
+
+// Closed trade for symbol with NO existing open row — must NOT appear in delete scope
+const scope4 = symbolsToDelete(
+  [{ symbol: 'LITE', exit_time: '2026-04-15T13:30:00.000Z' }],
+  existingOpen   // LITE not in existingOpen
+)
+if (scope4.length !== 0) {
+  fail(`LITE has no existing open row, close should not trigger delete: ${JSON.stringify(scope4)}`)
 }
 
 console.log('sync-open-trades-regression: PASS')

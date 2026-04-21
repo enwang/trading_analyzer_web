@@ -87,7 +87,7 @@ export default async function OverviewPage() {
         <KpiCard
           label="Win Rate"
           value={fmtPct(stats.winRate)}
-          sub={`${stats.nWins}W / ${stats.nLosses}L`}
+          sub={stats.nBreakevens > 0 ? `${stats.nWins}W / ${stats.nLosses}L / ${stats.nBreakevens}B` : `${stats.nWins}W / ${stats.nLosses}L`}
         />
         <KpiCard label="Profit Factor" value={fmtPf(stats.profitFactor)} />
         <KpiCard
