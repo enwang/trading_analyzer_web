@@ -99,6 +99,7 @@ export interface SummaryStats {
   totalTrades: number
   nWins: number
   nLosses: number
+  nBreakevens: number
   winRate: number
   netPnl: number
   grossProfit: number

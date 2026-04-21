@@ -61,11 +61,13 @@ export async function GET(request: Request) {
             .in('symbol', touchedSymbols)
 
           type ExistingRow = { symbol: string; entry_time: string | null; exit_time: string | null; stop_loss: number | null; r_multiple: number | null; setup_tag: string | null; notes: string | null; needs_review: boolean | null }
+          // Closed trades: keyed by symbol|entry_time|exit_time (precise dedup)
+          // Open trades: keyed by symbol only — openDateTime from XML may differ from CSV-stored entry_time
           const byKey = new Map<string, ExistingRow>(
             (existingRows ?? []).map((r) => {
               const key = r.exit_time
                 ? `${r.symbol}|${normalizeTs(r.entry_time)}|${normalizeTs(r.exit_time)}`
-                : `${r.symbol}|${normalizeTs(r.entry_time)}`
+                : r.symbol
               return [key, r] as const
             })
           )
@@ -73,7 +75,7 @@ export async function GET(request: Request) {
           for (const row of rows) {
             const key = row.exit_time
               ? `${row.symbol}|${normalizeTs(row.entry_time)}|${normalizeTs(row.exit_time)}`
-              : `${row.symbol}|${normalizeTs(row.entry_time)}`
+              : row.symbol
             const existing = byKey.get(key)
             if (!existing) continue
             if (row.setup_tag === 'untagged' && existing.setup_tag) row.setup_tag = existing.setup_tag
@@ -86,16 +88,20 @@ export async function GET(request: Request) {
           const enrichedRows = await enrichOpenTradesWithStopLosses(rows)
           rows.splice(0, rows.length, ...enrichedRows)
 
-          // Remove stale open rows only for symbols where IBKR returned a new open position.
-          // Symbols present only as closed trades must NOT have their open rows wiped.
-          const symbolsWithNewOpen = [...new Set(rows.filter(r => r.exit_time == null).map(r => r.symbol))]
-          if (symbolsWithNewOpen.length > 0) {
+          // Delete open rows for symbols with new open data OR symbols that just closed.
+          const symbolsWithNewOpenSet = new Set(rows.filter(r => r.exit_time == null).map(r => r.symbol))
+          const symbolsWithExistingOpen = new Set((existingRows ?? []).filter(r => r.exit_time == null).map(r => r.symbol))
+          const symbolsThatJustClosed = [...new Set(
+            rows.filter(r => r.exit_time != null && symbolsWithExistingOpen.has(r.symbol) && !symbolsWithNewOpenSet.has(r.symbol)).map(r => r.symbol)
+          )]
+          const symbolsToDeleteOpen = [...new Set([...symbolsWithNewOpenSet, ...symbolsThatJustClosed])]
+          if (symbolsToDeleteOpen.length > 0) {
             await supabase
               .from('trades')
               .delete()
               .eq('user_id', s.user_id)
               .is('exit_time', null)
-              .in('symbol', symbolsWithNewOpen)
+              .in('symbol', symbolsToDeleteOpen)
           }
         }
 
