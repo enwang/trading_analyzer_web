@@ -7,6 +7,11 @@ import { Info } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import {
+  DEFAULT_INITIAL_RISK_AMOUNT,
+  initialRiskFromStopLoss,
+  suggestedStopLossFromRisk,
+} from '@/lib/market/stop-loss'
 
 type Side = 'long' | 'short' | null
 
@@ -30,24 +35,6 @@ interface Props {
   initialMfe: number | null
   initialMae: number | null
   onStopLossSaved?: (stopLoss: number | null, rMultiple: number | null) => void
-}
-
-interface PreEntryExtremes {
-  entryDateInExchange: string
-  exchangeTimeZone: string
-  preEntry: {
-    low: number
-    high: number
-  }
-}
-
-interface Candle {
-  high: number
-  low: number
-}
-
-function round2(n: number) {
-  return Math.round(n * 100) / 100
 }
 
 function fmtMoney(n: number | null) {
@@ -125,7 +112,12 @@ export function TradeSummaryCard({
   initialMae,
   onStopLossSaved,
 }: Props) {
-  const [stopLossInput, setStopLossInput] = useState(initialStopLoss?.toFixed(2) ?? '')
+  const [initialRiskInput, setInitialRiskInput] = useState(
+    () => (
+      initialRiskFromStopLoss(side, entryPrice, shares, initialStopLoss)
+        ?? DEFAULT_INITIAL_RISK_AMOUNT
+    ).toFixed(2)
+  )
   const [savedR, setSavedR] = useState<number | null>(initialRMultiple)
   const [markedForReview, setMarkedForReview] = useState<boolean>(needsReview)
   const [error, setError] = useState<string | null>(null)
@@ -138,42 +130,6 @@ export function TradeSummaryCard({
   const [lastSavedKey, setLastSavedKey] = useState(
     JSON.stringify({ stopLoss: initialStopLoss, rMultiple: initialRMultiple })
   )
-
-  useEffect(() => {
-    if (!entryTime || !symbol) return
-    const entryTs = entryTime
-
-    let canceled = false
-    async function loadPreEntryExtremes() {
-      setError(null)
-      try {
-        const res = await fetch(
-          `/api/market/pre-entry-extremes?symbol=${encodeURIComponent(symbol)}&entryTime=${encodeURIComponent(entryTs)}`
-        )
-        const json = await res.json()
-        if (!res.ok) {
-          if (!canceled) setError(json.error ?? 'Failed to load market candle')
-          return
-        }
-
-        const extremes = json as PreEntryExtremes
-        if (canceled) return
-
-        if (!initialStopLoss && side) {
-          const candle: Candle = extremes.preEntry
-          const suggested = side === 'long' ? round2(candle.low - 0.01) : round2(candle.high + 0.01)
-          setStopLossInput((current) => (current.trim() === '' ? suggested.toFixed(2) : current))
-        }
-      } catch {
-        if (!canceled) setError('Failed to load market candle')
-      }
-    }
-
-    void loadPreEntryExtremes()
-    return () => {
-      canceled = true
-    }
-  }, [entryTime, symbol, side, initialStopLoss])
 
   // Always fetch fresh MFE/MAE from market data so stale stored values are corrected.
   // Display is always from the fresh fetch; DB is updated whenever the value changes.
@@ -221,11 +177,16 @@ export function TradeSummaryCard({
     return () => { canceled = true }
   }, [tradeId, symbol, entryTime, exitTime, side, entryPrice, shares])
 
+  const initialRiskAmount = useMemo(() => {
+    if (initialRiskInput.trim() === '') return null
+    const n = Number(initialRiskInput)
+    return Number.isFinite(n) && n > 0 ? n : null
+  }, [initialRiskInput])
+
   const stopLoss = useMemo(() => {
-    if (stopLossInput.trim() === '') return null
-    const n = Number(stopLossInput)
-    return Number.isFinite(n) ? n : null
-  }, [stopLossInput])
+    if (initialRiskAmount == null) return null
+    return suggestedStopLossFromRisk(side, entryPrice, shares, initialRiskAmount)
+  }, [side, entryPrice, shares, initialRiskAmount])
 
   const riskPerShare = useMemo(() => {
     if (!side || entryPrice == null || stopLoss == null) return null
@@ -233,11 +194,6 @@ export function TradeSummaryCard({
     if (v == null || v <= 0) return null
     return v
   }, [side, entryPrice, stopLoss])
-
-  const initialRiskAmount = useMemo(() => {
-    if (riskPerShare == null || shares == null) return null
-    return Math.abs(riskPerShare * shares)
-  }, [riskPerShare, shares])
 
   const initialRiskPct = useMemo(() => {
     if (riskPerShare == null || entryPrice == null || entryPrice === 0) return null
@@ -341,22 +297,21 @@ export function TradeSummaryCard({
 
         <div className="border-b py-2">
           <div className="mb-2 flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Stop Loss</span>
+            <span className="text-sm text-muted-foreground">Initial Risk</span>
           </div>
           <div className="flex items-center gap-2">
             <Input
               type="number"
               step="0.01"
-              value={stopLossInput}
-              onChange={(e) => setStopLossInput(e.target.value)}
-              placeholder="Stop loss"
+              value={initialRiskInput}
+              onChange={(e) => setInitialRiskInput(e.target.value)}
+              placeholder="2000.00"
               className="h-8"
             />
           </div>
           {error && <div className="mt-2 text-xs text-red-700">{error}</div>}
         </div>
 
-        <Row label="Initial Risk" value={initialRiskAmount != null ? fmtMoney(initialRiskAmount) : '—'} />
         <Row label="Initial Risk %" value={initialRiskPct != null ? `${initialRiskPct.toFixed(2)}%` : '—'} />
         <Row label="R Multiple" value={liveR != null ? liveR.toFixed(2) : savedR != null ? savedR.toFixed(2) : '—'} />
 

@@ -24,6 +24,11 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import {
+  DEFAULT_INITIAL_RISK_AMOUNT,
+  initialRiskFromStopLoss,
+  suggestedStopLossFromRisk,
+} from '@/lib/market/stop-loss'
 import { createClient } from '@/lib/supabase/client'
 
 type OutcomeFilter = 'all' | 'win' | 'loss' | 'open' | 'marked'
@@ -35,7 +40,6 @@ type SortKey =
   | 'holdDays'
   | 'shares'
   | 'entryPrice'
-  | 'stopLoss'
   | 'pnl'
   | 'pnlPct'
   | 'initialAmount'
@@ -55,7 +59,6 @@ type ColumnId =
   | 'holdDays'
   | 'shares'
   | 'entryPrice'
-  | 'stopLoss'
   | 'pnl'
   | 'pnlPct'
   | 'initialAmount'
@@ -75,6 +78,7 @@ const TRADES_LAST_SCROLL_STORAGE_KEY = 'trades-table-last-scroll'
 const DASHBOARD_SCROLL_CONTAINER_ID = 'dashboard-scroll-container'
 const LEGACY_COLUMN_MAP: Record<string, ColumnId> = {
   initialStopPct: 'notes',
+  stopLoss: 'initialRisk',
 }
 const DEFAULT_COLUMN_ORDER: ColumnId[] = [
   'symbol',
@@ -83,7 +87,6 @@ const DEFAULT_COLUMN_ORDER: ColumnId[] = [
   'exitTime',
   'shares',
   'entryPrice',
-  'stopLoss',
   'pnl',
   'pnlPct',
   'initialAmount',
@@ -107,7 +110,6 @@ const SORT_KEYS: SortKey[] = [
   'holdDays',
   'shares',
   'entryPrice',
-  'stopLoss',
   'pnl',
   'pnlPct',
   'initialAmount',
@@ -119,6 +121,28 @@ const SORT_KEYS: SortKey[] = [
   'rMultiple',
   'outcome',
 ]
+const DEFAULT_INITIAL_RISK_INPUT = DEFAULT_INITIAL_RISK_AMOUNT.toFixed(2)
+const TRADE_INITIAL_RISK_STORAGE_KEY = 'trades-table-initial-risk-v1'
+
+function loadStoredInitialRisks(): Record<string, string> {
+  if (typeof window === 'undefined') return {}
+  const raw = window.localStorage.getItem(TRADE_INITIAL_RISK_STORAGE_KEY)
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, string> : {}
+  } catch {
+    return {}
+  }
+}
+
+function saveStoredInitialRisk(id: string, value: string) {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(
+    TRADE_INITIAL_RISK_STORAGE_KEY,
+    JSON.stringify({ ...loadStoredInitialRisks(), [id]: value })
+  )
+}
 
 function normalizeColumnOrder(value: unknown): ColumnId[] {
   if (!Array.isArray(value)) return DEFAULT_COLUMN_ORDER
@@ -201,20 +225,22 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
   const initialSortDir: SortDir = dirParam === 'asc' || dirParam === 'desc' ? dirParam : 'desc'
   const [filter, setFilter] = useState<OutcomeFilter>(initialFilter)
   const initialDrafts = useMemo(
-    () =>
-      Object.fromEntries(
+    () => {
+      const storedInitialRisks = loadStoredInitialRisks()
+      return Object.fromEntries(
         trades.map((t) => [
           t.id,
           {
             setupTag: t.setupTag ?? 'untagged',
             notes: t.notes ?? '',
-            stopLoss: t.stopLoss != null ? t.stopLoss.toFixed(2) : '',
+            initialRisk: storedInitialRisks[t.id] ?? DEFAULT_INITIAL_RISK_INPUT,
           },
         ])
-      ),
+      )
+    },
     [trades]
   )
-  const [drafts, setDrafts] = useState<Record<string, { setupTag: string; notes: string; stopLoss: string }>>(
+  const [drafts, setDrafts] = useState<Record<string, { setupTag: string; notes: string; initialRisk: string }>>(
     () => initialDrafts
   )
   const [sortKey, setSortKey] = useState<SortKey>(initialSortKey)
@@ -227,7 +253,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
   const [liveQuotes, setLiveQuotes] = useState<Record<string, number | null>>({})
   const [populating, setPopulating] = useState(false)
   const [populateProgress, setPopulateProgress] = useState<{ done: number; total: number } | null>(null)
-  const savedRef = useRef<Record<string, { setupTag: string; notes: string; stopLoss: string }>>(initialDrafts)
+  const savedRef = useRef<Record<string, { setupTag: string; notes: string; initialRisk: string }>>(initialDrafts)
   const columnOrderDbLoadedRef = useRef(false)
   const columnOrderDbSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const timersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
@@ -521,10 +547,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
   function initialRisk(t: Trade, stopLossOverride?: number | null) {
     const sharesForRisk = riskShares(t)
     const stopLoss = stopLossOverride ?? t.stopLoss
-    if (!t.side || t.entryPrice == null || stopLoss == null || sharesForRisk == null) return null
-    const riskPerShare = t.side === 'long' ? t.entryPrice - stopLoss : stopLoss - t.entryPrice
-    if (!Number.isFinite(riskPerShare) || riskPerShare <= 0) return null
-    return Math.abs(riskPerShare * sharesForRisk)
+    return initialRiskFromStopLoss(t.side, t.entryPrice, sharesForRisk, stopLoss)
   }
 
   function initialRiskPct(t: Trade, stopLossOverride?: number | null) {
@@ -560,11 +583,13 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
   }
 
   function valueForSort(t: Trade, key: SortKey): string | number | null {
-    const draftStopLoss = drafts[t.id]?.stopLoss
-    const parsedDraftStopLoss =
-      draftStopLoss != null && draftStopLoss.trim() !== '' ? Number(draftStopLoss) : null
+    const draftInitialRisk = drafts[t.id]?.initialRisk
+    const parsedDraftInitialRisk =
+      draftInitialRisk != null && draftInitialRisk.trim() !== '' ? Number(draftInitialRisk) : null
     const effectiveStopLoss =
-      parsedDraftStopLoss != null && Number.isFinite(parsedDraftStopLoss) ? parsedDraftStopLoss : t.stopLoss
+      parsedDraftInitialRisk != null && Number.isFinite(parsedDraftInitialRisk)
+        ? suggestedStopLossFromRisk(t.side, t.entryPrice, riskShares(t), parsedDraftInitialRisk)
+        : t.stopLoss
 
     switch (key) {
       case 'symbol':
@@ -581,8 +606,6 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
         return displayShares(t)
       case 'entryPrice':
         return t.entryPrice ?? null
-      case 'stopLoss':
-        return effectiveStopLoss ?? null
       case 'pnl':
         return t.pnl ?? null
       case 'pnlPct':
@@ -691,7 +714,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
 
   function updateDraft(
     id: string,
-    key: 'setupTag' | 'notes' | 'stopLoss',
+    key: 'setupTag' | 'notes' | 'initialRisk',
     value: string
   ) {
     setDrafts((prev) => ({
@@ -699,7 +722,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
       [id]: {
         setupTag: prev[id]?.setupTag ?? 'untagged',
         notes: prev[id]?.notes ?? '',
-        stopLoss: prev[id]?.stopLoss ?? '',
+        initialRisk: prev[id]?.initialRisk ?? DEFAULT_INITIAL_RISK_INPUT,
         [key]: value,
       },
     }))
@@ -725,17 +748,11 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
     for (let i = 0; i < needsStop.length; i++) {
       const t = needsStop[i]
       try {
-        const res = await fetch(
-          `/api/market/pre-entry-extremes?symbol=${encodeURIComponent(t.symbol)}&entryTime=${encodeURIComponent(t.entryTime!)}`
-        )
-        if (!res.ok) {
+        const suggested = suggestedStopLossFromRisk(t.side, t.entryPrice, displayShares(t))
+        if (suggested == null) {
           setPopulateProgress({ done: i + 1, total: needsStop.length })
           continue
         }
-        const json = await res.json() as { preEntry: { low: number; high: number } }
-        const suggested = t.side === 'long'
-          ? Math.round((json.preEntry.low - 0.01) * 100) / 100
-          : Math.round((json.preEntry.high + 0.01) * 100) / 100
 
         let rMultiple: number | null = null
         if (t.entryPrice != null && t.exitPrice != null) {
@@ -762,7 +779,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
     router.refresh()
   }
 
-  async function saveTradeFields(id: string, draft: { setupTag: string; notes: string; stopLoss: string }) {
+  async function saveTradeFields(id: string, draft: { setupTag: string; notes: string; initialRisk: string }) {
     setError(null)
     try {
       const journalRes = await fetch(`/api/trades/${id}/journal`, {
@@ -779,11 +796,14 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
         return
       }
 
-      const parsedStopLoss = draft.stopLoss.trim() === '' ? null : Number(draft.stopLoss)
-      if (parsedStopLoss != null && !Number.isFinite(parsedStopLoss)) {
+      const parsedInitialRisk = draft.initialRisk.trim() === '' ? null : Number(draft.initialRisk)
+      if (parsedInitialRisk != null && (!Number.isFinite(parsedInitialRisk) || parsedInitialRisk <= 0)) {
         return
       }
       const trade = tradeById.get(id)
+      const parsedStopLoss = trade && parsedInitialRisk != null
+        ? suggestedStopLossFromRisk(trade.side, trade.entryPrice, riskShares(trade), parsedInitialRisk)
+        : null
       const nextR = trade ? computedR(trade, parsedStopLoss) : null
       const riskRes = await fetch(`/api/trades/${id}/risk`, {
         method: 'PATCH',
@@ -796,6 +816,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
         return
       }
 
+      saveStoredInitialRisk(id, draft.initialRisk)
       savedRef.current[id] = draft
     } catch {
       setError('Failed to save trade values')
@@ -809,7 +830,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
         saved &&
         saved.setupTag === draft.setupTag &&
         saved.notes === draft.notes &&
-        saved.stopLoss === draft.stopLoss
+        saved.initialRisk === draft.initialRisk
       ) {
         continue
       }
@@ -870,7 +891,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
             >
               {populating && populateProgress
                 ? `Populating ${populateProgress.done}/${populateProgress.total}…`
-                : 'Populate Stop Losses'}
+                : 'Populate Initial Risk'}
             </Button>
           )}
           <span className="text-sm text-muted-foreground">View</span>
@@ -899,7 +920,6 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                   col === 'holdDays' ||
                   col === 'shares' ||
                   col === 'entryPrice' ||
-                  col === 'stopLoss' ||
                   col === 'pnl' ||
                   col === 'pnlPct' ||
                   col === 'initialAmount' ||
@@ -917,7 +937,6 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                   holdDays: sortableHeader('Hold Days', 'holdDays'),
                   shares: sortableHeader('Shares', 'shares'),
                   entryPrice: sortableHeader('Entry $', 'entryPrice'),
-                  stopLoss: sortableHeader('Stop Loss $', 'stopLoss'),
                   pnl: sortableHeader('P&L', 'pnl'),
                   pnlPct: sortableHeader('P&L %', 'pnlPct'),
                   initialAmount: sortableHeader('Initial Amount', 'initialAmount'),
@@ -962,11 +981,13 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
               </TableRow>
             )}
             {sortedFiltered.map((t) => {
-              const draftStopLoss = drafts[t.id]?.stopLoss ?? (t.stopLoss != null ? t.stopLoss.toFixed(2) : '')
-              const parsedDraftStopLoss = draftStopLoss.trim() === '' ? null : Number(draftStopLoss)
+              const draftInitialRisk =
+                drafts[t.id]?.initialRisk
+                ?? DEFAULT_INITIAL_RISK_INPUT
+              const parsedDraftInitialRisk = draftInitialRisk.trim() === '' ? null : Number(draftInitialRisk)
               const effectiveStopLoss =
-                parsedDraftStopLoss != null && Number.isFinite(parsedDraftStopLoss)
-                  ? parsedDraftStopLoss
+                parsedDraftInitialRisk != null && Number.isFinite(parsedDraftInitialRisk)
+                  ? suggestedStopLossFromRisk(t.side, t.entryPrice, riskShares(t), parsedDraftInitialRisk)
                   : t.stopLoss
               const isMarkedForReview = t.needsReview
 
@@ -1017,23 +1038,22 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                   if (col === 'holdDays') return <TableCell key={col} className="text-right">{fmtHoldDuration(effectiveHoldTimeMin(t), t.holdDays)}</TableCell>
                   if (col === 'shares') return <TableCell key={col} className="text-right">{displayShares(t) ?? '—'}</TableCell>
                   if (col === 'entryPrice') return <TableCell key={col} className="text-right">{fmtPrice(t.entryPrice)}</TableCell>
-                  if (col === 'stopLoss') {
+                  if (col === 'pnl') return <TableCell key={col} className={`text-right font-medium ${signedValueClass(t.pnl) || pnlClass(t.outcome)}`}>{t.pnl != null ? `${t.pnl >= 0 ? '+' : ''}$${t.pnl.toFixed(2)}` : '—'}</TableCell>
+                  if (col === 'pnlPct') return <TableCell key={col} className={`text-right ${signedValueClass(t.pnlPct) || pnlClass(t.outcome)}`}>{t.pnlPct != null ? `${(t.pnlPct * 100).toFixed(2)}%` : '—'}</TableCell>
+                  if (col === 'initialAmount') return <TableCell key={col} className="text-right">{initialAmount(t) != null ? fmtMoney(initialAmount(t) as number) : '—'}</TableCell>
+                  if (col === 'initialRisk') {
                     return (
                       <TableCell key={col} className="text-right">
                         <input
                           className="h-8 w-[92px] rounded-md border px-2 text-right text-xs"
-                          value={draftStopLoss}
-                          onChange={(e) => updateDraft(t.id, 'stopLoss', e.target.value)}
-                          placeholder="0.00"
+                          value={draftInitialRisk}
+                          onChange={(e) => updateDraft(t.id, 'initialRisk', e.target.value)}
+                          placeholder="2000.00"
                           inputMode="decimal"
                         />
                       </TableCell>
                     )
                   }
-                  if (col === 'pnl') return <TableCell key={col} className={`text-right font-medium ${signedValueClass(t.pnl) || pnlClass(t.outcome)}`}>{t.pnl != null ? `${t.pnl >= 0 ? '+' : ''}$${t.pnl.toFixed(2)}` : '—'}</TableCell>
-                  if (col === 'pnlPct') return <TableCell key={col} className={`text-right ${signedValueClass(t.pnlPct) || pnlClass(t.outcome)}`}>{t.pnlPct != null ? `${(t.pnlPct * 100).toFixed(2)}%` : '—'}</TableCell>
-                  if (col === 'initialAmount') return <TableCell key={col} className="text-right">{initialAmount(t) != null ? fmtMoney(initialAmount(t) as number) : '—'}</TableCell>
-                  if (col === 'initialRisk') return <TableCell key={col} className="text-right">{initialRisk(t, effectiveStopLoss) != null ? fmtMoney(initialRisk(t, effectiveStopLoss) as number) : '—'}</TableCell>
                   if (col === 'initialRiskPct') return <TableCell key={col} className="text-right">{initialRiskPct(t, effectiveStopLoss) != null ? `${initialRiskPct(t, effectiveStopLoss)?.toFixed(2)}%` : '—'}</TableCell>
                   if (col === 'currentPrice') return <TableCell key={col} className="text-right">{currentPrice(t) != null ? fmtPrice(currentPrice(t) as number) : '—'}</TableCell>
                   if (col === 'currentAmount') return <TableCell key={col} className="text-right">{currentAmount(t) != null ? fmtMoney(currentAmount(t) as number) : '—'}</TableCell>

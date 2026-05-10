@@ -48,20 +48,20 @@ const enriched = await enrichOpenTradesWithStopLosses(
   }
 )
 
-if (calls !== 2) {
-  fail(`expected lookup to run for 2 missing open stops, got ${calls}`)
+if (calls !== 0) {
+  fail(`expected legacy market lookup to remain unused, got ${calls}`)
 }
 
 const fsly = enriched.find((row) => row.symbol === 'FSLY')
 if (!fsly) fail('missing enriched FSLY row')
-if (fsly.stop_loss !== 19.39) {
-  fail(`expected FSLY stop loss 19.39, got ${fsly.stop_loss}`)
+if (fsly.stop_loss !== 18.32) {
+  fail(`expected FSLY $2000-risk stop loss 18.32, got ${fsly.stop_loss}`)
 }
 
 const nvda = enriched.find((row) => row.symbol === 'NVDA')
 if (!nvda) fail('missing enriched NVDA row')
-if (nvda.stop_loss !== 118.46) {
-  fail(`expected NVDA short stop loss 118.46, got ${nvda.stop_loss}`)
+if (nvda.stop_loss !== 22.32) {
+  fail(`expected NVDA $2000-risk short stop loss 22.32, got ${nvda.stop_loss}`)
 }
 
 const pl = enriched.find((row) => row.symbol === 'PL')

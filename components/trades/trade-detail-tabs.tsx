@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { TradeSummaryCard } from '@/components/trades/trade-summary-card'
 import { TradeAiAnalyzer } from '@/components/trades/trade-ai-analyzer'
 import type { ExecutionLeg } from '@/types/trade'
+import { initialRiskFromStopLoss } from '@/lib/market/stop-loss'
 
 type Side = 'long' | 'short' | null
 
@@ -129,6 +130,7 @@ export function TradeDetailTabs(props: Props) {
       ? computeR(props.side, props.entryPrice, props.exitPrice, liveStopLoss)
       : null
   )
+  const displayInitialRisk = initialRiskFromStopLoss(props.side, props.entryPrice, props.shares, liveStopLoss)
 
   return (
     <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'summary' | 'executions' | 'ai')} className="w-full">
@@ -187,9 +189,9 @@ export function TradeDetailTabs(props: Props) {
               </div>
             </div>
             <div className="rounded-lg border p-3">
-              <div className="mb-1 text-xs text-muted-foreground">Stop Loss</div>
+              <div className="mb-1 text-xs text-muted-foreground">Initial Risk</div>
               <div className="text-sm font-medium text-red-600">
-                {fmtPrice(liveStopLoss)}
+                {fmtPrice(displayInitialRisk)}
               </div>
             </div>
             <div className="rounded-lg border p-3">
