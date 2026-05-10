@@ -54,3 +54,22 @@ export async function createTradeSnapshot(
 
   return data
 }
+
+export async function pruneOldSnapshots(
+  supabase: SupabaseClient,
+  userId: string,
+  keepCount = 30
+) {
+  // Fetch IDs of snapshots beyond the most recent `keepCount`, oldest first
+  const { data, error } = await supabase
+    .from('trade_snapshots')
+    .select('id')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .range(keepCount, 9999)
+
+  if (error || !data?.length) return
+
+  const ids = data.map((r: { id: string }) => r.id)
+  await supabase.from('trade_snapshots').delete().in('id', ids)
+}

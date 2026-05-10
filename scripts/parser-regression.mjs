@@ -129,6 +129,43 @@ if (Math.abs((aaoi[0].entry_price ?? 0) - (1600 / 150)) > 1e-9) {
   fail(`expected aggregated AAOI entry price = ${1600 / 150}, got ${aaoi[0].entry_price}`)
 }
 
+const afterSellAddonCsv = `Open/CloseIndicator,Symbol,Quantity,Date/Time,Open Date/Time,Buy/Sell,T. Price,Basis
+O,ARM,100,2026-03-01 09:30:00,,BUY,100,
+C,ARM,50,2026-03-02 10:00:00,,SELL,110,5000
+O,ARM,100,2026-03-03 09:30:00,,BUY,120,
+C,ARM,100,2026-03-04 10:00:00,,SELL,130,12000
+O,XYZ,10,2026-03-01 10:00:00,,BUY,20,
+C,XYZ,10,2026-03-03 10:00:00,2026-03-01 10:00:00,SELL,21,200
+`
+const afterSellAddonTrades = parseFlexCsv(afterSellAddonCsv)
+const armClosedHigh = afterSellAddonTrades.find((t) => t.symbol === 'ARM' && t.exit_time != null)
+if (!armClosedHigh || armClosedHigh.entry_price !== 120 || armClosedHigh.shares !== 100 || armClosedHigh.pnl !== 1000) {
+  fail(`expected ARM later add-on to close as separate 100 @ 120 lot for +1000, got ${JSON.stringify(armClosedHigh)}`)
+}
+const armOpenLow = afterSellAddonTrades.find((t) => t.symbol === 'ARM' && t.outcome === 'open')
+if (!armOpenLow || armOpenLow.entry_price !== 100 || armOpenLow.shares !== 50 || armOpenLow.pnl !== 500) {
+  fail(`expected original ARM lot to remain open with 50 shares and +500 partial P&L, got ${JSON.stringify(armOpenLow)}`)
+}
+
+const sameDaySellAddonCsv = `Open/CloseIndicator,Symbol,Quantity,Date/Time,Open Date/Time,Buy/Sell,T. Price,Basis
+O,ARM,100,2026-03-01 09:30:00,,BUY,100,
+C,ARM,50,2026-03-02 10:00:00,,SELL,110,5000
+O,ARM,100,2026-03-02 11:30:00,,BUY,120,
+O,XYZ,10,2026-03-01 10:00:00,,BUY,20,
+C,XYZ,10,2026-03-03 10:00:00,2026-03-01 10:00:00,SELL,21,200
+`
+const sameDaySellAddonTrades = parseFlexCsv(sameDaySellAddonCsv)
+const armSameDayRows = sameDaySellAddonTrades.filter((t) => t.symbol === 'ARM')
+if (armSameDayRows.length !== 2) {
+  fail(`expected same-day ARM add after sell to split into 2 open trades, got ${JSON.stringify(armSameDayRows)}`)
+}
+if (!armSameDayRows.some((t) => t.entry_price === 100 && t.shares === 50 && t.pnl === 500)) {
+  fail(`expected original same-day ARM lot to remain open with 50 shares and +500 partial P&L, got ${JSON.stringify(armSameDayRows)}`)
+}
+if (!armSameDayRows.some((t) => t.entry_price === 120 && t.shares === 100 && t.pnl === 0)) {
+  fail(`expected same-day ARM add-on to become separate open 100 @ 120 trade, got ${JSON.stringify(armSameDayRows)}`)
+}
+
 const multiSellOpenCsv = `Open/CloseIndicator,Symbol,Quantity,Date/Time,Open Date/Time,Buy/Sell,T. Price,Basis
 O,FSLY,2500,2026-03-09 09:48:00,,BUY,20.315,
 O,XYZ,10,2026-03-01 10:00:00,,BUY,20,

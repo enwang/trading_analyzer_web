@@ -99,43 +99,46 @@ function deriveTradeFromExecutionLegs(base: Trade, executionLegs: ExecutionLeg[]
 }
 
 export function mergeOpenTradesForDisplay(trades: Trade[]): Trade[] {
-  const closed = trades.filter((trade) => trade.exitTime != null || trade.outcome !== 'open')
-  const open = trades.filter((trade) => trade.exitTime == null && trade.outcome === 'open')
+  return trades
+}
 
-  const groups = new Map<string, Trade[]>()
-  for (const trade of open) {
-    const key = `${trade.symbol}|${trade.side ?? ''}`
-    if (!groups.has(key)) groups.set(key, [])
-    groups.get(key)!.push(trade)
+function legKey(leg: ExecutionLeg): string {
+  return `${leg.time}|${leg.action}|${leg.shares}|${leg.price}`
+}
+
+function containsAllLegs(container: Map<string, number>, legs: ExecutionLeg[]): boolean {
+  const remaining = new Map(container)
+  for (const leg of legs) {
+    const key = legKey(leg)
+    const count = remaining.get(key) ?? 0
+    if (count <= 0) return false
+    if (count === 1) remaining.delete(key)
+    else remaining.set(key, count - 1)
   }
+  return true
+}
 
-  const mergedOpen: Trade[] = []
-  for (const [, group] of groups) {
-    if (group.length === 1) {
-      mergedOpen.push(group[0])
-      continue
+function dropCompositeDuplicateClosedTrades(trades: Trade[]): Trade[] {
+  return trades.filter((trade, index) => {
+    if (trade.exitTime == null || !trade.executionLegs?.length) return true
+    const tradeLegs = trade.executionLegs
+
+    const tradeLegCounts = new Map<string, number>()
+    for (const leg of tradeLegs) {
+      const key = legKey(leg)
+      tradeLegCounts.set(key, (tradeLegCounts.get(key) ?? 0) + 1)
     }
 
-    const base = { ...group[0] }
-    const totalShares = group.reduce((sum, trade) => sum + Math.abs(trade.shares ?? 0), 0)
-    const weightedEntryCost = group.reduce(
-      (sum, trade) => sum + Math.abs(trade.shares ?? 0) * (trade.entryPrice ?? 0),
-      0
-    )
-    const executionLegs = sortLegs(group.flatMap((trade) => trade.executionLegs ?? []))
+    const componentRows = trades.filter((candidate, candidateIndex) => {
+      if (candidateIndex === index) return false
+      if (candidate.symbol !== trade.symbol) return false
+      if (candidate.exitTime == null || !candidate.executionLegs?.length) return false
+      if (candidate.executionLegs.length >= tradeLegs.length) return false
+      return containsAllLegs(tradeLegCounts, candidate.executionLegs)
+    })
 
-    base.entryTime = group
-      .map((trade) => trade.entryTime)
-      .filter((value): value is string => value != null)
-      .sort()[0] ?? null
-    base.shares = totalShares > 0 ? totalShares : null
-    base.entryPrice = totalShares > 0 ? weightedEntryCost / totalShares : base.entryPrice
-    base.pnl = group.reduce((sum, trade) => sum + (trade.pnl ?? 0), 0)
-    base.executionLegs = executionLegs.length > 0 ? executionLegs : null
-    mergedOpen.push(base)
-  }
-
-  return [...closed, ...mergedOpen]
+    return componentRows.length < 2
+  })
 }
 
 export function collapseClosedTradeFragmentsForDisplay(trades: Trade[]): Trade[] {
@@ -181,18 +184,14 @@ export function collapseClosedTradeFragmentsForDisplay(trades: Trade[]): Trade[]
 }
 
 export function normalizeTradesForDisplay(trades: Trade[]): Trade[] {
-  return collapseClosedTradeFragmentsForDisplay(mergeOpenTradesForDisplay(trades))
+  return collapseClosedTradeFragmentsForDisplay(dropCompositeDuplicateClosedTrades(mergeOpenTradesForDisplay(trades)))
 }
 
 export function dedupeTradeRowsForCleanup(trades: Trade[]) {
-  const openGroups = new Map<string, Trade[]>()
   const closedGroups = new Map<string, Trade[]>()
 
   for (const trade of trades) {
     if (trade.exitTime == null || trade.outcome === 'open') {
-      const key = `${trade.symbol}|${trade.side ?? ''}|open`
-      if (!openGroups.has(key)) openGroups.set(key, [])
-      openGroups.get(key)!.push(trade)
       continue
     }
 
@@ -204,17 +203,6 @@ export function dedupeTradeRowsForCleanup(trades: Trade[]) {
   }
 
   const cleanupGroups: Array<{ keep: Trade; removeIds: string[]; merged: Trade }> = []
-
-  for (const [, group] of openGroups) {
-    if (group.length <= 1) continue
-    const merged = mergeOpenTradesForDisplay(group)[0]
-    const keep = group[0]
-    cleanupGroups.push({
-      keep,
-      removeIds: group.slice(1).map((trade) => trade.id),
-      merged,
-    })
-  }
 
   for (const [, group] of closedGroups) {
     if (group.length <= 1) continue

@@ -193,6 +193,42 @@ function parseCsv(csvStr: string): NormalizedTrade[] {
     totalCost: number
     legs: { time: string; action: 'BUY' | 'SELL'; shares: number; price: number }[]
   }>()
+  const openGroupIdsByRow = new Map<Record<string, string>, string>()
+
+  type SegmentState = { id: number; hasClose: boolean }
+  const segmentStateBySymbol = new Map<string, SegmentState>()
+  const chronologicalRows = raw
+    .map((row, index) => {
+      const sym = col(row, 'symbol').toUpperCase().trim()
+      const oci = ociKey ? (row[ociKey] ?? '').toUpperCase() : ''
+      const isO = oci.includes('O') && !oci.includes('C')
+      const isC = oci.includes('C')
+      const dtStr = col(row, 'date/time', 'datetime', 'tradedatetime', 'open date/time', 'opendatetime', 'dateandhour', 'date', 'tradedate')
+      const iso = dtStr ? toUtcIso(parseIbkrDatetime(dtStr)) : null
+      return { row, index, sym, isO, isC, iso }
+    })
+    .filter((event) => event.sym && event.iso && (event.isO || event.isC))
+    .sort((a, b) => {
+      if (a.iso! !== b.iso!) return a.iso! < b.iso! ? -1 : 1
+      return a.index - b.index
+    })
+
+  for (const event of chronologicalRows) {
+    const state = segmentStateBySymbol.get(event.sym)
+    if (event.isO) {
+      let nextState = state
+      if (!nextState || nextState.hasClose) {
+        nextState = {
+          id: (state?.id ?? 0) + 1,
+          hasClose: false,
+        }
+        segmentStateBySymbol.set(event.sym, nextState)
+      }
+      openGroupIdsByRow.set(event.row, `${event.sym}|seg:${nextState.id}`)
+    } else if (event.isC && state) {
+      state.hasClose = true
+    }
+  }
 
   const oRaw: Record<string, string>[] = []
   const cRaw: Record<string, string>[] = []
@@ -230,10 +266,7 @@ function parseCsv(csvStr: string): NormalizedTrade[] {
           byDate.totalCost += fillPrice * qty
           openPriceMapByDate.set(dateMapKey, byDate)
 
-          const ibOrderId = col(row, 'iborderid').trim()
-          const groupId = ibOrderId && ibOrderId !== '0'
-            ? `${sym}|ord:${ibOrderId}`
-            : `${sym}|ts:${entryIso}`
+          const groupId = openGroupIdsByRow.get(row) ?? `${sym}|ts:${entryIso}`
           const bs = col(row, 'buy/sell', 'buysell').toUpperCase()
           const action: 'BUY' | 'SELL' = bs.includes('SELL') ? 'SELL' : 'BUY'
           const group = openGroups.get(groupId) ?? {
@@ -279,7 +312,11 @@ function parseCsv(csvStr: string): NormalizedTrade[] {
     })
   }
   for (const [, lots] of openLotsBySymbol) {
-    lots.sort((a, b) => (a.entryIso < b.entryIso ? -1 : a.entryIso > b.entryIso ? 1 : 0))
+    lots.sort((a, b) => {
+      const priceDiff = b.avgPrice - a.avgPrice
+      if (priceDiff !== 0) return priceDiff
+      return a.entryIso < b.entryIso ? -1 : a.entryIso > b.entryIso ? 1 : 0
+    })
   }
 
   // Use C-rows, or fall back to rows with non-zero realized P/L
@@ -298,31 +335,21 @@ function parseCsv(csvStr: string): NormalizedTrade[] {
     sym: string,
     exitTime: string | null,
     requestedShares: number | null,
-    preferredEntryTime: string | null,
-    basisEntryPrice: number | null
+    _preferredEntryTime: string | null,
+    _basisEntryPrice: number | null
   ): { entryTime: string; shares: number } | null {
     if (!exitTime || requestedShares == null || requestedShares <= 0) return null
     const lots = openLotsBySymbol.get(sym) ?? []
     const candidates = lots.filter(l => l.entryIso <= exitTime && l.remainingShares > 0)
     if (!candidates.length) return null
 
-    let chosen: { entryIso: string; avgPrice: number; remainingShares: number } | null = null
-    if (preferredEntryTime) {
-      chosen = candidates.find(c => c.entryIso === preferredEntryTime) ?? null
-    }
-    if (!chosen) {
-      chosen = candidates[candidates.length - 1]
-      if (basisEntryPrice != null) {
-        chosen = candidates
-          .slice()
-          .sort((a, b) => {
-            const da = Math.abs(a.avgPrice - basisEntryPrice)
-            const db = Math.abs(b.avgPrice - basisEntryPrice)
-            if (da !== db) return da - db
-            return a.entryIso < b.entryIso ? -1 : a.entryIso > b.entryIso ? 1 : 0
-          })[0]
-      }
-    }
+    const chosen = candidates
+      .slice()
+      .sort((a, b) => {
+        const priceDiff = b.avgPrice - a.avgPrice
+        if (priceDiff !== 0) return priceDiff
+        return a.entryIso < b.entryIso ? -1 : a.entryIso > b.entryIso ? 1 : 0
+      })[0]
 
     const matched = Math.min(requestedShares, chosen.remainingShares)
     if (matched <= 0) return null
@@ -426,7 +453,7 @@ function parseCsv(csvStr: string): NormalizedTrade[] {
       if (!match) break
       matchedPieces.push(match)
       remaining -= match.shares
-      // First allocation can honor preferred entry; subsequent ones should flow by lot availability.
+      // Allocations use highest entry price first among lots that existed at the sell time.
       preferred = null
     }
 
@@ -465,10 +492,9 @@ function parseCsv(csvStr: string): NormalizedTrade[] {
   }
 
   appendOpenPositions(merged, openLotsBySymbol, openLegsByEntry, closeLegsByEntry)
-  const normalizedOpenRows = mergeOpenPositionsBySymbol(merged)
 
   const normalized: NormalizedTrade[] = []
-  for (const t of normalizedOpenRows) {
+  for (const t of merged) {
     const withDerived = computeDerived(t)
     if (withDerived.outcome !== 'open') {
       if (!withDerived.entry_time) continue
@@ -478,7 +504,7 @@ function parseCsv(csvStr: string): NormalizedTrade[] {
     normalized.push(withDerived)
   }
 
-  return dedupByConstraintKey(mergeSameExitTrades(normalized))
+  return dedupByConstraintKey(normalized)
 }
 
 // ---------------------------------------------------------------------------
@@ -600,45 +626,7 @@ function dedupByConstraintKey(trades: NormalizedTrade[]): NormalizedTrade[] {
 }
 
 function mergeOpenPositionsBySymbol(trades: NormalizedTrade[]): NormalizedTrade[] {
-  const closed = trades.filter((t) => t.exit_time != null || t.outcome !== 'open')
-  const open = trades.filter((t) => t.exit_time == null && t.outcome === 'open')
-
-  const groups = new Map<string, NormalizedTrade[]>()
-  for (const trade of open) {
-    const key = `${trade.symbol}|${trade.side ?? ''}`
-    if (!groups.has(key)) groups.set(key, [])
-    groups.get(key)!.push(trade)
-  }
-
-  const mergedOpen: NormalizedTrade[] = []
-  for (const [, group] of groups) {
-    if (group.length === 1) {
-      mergedOpen.push(group[0])
-      continue
-    }
-
-    const base = { ...group[0] }
-    const totalShares = group.reduce((sum, trade) => sum + Math.abs(trade.shares ?? 0), 0)
-    const weightedEntryCost = group.reduce(
-      (sum, trade) => sum + Math.abs(trade.shares ?? 0) * (trade.entry_price ?? 0),
-      0
-    )
-    const executionLegs = group
-      .flatMap((trade) => trade.execution_legs ?? [])
-      .sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0))
-
-    base.entry_time = group
-      .map((trade) => trade.entry_time)
-      .filter((value): value is string => value != null)
-      .sort()[0] ?? null
-    base.shares = totalShares > 0 ? totalShares : null
-    base.entry_price = totalShares > 0 ? weightedEntryCost / totalShares : base.entry_price
-    base.pnl = group.reduce((sum, trade) => sum + (trade.pnl ?? 0), 0)
-    base.execution_legs = executionLegs.length > 0 ? executionLegs : null
-    mergedOpen.push(base)
-  }
-
-  return [...closed, ...mergedOpen]
+  return trades
 }
 
 // ---------------------------------------------------------------------------
