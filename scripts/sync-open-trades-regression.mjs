@@ -36,23 +36,35 @@ if (fs.existsSync('./mytrade.csv')) {
 // ---------------------------------------------------------------------------
 function preserveManualFields(newRows, existingRows) {
   const normalizeTs = (t) => t ? t.slice(0, 19) : ''
+
+  const openRowsBySymbol = new Map()
+  for (const existing of existingRows) {
+    if (existing.exit_time != null) continue
+    const list = openRowsBySymbol.get(existing.symbol) ?? []
+    list.push(existing)
+    openRowsBySymbol.set(existing.symbol, list)
+  }
+
+  // Closed: symbol|entry_time|exit_time. Open: symbol|entry_time.
   const byKey = new Map(
     existingRows.map(r => {
-      // Open trades: keyed by symbol only (openDateTime from XML can differ from CSV)
       const key = r.exit_time
         ? `${r.symbol}|${normalizeTs(r.entry_time)}|${normalizeTs(r.exit_time)}`
-        : r.symbol
+        : `${r.symbol}|${normalizeTs(r.entry_time)}`
       return [key, r]
     })
   )
   for (const row of newRows) {
     const key = row.exit_time
       ? `${row.symbol}|${normalizeTs(row.entry_time)}|${normalizeTs(row.exit_time)}`
-      : row.symbol
-    const existing = byKey.get(key)
+      : `${row.symbol}|${normalizeTs(row.entry_time)}`
+    const exactExisting = byKey.get(key)
+    const symbolOpenRows = openRowsBySymbol.get(row.symbol) ?? []
+    const existing = exactExisting ?? (row.exit_time == null && symbolOpenRows.length === 1 ? symbolOpenRows[0] : null)
     if (!existing) continue
     if (row.setup_tag === 'untagged' && existing.setup_tag) row.setup_tag = existing.setup_tag
     if (!row.notes && existing.notes) row.notes = existing.notes
+    if (!row.needs_review && existing.needs_review) row.needs_review = existing.needs_review
     if (row.stop_loss == null && existing.stop_loss != null) row.stop_loss = existing.stop_loss
     if (row.r_multiple == null && existing.r_multiple != null) row.r_multiple = existing.r_multiple
   }
@@ -62,23 +74,23 @@ function preserveManualFields(newRows, existingRows) {
 const existingDbRows = [
   // Open trade with manual override — entry_time is the CSV-stored value
   { symbol: 'GSAT', entry_time: '2026-04-14T14:00:00.000Z', exit_time: null,
-    stop_loss: 77.77, r_multiple: null, setup_tag: 'momentum', notes: 'my note' },
+    stop_loss: 77.77, r_multiple: null, setup_tag: 'momentum', notes: 'my note', needs_review: true },
   // Another open trade with manual stop
   { symbol: 'ADEA', entry_time: '2026-04-07T13:30:00.000Z', exit_time: null,
-    stop_loss: 25.00, r_multiple: null, setup_tag: 'untagged', notes: null },
+    stop_loss: 25.00, r_multiple: null, setup_tag: 'untagged', notes: null, needs_review: false },
   // Closed trade keyed by symbol|entry|exit
   { symbol: 'LITE', entry_time: '2026-04-14T19:00:00.000Z', exit_time: '2026-04-15T13:30:00.000Z',
-    stop_loss: 822.99, r_multiple: -1.13, setup_tag: 'breakout', notes: null },
+    stop_loss: 822.99, r_multiple: -1.13, setup_tag: 'breakout', notes: null, needs_review: false },
 ]
 
 // New rows from IBKR — GSAT entry_time differs by 1 second (XML openDateTime ≠ CSV stored time)
 const newRows = [
   { symbol: 'GSAT', entry_time: '2026-04-14T14:00:01.000Z', exit_time: null,
-    stop_loss: null, r_multiple: null, setup_tag: 'untagged', notes: null },
+    stop_loss: null, r_multiple: null, setup_tag: 'untagged', notes: null, needs_review: false },
   { symbol: 'ADEA', entry_time: '2026-04-07T13:30:00.000Z', exit_time: null,
-    stop_loss: null, r_multiple: null, setup_tag: 'untagged', notes: null },
+    stop_loss: null, r_multiple: null, setup_tag: 'untagged', notes: null, needs_review: false },
   { symbol: 'LITE', entry_time: '2026-04-14T19:00:00.000Z', exit_time: '2026-04-15T13:30:00.000Z',
-    stop_loss: null, r_multiple: null, setup_tag: 'untagged', notes: null },
+    stop_loss: null, r_multiple: null, setup_tag: 'untagged', notes: null, needs_review: false },
 ]
 
 preserveManualFields(newRows, existingDbRows)
@@ -92,6 +104,9 @@ if (gsatRow.setup_tag !== 'momentum') {
 }
 if (gsatRow.notes !== 'my note') {
   fail(`manual GSAT notes not preserved — got ${gsatRow.notes}`)
+}
+if (!gsatRow.needs_review) {
+  fail(`manual GSAT needs_review not preserved after sync (entry_time mismatch) — got ${gsatRow.needs_review}`)
 }
 
 const adeaRow = newRows.find(r => r.symbol === 'ADEA')

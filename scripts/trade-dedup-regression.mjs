@@ -147,8 +147,8 @@ const trades = [
 ]
 
 const normalized = normalizeTradesForDisplay(trades)
-if (normalized.length !== 3) {
-  fail(`expected 3 normalized rows, got ${normalized.length}`)
+if (normalized.length !== 4) {
+  fail(`expected 4 normalized rows, got ${normalized.length}`)
 }
 
 const aaoiRows = normalized.filter((trade) => trade.symbol === 'AAOI')
@@ -174,21 +174,21 @@ if (umacRows[0].outcome !== 'loss') {
 }
 
 const fslyRows = normalized.filter((trade) => trade.symbol === 'FSLY')
-if (fslyRows.length !== 1) {
-  fail(`expected 1 FSLY open row after normalization, got ${fslyRows.length}`)
+if (fslyRows.length !== 2) {
+  fail(`expected 2 separate FSLY open rows after normalization, got ${fslyRows.length}`)
 }
-if ((fslyRows[0].shares ?? 0) !== 2500) {
-  fail(`expected FSLY open shares to merge to 2500, got ${fslyRows[0].shares}`)
+if (fslyRows.reduce((sum, trade) => sum + (trade.shares ?? 0), 0) !== 2500) {
+  fail(`expected separate FSLY open rows to total 2500 shares, got ${fslyRows.reduce((sum, trade) => sum + (trade.shares ?? 0), 0)}`)
 }
 
 const cleanupGroups = dedupeTradeRowsForCleanup(trades)
-if (cleanupGroups.length !== 3) {
-  fail(`expected 3 cleanup groups, got ${cleanupGroups.length}`)
+if (cleanupGroups.length !== 2) {
+  fail(`expected 2 cleanup groups, got ${cleanupGroups.length}`)
 }
 
 const deletedRows = cleanupGroups.reduce((sum, group) => sum + group.removeIds.length, 0)
-if (deletedRows !== 4) {
-  fail(`expected cleanup to remove 4 duplicate rows, got ${deletedRows}`)
+if (deletedRows !== 3) {
+  fail(`expected cleanup to remove 3 duplicate rows, got ${deletedRows}`)
 }
 
 console.log('trade-dedup-regression: PASS')

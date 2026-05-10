@@ -59,14 +59,22 @@ export async function POST(request: NextRequest) {
         .eq('user_id', user.id)
         .in('symbol', touchedSymbols)
 
-      // Closed trades: keyed by symbol|entry_time|exit_time (precise dedup)
-      // Open trades: keyed by symbol only — openDateTime from XML may differ from CSV-stored entry_time
       type ExistingRow = { symbol: string; entry_time: string | null; exit_time: string | null; stop_loss: number | null; r_multiple: number | null; setup_tag: string | null; notes: string | null; needs_review: boolean | null }
+      const openRowsBySymbol = new Map<string, ExistingRow[]>()
+      for (const existing of existingRows ?? []) {
+        if (existing.exit_time != null) continue
+        const list = openRowsBySymbol.get(existing.symbol) ?? []
+        list.push(existing)
+        openRowsBySymbol.set(existing.symbol, list)
+      }
+
+      // Closed trades: keyed by symbol|entry_time|exit_time.
+      // Open trades: keyed by symbol|entry_time so add-on lots can keep separate metadata.
       const byKey = new Map<string, ExistingRow>(
         (existingRows ?? []).map((r) => {
           const key = r.exit_time
             ? `${r.symbol}|${normalizeTs(r.entry_time)}|${normalizeTs(r.exit_time)}`
-            : r.symbol
+            : `${r.symbol}|${normalizeTs(r.entry_time)}`
           return [key, r] as const
         })
       )
@@ -74,8 +82,10 @@ export async function POST(request: NextRequest) {
       for (const row of rows) {
         const key = row.exit_time
           ? `${row.symbol}|${normalizeTs(row.entry_time)}|${normalizeTs(row.exit_time)}`
-          : row.symbol
-        const existing = byKey.get(key)
+          : `${row.symbol}|${normalizeTs(row.entry_time)}`
+        const exactExisting = byKey.get(key)
+        const symbolOpenRows = openRowsBySymbol.get(row.symbol) ?? []
+        const existing = exactExisting ?? (row.exit_time == null && symbolOpenRows.length === 1 ? symbolOpenRows[0] : null)
         if (!existing) continue
         if (row.setup_tag === 'untagged' && existing.setup_tag) row.setup_tag = existing.setup_tag
         if (!row.notes && existing.notes) row.notes = existing.notes
