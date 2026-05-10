@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { parseFlexCsv } from '@/lib/ibkr/flex'
 import { enrichOpenTradesWithStopLosses } from '@/lib/market/stop-loss'
+import { createTradeSnapshot } from '@/lib/trade-snapshots'
 import { NextRequest, NextResponse } from 'next/server'
 
 type UpsertRow = {
@@ -35,10 +36,14 @@ export async function POST(request: NextRequest) {
     }
 
     const csvText = await file.text()
+    const snapshot = await createTradeSnapshot(supabase, user.id, {
+      label: `Before CSV upload ${new Date().toISOString()}`,
+      reason: 'csv-upload',
+    })
     const trades = parseFlexCsv(csvText)
 
     if (!trades.length) {
-      return NextResponse.json({ upserted: 0, skipped: 0 })
+      return NextResponse.json({ upserted: 0, skipped: 0, snapshotId: snapshot?.id ?? null })
     }
 
     const rows: UpsertRow[] = trades.map(t => ({ ...t, user_id: user.id, needs_review: false }))
@@ -111,7 +116,7 @@ export async function POST(request: NextRequest) {
     const upserted = data?.length ?? 0
     const skipped = trades.length - upserted
 
-    return NextResponse.json({ upserted, skipped })
+    return NextResponse.json({ upserted, skipped, snapshotId: snapshot?.id ?? null })
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
     return NextResponse.json({ error: msg }, { status: 500 })

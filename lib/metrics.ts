@@ -100,8 +100,8 @@ export function computeSummary(trades: Trade[]): SummaryStats {
 
 export function equityCurve(trades: Trade[]): EquityPoint[] {
   const sorted = [...closedTrades(trades)].sort((a, b) => {
-    const ta = a.entryTime ?? a.exitTime ?? ''
-    const tb = b.entryTime ?? b.exitTime ?? ''
+    const ta = a.exitTime ?? a.entryTime ?? ''
+    const tb = b.exitTime ?? b.entryTime ?? ''
     return ta < tb ? -1 : ta > tb ? 1 : 0
   })
 

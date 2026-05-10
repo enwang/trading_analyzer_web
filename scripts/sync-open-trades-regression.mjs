@@ -116,7 +116,7 @@ const enriched = await enrichOpenTradesWithStopLosses(
     // GSAT: manual stop_loss already set — enrichment must skip it
     { symbol: 'GSAT', entry_time: '2026-04-14T14:00:01.000Z', exit_time: null, side: 'long', stop_loss: 77.77 },
     // ADEA: no stop_loss — enrichment must calculate one
-    { symbol: 'ADEA', entry_time: '2026-04-07T13:30:00.000Z', exit_time: null, side: 'long', stop_loss: null },
+    { symbol: 'ADEA', entry_time: '2026-04-07T13:30:00.000Z', exit_time: null, side: 'long', entry_price: 24.50, shares: 1000, stop_loss: null },
     // LITE: closed trade — enrichment must skip it
     { symbol: 'LITE', entry_time: '2026-04-14T19:00:00.000Z', exit_time: '2026-04-15T13:30:00.000Z', side: 'long', stop_loss: null },
   ],
@@ -131,15 +131,15 @@ const enrichedGsat = enriched.find(r => r.symbol === 'GSAT')
 if (enrichedGsat.stop_loss !== 77.77) {
   fail(`enrichment overwrote manual GSAT stop_loss — got ${enrichedGsat.stop_loss}`)
 }
-if (lookupCalls !== 1) {
-  fail(`expected exactly 1 market lookup (ADEA only), got ${lookupCalls}`)
+if (lookupCalls !== 0) {
+  fail(`expected no legacy market lookups, got ${lookupCalls}`)
 }
 const enrichedAdea = enriched.find(r => r.symbol === 'ADEA')
 if (enrichedAdea.stop_loss == null) {
   fail('ADEA should have received a calculated stop_loss from enrichment')
 }
-if (enrichedAdea.stop_loss !== 24.49) {
-  fail(`expected ADEA calculated stop_loss 24.49 (low 24.50 - 0.01), got ${enrichedAdea.stop_loss}`)
+if (enrichedAdea.stop_loss !== 22.50) {
+  fail(`expected ADEA $2000-risk stop_loss 22.50, got ${enrichedAdea.stop_loss}`)
 }
 
 // ---------------------------------------------------------------------------

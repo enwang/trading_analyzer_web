@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 
+import { createTradeSnapshot } from '@/lib/trade-snapshots'
 import { dedupeTradeRowsForCleanup, pickTradeMetadata } from '@/lib/trades'
 import { createClient } from '@/lib/supabase/server'
 import { rowToTrade, type TradeRow } from '@/types/trade'
@@ -28,6 +29,13 @@ export async function POST() {
     const allRows = (rows ?? []) as TradeRow[]
     const trades = allRows.map(rowToTrade)
     const groups = dedupeTradeRowsForCleanup(trades)
+
+    const snapshot = groups.length > 0
+      ? await createTradeSnapshot(supabase, user.id, {
+          label: `Before duplicate cleanup ${new Date().toISOString()}`,
+          reason: 'cleanup',
+        })
+      : null
 
     let deleted = 0
     let cleanedGroups = 0
@@ -86,7 +94,7 @@ export async function POST() {
       cleanedGroups += 1
     }
 
-    return NextResponse.json({ deleted, groups: cleanedGroups })
+    return NextResponse.json({ deleted, groups: cleanedGroups, snapshotId: snapshot?.id ?? null })
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
     return NextResponse.json({ error: msg }, { status: 500 })

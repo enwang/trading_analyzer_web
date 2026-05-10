@@ -32,7 +32,15 @@ export interface StopLossEnrichmentRow {
   entry_time: string | null
   exit_time: string | null
   side: string | null
+  entry_price?: number | null
+  shares?: number | null
   stop_loss?: number | null
+}
+
+export const DEFAULT_INITIAL_RISK_AMOUNT = 2000
+
+function round2(n: number) {
+  return Math.round(n * 100) / 100
 }
 
 function formatDateInTimeZone(iso: string, timeZone: string) {
@@ -115,32 +123,56 @@ export async function fetchPreEntryExtremes(symbol: string, entryTime: string): 
 }
 
 export function suggestedStopLoss(side: string | null, preEntry: PreEntryExtremes): number | null {
-  if (side === 'long') return Math.round((preEntry.low - 0.01) * 100) / 100
-  if (side === 'short') return Math.round((preEntry.high + 0.01) * 100) / 100
+  if (side === 'long') return round2(preEntry.low - 0.01)
+  if (side === 'short') return round2(preEntry.high + 0.01)
   return null
+}
+
+export function suggestedStopLossFromRisk(
+  side: string | null,
+  entryPrice: number | null | undefined,
+  shares: number | null | undefined,
+  riskAmount = DEFAULT_INITIAL_RISK_AMOUNT
+): number | null {
+  if (!side || entryPrice == null || shares == null) return null
+  const absShares = Math.abs(shares)
+  if (!Number.isFinite(entryPrice) || !Number.isFinite(absShares) || entryPrice <= 0 || absShares <= 0) return null
+
+  const riskPerShare = riskAmount / absShares
+  if (side === 'long') {
+    const stopLoss = entryPrice - riskPerShare
+    return stopLoss > 0 ? round2(stopLoss) : null
+  }
+  if (side === 'short') return round2(entryPrice + riskPerShare)
+  return null
+}
+
+export function initialRiskFromStopLoss(
+  side: string | null,
+  entryPrice: number | null | undefined,
+  shares: number | null | undefined,
+  stopLoss: number | null | undefined
+): number | null {
+  if (!side || entryPrice == null || shares == null || stopLoss == null) return null
+  const absShares = Math.abs(shares)
+  if (!Number.isFinite(entryPrice) || !Number.isFinite(absShares) || !Number.isFinite(stopLoss) || absShares <= 0) return null
+
+  const riskPerShare = side === 'long' ? entryPrice - stopLoss : stopLoss - entryPrice
+  if (!Number.isFinite(riskPerShare) || riskPerShare <= 0) return null
+  return round2(Math.abs(riskPerShare * absShares))
 }
 
 export async function enrichOpenTradesWithStopLosses<T extends StopLossEnrichmentRow>(
   rows: T[],
-  lookup: (symbol: string, entryTime: string) => Promise<PreEntryExtremes | null> = fetchPreEntryExtremes
+  _lookup: (symbol: string, entryTime: string) => Promise<PreEntryExtremes | null> = fetchPreEntryExtremes
 ): Promise<T[]> {
-  const cache = new Map<string, PreEntryExtremes | null>()
-
   return Promise.all(
     rows.map(async (row) => {
       if (row.exit_time != null) return row
       if (row.stop_loss != null) return row
-      if (!row.entry_time || !row.side) return row
+      if (!row.side) return row
 
-      const key = `${row.symbol}|${row.entry_time}`
-      let preEntry = cache.get(key)
-      if (preEntry === undefined) {
-        preEntry = await lookup(row.symbol, row.entry_time)
-        cache.set(key, preEntry)
-      }
-      if (!preEntry) return row
-
-      const stopLoss = suggestedStopLoss(row.side, preEntry)
+      const stopLoss = suggestedStopLossFromRisk(row.side, row.entry_price, row.shares)
       if (stopLoss == null) return row
       return { ...row, stop_loss: stopLoss }
     })

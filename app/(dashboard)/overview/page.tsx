@@ -7,6 +7,7 @@ import { EquityCurve } from '@/components/charts/equity-curve'
 import { DailyPnlByTimezone } from '@/components/charts/daily-pnl-by-timezone'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { OverviewSyncButton } from '@/components/overview/overview-sync-button'
+import { OpenPnlCard } from '@/components/overview/open-pnl-card'
 
 function fmtMoney(n: number) {
   const abs = Math.abs(n)
@@ -62,6 +63,15 @@ export default async function OverviewPage() {
   const stats = computeSummary(trades)
   const equity = equityCurve(trades)
   const closedTrades = trades.filter((t) => t.exitTime && t.pnl != null)
+  const openTrades = trades
+    .filter((t) => t.exitTime == null || t.outcome === 'open')
+    .map((t) => ({
+      symbol: t.symbol,
+      side: t.side,
+      shares: t.shares,
+      entryPrice: t.entryPrice,
+      realizedPnl: t.pnl,
+    }))
   const largestWinTrade = closedTrades.length
     ? closedTrades.reduce((best, t) => ((best == null || (t.pnl ?? -Infinity) > (best.pnl ?? -Infinity)) ? t : best), null as typeof closedTrades[number] | null)
     : null
@@ -84,12 +94,13 @@ export default async function OverviewPage() {
           trend={stats.netPnl >= 0 ? 'up' : 'down'}
           sub={stats.dateRange}
         />
+        <OpenPnlCard trades={openTrades} />
         <KpiCard
           label="Win Rate"
           value={fmtPct(stats.winRate)}
           sub={stats.nBreakevens > 0 ? `${stats.nWins}W / ${stats.nLosses}L / ${stats.nBreakevens}B` : `${stats.nWins}W / ${stats.nLosses}L`}
         />
-        <KpiCard label="Profit Factor" value={fmtPf(stats.profitFactor)} />
+        <KpiCard label="Avg Win/Loss" value={fmtPf(stats.payoffRatio)} />
         <KpiCard
           label="Expectancy"
           value={fmtMoney(stats.expectancy)}

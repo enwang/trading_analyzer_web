@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { fetchFlexTrades } from '@/lib/ibkr/flex'
 import { enrichOpenTradesWithStopLosses } from '@/lib/market/stop-loss'
+import { createTradeSnapshot } from '@/lib/trade-snapshots'
 import { NextResponse } from 'next/server'
 
 type UpsertRow = {
@@ -43,6 +44,10 @@ export async function GET(request: Request) {
 
   for (const s of settings ?? []) {
     try {
+      const snapshot = await createTradeSnapshot(supabase, s.user_id, {
+        label: `Before scheduled sync ${new Date().toISOString()}`,
+        reason: 'ibkr-sync',
+      })
       const trades = await fetchFlexTrades(s.ibkr_token, s.ibkr_query_id)
 
       let upserted = 0
@@ -122,7 +127,7 @@ export async function GET(request: Request) {
         })
         .eq('user_id', s.user_id)
 
-      results.push({ user_id: s.user_id, upserted, skipped: trades.length - upserted })
+      results.push({ user_id: s.user_id, upserted, skipped: trades.length - upserted, snapshotId: snapshot?.id ?? null })
     } catch (e) {
       results.push({
         user_id: s.user_id,
