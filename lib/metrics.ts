@@ -35,7 +35,7 @@ export function computeSummary(trades: Trade[]): SummaryStats {
   const avgLoss = nLosses > 0 ? -(grossLoss / nLosses) : 0
   const payoffRatio = nLosses > 0 && avgLoss !== 0 ? Math.abs(avgWin / avgLoss) : Infinity
 
-  const lossRate = 1 - winRate
+  const lossRate = total > 0 ? nLosses / total : 0
   const expectancy = winRate * avgWin + lossRate * avgLoss
 
   const pnls = closed.map(t => t.pnl ?? 0)

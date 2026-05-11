@@ -6,11 +6,12 @@ import { TradesTable } from '@/components/trades/trades-table'
 export default async function TradesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ date?: string; tz?: string }>
+  searchParams: Promise<{ date?: string; tz?: string; symbol?: string }>
 }) {
-  const { date, tz } = await searchParams
+  const { date, tz, symbol } = await searchParams
   const safeDate = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null
   const safeTz = tz && /^[A-Za-z_]+\/[A-Za-z_]+(?:\/[A-Za-z_]+)?$/.test(tz) ? tz : null
+  const safeSymbol = symbol && /^[A-Za-z0-9.^-]{1,10}$/.test(symbol) ? symbol.toUpperCase() : null
   const supabase = await createClient()
   const {
     data: { user },
@@ -26,6 +27,7 @@ export default async function TradesPage({
   const trades = normalizeTradesForDisplay((rows ?? [])
     .map(rowToTrade))
     .filter((t) => {
+      if (safeSymbol && t.symbol !== safeSymbol) return false
       if (!safeDate) return true
       const tradeDate = t.exitTime
         ? new Intl.DateTimeFormat('en-CA', {

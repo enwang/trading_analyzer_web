@@ -102,7 +102,7 @@ export default async function OverviewPage() {
         />
         <KpiCard label="Avg Win/Loss" value={fmtPf(stats.payoffRatio)} />
         <KpiCard
-          label="Expectancy"
+          label="Avg net trade P&L"
           value={fmtMoney(stats.expectancy)}
           trend={stats.expectancy >= 0 ? 'up' : 'down'}
         />
