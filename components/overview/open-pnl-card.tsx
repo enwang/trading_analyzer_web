@@ -76,7 +76,7 @@ export function OpenPnlCard({ trades }: { trades: OpenTradeForPnl[] }) {
         <p className="text-muted-foreground mt-0.5 text-xs">
           Unrealized {fmtMoneySigned(unrealized)} · Partial {fmtMoneySigned(partialGains)}
         </p>
-        <p className="text-muted-foreground mt-0.5 text-xs">{priced}/{trades.length} open priced</p>
+        <p className="text-muted-foreground mt-0.5 text-xs">{trades.length} open</p>
       </CardContent>
     </Card>
   )

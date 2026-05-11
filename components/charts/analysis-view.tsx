@@ -1,6 +1,8 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import {
   LineChart,
   Line,
@@ -310,15 +312,9 @@ function SummaryGrid({
     avgNetTradePnl: number
     avgDailyVolume: number
     winPct: number
-    avgDailyWinLoss: number
     avgDailyNetPnl: number
     loggedDays: number
-    avgDailyWinPct: number
-    dayWinCount: number
-    dayLossCount: number
-    dayCount: number
     avgTradeWinLoss: number
-    avgPlannedRMultiple: number
     maxDailyNetDrawdown: number
     profitFactor: number
     avgHoldTimeMin: number | null
@@ -329,30 +325,19 @@ function SummaryGrid({
   const columns = [
     [
       { label: 'Net P&L', value: fmtMoney(summary.netPnl) },
-      { label: 'Win %', value: `${summary.winPct.toFixed(2)}%` },
-      {
-        label: 'Avg daily win %',
-        value: `${summary.avgDailyWinPct.toFixed(2)}% (${summary.dayWinCount}/${summary.dayLossCount}/${summary.dayCount})`,
-      },
-      { label: 'Profit factor', value: fmtRatio(summary.profitFactor) },
-    ],
-    [
-      { label: 'Trade expectancy', value: fmtMoney(summary.tradeExpectancy) },
-      { label: 'Avg daily win/loss', value: fmtRatio(summary.avgDailyWinLoss) },
-      { label: 'Avg trade win/loss', value: fmtRatio(summary.avgTradeWinLoss) },
-      { label: 'Avg hold time', value: fmtHold(summary.avgHoldTimeMin) },
-    ],
-    [
       { label: 'Avg net trade P&L', value: fmtMoney(summary.avgNetTradePnl) },
-      { label: 'Avg daily net P&L', value: fmtMoney(summary.avgDailyNetPnl) },
-      { label: 'Avg. planned r-multiple', value: `${summary.avgPlannedRMultiple.toFixed(0)}R` },
+    ],
+    [
+      { label: 'Win %', value: `${summary.winPct.toFixed(2)}%` },
+      { label: 'Avg win/loss rate', value: fmtRatio(summary.avgTradeWinLoss) },
       { label: 'Avg. realized r-multiple', value: `${summary.avgRealizedRMultiple.toFixed(2)}R` },
     ],
     [
-      { label: 'Avg daily volume', value: summary.avgDailyVolume.toFixed(2) },
-      { label: 'Logged days', value: String(summary.loggedDays) },
+      { label: 'Avg daily net P&L', value: fmtMoney(summary.avgDailyNetPnl) },
       { label: 'Max daily net drawdown', value: fmtMoney(summary.maxDailyNetDrawdown) },
-      { label: 'Avg daily net drawdown', value: fmtMoney(summary.avgDailyNetDrawdown) },
+    ],
+    [
+      { label: 'Avg hold time', value: fmtHold(summary.avgHoldTimeMin) },
     ],
   ]
 
@@ -380,6 +365,9 @@ function SummaryGrid({
 
 export function AnalysisView({ data }: { data: AnalysisData }) {
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+  const [expandedDay, setExpandedDay] = useState<string | null>(null)
+  const searchParams = useSearchParams()
+  const initialTab = searchParams.get('tab') ?? 'summary'
 
   const computed = useMemo(() => {
     const sorted = [...data.closedTrades].sort((a, b) => {
@@ -408,9 +396,8 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
     let lossCount = 0
 
     for (const t of sorted) {
-      const time = t.exitTime ?? t.entryTime
-      if (!time) continue
-      const key = dateKeyInTimeZone(time, timeZone)
+      if (!t.exitTime) continue
+      const key = dateKeyInTimeZone(t.exitTime, timeZone)
       const bucket = dayMap.get(key) ?? {
         date: key,
         pnl: 0,
@@ -492,7 +479,7 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
       : 0
 
     return {
-      dayRows,
+      dayRows: [...dayRows].reverse(),
       trends,
       summary: {
         ...data.summaryBase,
@@ -509,7 +496,7 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
         dayCount: dayRows.length,
         avgDailyWinPct: dayRows.length ? (winDays.length / dayRows.length) * 100 : 0,
       },
-      trades: sorted,
+      trades: [...sorted].reverse(),
     }
   }, [data.closedTrades, data.summaryBase, timeZone])
 
@@ -518,7 +505,7 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
   }
 
   return (
-    <Tabs defaultValue="summary" className="space-y-4">
+    <Tabs defaultValue={initialTab} className="space-y-4">
       <TabsList variant="line" className="w-full justify-start">
         <TabsTrigger value="summary" className="max-w-fit px-4">Summary</TabsTrigger>
         <TabsTrigger value="days" className="max-w-fit px-4">Days</TabsTrigger>
@@ -558,16 +545,47 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
               <TableBody>
                 {computed.dayRows.map((row) => {
                   const winPct = row.trades > 0 ? (row.wins / row.trades) * 100 : 0
+                  const isExpanded = expandedDay === row.date
+                  const dayTrades = computed.trades.filter((t) =>
+                    t.exitTime ? dateKeyInTimeZone(t.exitTime, timeZone) === row.date : false
+                  )
                   return (
-                    <TableRow key={row.date}>
-                      <TableCell className="font-medium">{row.date}</TableCell>
-                      <TableCell className="text-right">{row.trades}</TableCell>
-                      <TableCell className="text-right">{winPct.toFixed(1)}%</TableCell>
-                      <TableCell className={`text-right font-medium ${row.pnl >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                        {fmtMoney(row.pnl)}
-                      </TableCell>
-                      <TableCell className="text-right">{row.volume.toFixed(0)}</TableCell>
-                    </TableRow>
+                    <>
+                      <TableRow
+                        key={row.date}
+                        className="cursor-pointer hover:bg-muted/50"
+                        onClick={() => setExpandedDay(isExpanded ? null : row.date)}
+                      >
+                        <TableCell className="font-medium">{row.date}</TableCell>
+                        <TableCell className="text-right">{row.trades}</TableCell>
+                        <TableCell className="text-right">{winPct.toFixed(1)}%</TableCell>
+                        <TableCell className={`text-right font-medium ${row.pnl >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                          {fmtMoney(row.pnl)}
+                        </TableCell>
+                        <TableCell className="text-right">{row.volume.toFixed(0)}</TableCell>
+                      </TableRow>
+                      {isExpanded && dayTrades.map((t) => (
+                        <TableRow key={t.id} className="bg-muted/30">
+                          <TableCell className="pl-8">
+                            <Link
+                              href={`/trades?symbol=${encodeURIComponent(t.symbol)}&date=${row.date}&tz=${encodeURIComponent(timeZone)}`}
+                              className="font-medium hover:underline"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {t.symbol}
+                            </Link>
+                          </TableCell>
+                          <TableCell className="text-right">{Math.abs(t.shares).toFixed(0)}</TableCell>
+                          <TableCell className="text-right">
+                            {`${(t.pnl / 2000).toFixed(2)}R`}
+                          </TableCell>
+                          <TableCell className={`text-right font-medium ${t.pnl >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                            {fmtMoney(t.pnl)}
+                          </TableCell>
+                          <TableCell />
+                        </TableRow>
+                      ))}
+                    </>
                   )
                 })}
               </TableBody>
@@ -593,12 +611,16 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
               <TableBody>
                 {computed.trades.map((t) => (
                   <TableRow key={t.id}>
-                    <TableCell className="font-medium">{t.symbol}</TableCell>
+                    <TableCell className="font-medium">
+                      <Link href={`/trades?symbol=${encodeURIComponent(t.symbol)}`} className="hover:underline">
+                        {t.symbol}
+                      </Link>
+                    </TableCell>
                     <TableCell>{formatDateCell(t.entryTime, timeZone)}</TableCell>
                     <TableCell>{formatDateCell(t.exitTime, timeZone)}</TableCell>
                     <TableCell className="text-right">{Math.abs(t.shares).toFixed(0)}</TableCell>
-                    <TableCell className={`text-right ${t.rMultiple == null ? '' : t.rMultiple >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                      {t.rMultiple == null ? '—' : `${t.rMultiple.toFixed(2)}R`}
+                    <TableCell className={`text-right ${t.pnl >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                      {`${(t.pnl / 2000).toFixed(2)}R`}
                     </TableCell>
                     <TableCell className={`text-right font-medium ${t.pnl >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                       {fmtMoney(t.pnl)}

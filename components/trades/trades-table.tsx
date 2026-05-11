@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { Trash2 } from 'lucide-react'
+import { ArrowLeft, Trash2 } from 'lucide-react'
 
 import type { Trade } from '@/types/trade'
 import { Badge } from '@/components/ui/badge'
@@ -878,9 +878,22 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-xl font-semibold">
-          {title} ({filtered.length})
-        </h1>
+        <div className="flex items-center gap-3">
+          {(searchParams.get('symbol') || searchParams.get('date')) && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => router.push(searchParams.get('date') ? '/analysis?tab=days' : '/analysis?tab=trades')}
+              className="gap-1 px-2"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Back
+            </Button>
+          )}
+          <h1 className="text-xl font-semibold">
+            {title} ({filtered.length})
+          </h1>
+        </div>
         <div className="flex items-center gap-2">
           {trades.some((t) => t.stopLoss == null && t.entryTime != null && t.side != null) && (
             <Button
