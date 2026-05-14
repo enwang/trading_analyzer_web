@@ -4,18 +4,44 @@ import { enrichOpenTradesWithStopLosses } from '@/lib/market/stop-loss'
 import { createTradeSnapshot, pruneOldSnapshots } from '@/lib/trade-snapshots'
 import { NextResponse } from 'next/server'
 
-function computeOpenSharesFromLegs(legs: unknown): number | null {
+type Leg = { action?: string; shares?: number; price?: number }
+
+function parseLegs(legs: unknown): Leg[] | null {
   if (!Array.isArray(legs) || legs.length === 0) return null
+  return legs.filter((l): l is Leg => !!l && typeof l === 'object')
+}
+
+function computeOpenSharesFromLegs(legs: unknown): number | null {
+  const parsed = parseLegs(legs)
+  if (!parsed) return null
   let net = 0
-  for (const leg of legs) {
-    if (!leg || typeof leg !== 'object') continue
-    const action = (leg as { action?: string }).action
-    const shares = (leg as { shares?: number }).shares
-    if (typeof shares !== 'number') continue
-    if (action === 'BUY') net += shares
-    else if (action === 'SELL') net -= shares
+  for (const leg of parsed) {
+    if (typeof leg.shares !== 'number') continue
+    if (leg.action === 'BUY') net += leg.shares
+    else if (leg.action === 'SELL') net -= leg.shares
   }
   return Math.abs(net)
+}
+
+// Realized P&L from partial closes, assuming a long position with weighted-avg buy basis
+function computeRealizedPnlFromLegs(legs: unknown): number | null {
+  const parsed = parseLegs(legs)
+  if (!parsed) return null
+  let totalBuyShares = 0
+  let totalBuyCost = 0
+  for (const leg of parsed) {
+    if (leg.action !== 'BUY' || typeof leg.shares !== 'number' || typeof leg.price !== 'number') continue
+    totalBuyShares += leg.shares
+    totalBuyCost += leg.shares * leg.price
+  }
+  if (totalBuyShares <= 0) return null
+  const avgBuy = totalBuyCost / totalBuyShares
+  let pnl = 0
+  for (const leg of parsed) {
+    if (leg.action !== 'SELL' || typeof leg.shares !== 'number' || typeof leg.price !== 'number') continue
+    pnl += (leg.price - avgBuy) * leg.shares
+  }
+  return pnl
 }
 
 type UpsertRow = {
@@ -113,10 +139,14 @@ export async function GET(request: Request) {
             if (!row.needs_review && existing.needs_review) row.needs_review = existing.needs_review
             if (row.stop_loss == null && existing.stop_loss != null) row.stop_loss = existing.stop_loss
             if (row.r_multiple == null && existing.r_multiple != null) row.r_multiple = existing.r_multiple
-            // Preserve manually-corrected execution_legs (and derived shares) for trades flagged for review or with notes
+            // Preserve manually-corrected execution_legs (and derived shares/pnl) for trades flagged for review or with notes
             if ((existing.needs_review || existing.notes) && existing.execution_legs != null) {
               row.execution_legs = existing.execution_legs
               row.shares = computeOpenSharesFromLegs(existing.execution_legs) ?? row.shares
+              if (row.exit_time == null) {
+                const realized = computeRealizedPnlFromLegs(existing.execution_legs)
+                if (realized != null) row.pnl = realized
+              }
             }
           }
 
