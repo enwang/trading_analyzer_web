@@ -55,11 +55,11 @@ export async function POST(request: NextRequest) {
       // Fetch ALL existing trades for touched symbols (open and closed) to preserve manual fields
       const { data: existingRows } = await supabase
         .from('trades')
-        .select('symbol, entry_time, exit_time, stop_loss, r_multiple, setup_tag, notes, needs_review')
+        .select('symbol, entry_time, exit_time, stop_loss, r_multiple, setup_tag, notes, needs_review, execution_legs')
         .eq('user_id', user.id)
         .in('symbol', touchedSymbols)
 
-      type ExistingRow = { symbol: string; entry_time: string | null; exit_time: string | null; stop_loss: number | null; r_multiple: number | null; setup_tag: string | null; notes: string | null; needs_review: boolean | null }
+      type ExistingRow = { symbol: string; entry_time: string | null; exit_time: string | null; stop_loss: number | null; r_multiple: number | null; setup_tag: string | null; notes: string | null; needs_review: boolean | null; execution_legs: unknown | null }
       const openRowsBySymbol = new Map<string, ExistingRow[]>()
       for (const existing of existingRows ?? []) {
         if (existing.exit_time != null) continue
@@ -92,6 +92,10 @@ export async function POST(request: NextRequest) {
         if (!row.needs_review && existing.needs_review) row.needs_review = existing.needs_review
         if (row.stop_loss == null && existing.stop_loss != null) row.stop_loss = existing.stop_loss
         if (row.r_multiple == null && existing.r_multiple != null) row.r_multiple = existing.r_multiple
+        // Preserve manually-corrected execution_legs for trades flagged for review or with notes
+        if ((existing.needs_review || existing.notes) && existing.execution_legs != null) {
+          row.execution_legs = existing.execution_legs
+        }
       }
 
       const enrichedRows = await enrichOpenTradesWithStopLosses(rows)
