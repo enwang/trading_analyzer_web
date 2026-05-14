@@ -322,39 +322,27 @@ function SummaryGrid({
     avgDailyNetDrawdown: number
   }
 }) {
-  const columns = [
-    [
-      { label: 'Net P&L', value: fmtMoney(summary.netPnl) },
-      { label: 'Avg net trade P&L', value: fmtMoney(summary.avgNetTradePnl) },
-    ],
-    [
-      { label: 'Win %', value: `${summary.winPct.toFixed(2)}%` },
-      { label: 'Avg win/loss rate', value: fmtRatio(summary.avgTradeWinLoss) },
-      { label: 'Avg. realized r-multiple', value: `${summary.avgRealizedRMultiple.toFixed(2)}R` },
-    ],
-    [
-      { label: 'Avg daily net P&L', value: fmtMoney(summary.avgDailyNetPnl) },
-      { label: 'Max daily net drawdown', value: fmtMoney(summary.maxDailyNetDrawdown) },
-    ],
-    [
-      { label: 'Avg hold time', value: fmtHold(summary.avgHoldTimeMin) },
-    ],
+  const items = [
+    { label: 'Net P&L', value: fmtMoney(summary.netPnl) },
+    { label: 'Win %', value: `${summary.winPct.toFixed(2)}%` },
+    { label: 'Avg daily net P&L', value: fmtMoney(summary.avgDailyNetPnl) },
+    { label: 'Avg hold time', value: fmtHold(summary.avgHoldTimeMin) },
+    { label: 'Avg net trade P&L', value: fmtMoney(summary.avgNetTradePnl) },
+    { label: 'Avg win/loss rate', value: fmtRatio(summary.avgTradeWinLoss) },
+    { label: 'Avg. realized r-multiple', value: `${summary.avgRealizedRMultiple.toFixed(2)}R` },
+    { label: 'Max daily net drawdown', value: fmtMoney(summary.maxDailyNetDrawdown) },
   ]
 
   return (
     <Card>
       <CardContent className="p-0">
-        <div className="grid divide-y sm:grid-cols-2 sm:divide-y-0 lg:grid-cols-4 lg:divide-x">
-          {columns.map((col, i) => (
-            <div key={i} className="space-y-10 p-4">
-              {col.map((item) => (
-                <div key={item.label}>
-                  <div className="text-muted-foreground text-sm">{item.label}</div>
-                  <div className="text-xl leading-tight font-semibold tracking-tight sm:text-2xl lg:text-[1.6rem]">
-                    {item.value}
-                  </div>
-                </div>
-              ))}
+        <div className="grid grid-cols-2 sm:grid-cols-4">
+          {items.map((item) => (
+            <div key={item.label} className="border-b border-r p-4 last:border-b-0 [&:nth-child(4n)]:border-r-0 sm:[&:nth-last-child(-n+4)]:border-b-0">
+              <div className="text-muted-foreground text-sm">{item.label}</div>
+              <div className="text-xl leading-tight font-semibold tracking-tight sm:text-2xl lg:text-[1.6rem]">
+                {item.value}
+              </div>
             </div>
           ))}
         </div>
