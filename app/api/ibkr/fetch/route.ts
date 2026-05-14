@@ -4,6 +4,20 @@ import { enrichOpenTradesWithStopLosses } from '@/lib/market/stop-loss'
 import { createTradeSnapshot } from '@/lib/trade-snapshots'
 import { NextRequest, NextResponse } from 'next/server'
 
+function computeOpenSharesFromLegs(legs: unknown): number | null {
+  if (!Array.isArray(legs) || legs.length === 0) return null
+  let net = 0
+  for (const leg of legs) {
+    if (!leg || typeof leg !== 'object') continue
+    const action = (leg as { action?: string }).action
+    const shares = (leg as { shares?: number }).shares
+    if (typeof shares !== 'number') continue
+    if (action === 'BUY') net += shares
+    else if (action === 'SELL') net -= shares
+  }
+  return Math.abs(net)
+}
+
 type UpsertRow = {
   user_id: string
   symbol: string
@@ -96,9 +110,10 @@ export async function POST(request: NextRequest) {
         if (!row.needs_review && existing.needs_review) row.needs_review = existing.needs_review
         if (row.stop_loss == null && existing.stop_loss != null) row.stop_loss = existing.stop_loss
         if (row.r_multiple == null && existing.r_multiple != null) row.r_multiple = existing.r_multiple
-        // Preserve manually-corrected execution_legs for trades flagged for review or with notes
+        // Preserve manually-corrected execution_legs (and derived shares) for trades flagged for review or with notes
         if ((existing.needs_review || existing.notes) && existing.execution_legs != null) {
           row.execution_legs = existing.execution_legs
+          row.shares = computeOpenSharesFromLegs(existing.execution_legs) ?? row.shares
         }
       }
 
