@@ -40,16 +40,19 @@ export default async function AnalysisPage() {
   const trades = normalizeTradesForDisplay(allTrades)
   const summary = computeSummary(trades)
 
-  // Monthly recap: returns from NAV daily, stats from normalized trades.
-  const monthlyReturns = computeMonthlyReturns(navRows ?? [], navChangeRows ?? [])
+  // Monthly recap: pick the latest year that has trade activity first, then
+  // compute monthly returns scoped to that year so the deposit "first month"
+  // attribution lands on the first month being displayed (not a stray
+  // year-end NAV snapshot from the prior year).
   const monthlyStats = computeMonthlyStats(trades)
-  // Pick the latest year that has either trade or NAV activity.
   const yearsWithData = new Set<string>()
   for (const r of monthlyStats) yearsWithData.add(r.monthKey.slice(0, 4))
-  for (const r of monthlyReturns.rows) yearsWithData.add(r.monthKey.slice(0, 4))
+  for (const r of navRows ?? []) yearsWithData.add(r.report_date.slice(0, 4))
   const recapYear = [...yearsWithData].sort().pop() ?? String(new Date().getFullYear())
+  const navForYear = (navRows ?? []).filter((r) => r.report_date.startsWith(recapYear))
+  const monthlyReturns = computeMonthlyReturns(navForYear, navChangeRows ?? [])
   const yearlyAverages = computeYearlyAverages(trades, recapYear)
-  const recapReturns = monthlyReturns.rows.filter((r) => r.monthKey.startsWith(recapYear))
+  const recapReturns = monthlyReturns.rows
   const recapStats = monthlyStats.filter((r) => r.monthKey.startsWith(recapYear))
 
   const normalizedClosed = trades.filter((t) => t.outcome !== 'open' && t.pnl != null)
