@@ -2,12 +2,14 @@
 
 import { useState } from 'react'
 
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { LocalTime } from '@/components/ui/local-time'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { TradeSummaryCard } from '@/components/trades/trade-summary-card'
 import { TradeAiAnalyzer } from '@/components/trades/trade-ai-analyzer'
 import type { ExecutionLeg } from '@/types/trade'
+import { riskSharesForTrade } from '@/lib/trades'
 import { initialRiskFromStopLoss } from '@/lib/market/stop-loss'
 
 type Side = 'long' | 'short' | null
@@ -119,24 +121,54 @@ function computeR(side: Side, entry: number, exit: number, stop: number): number
 }
 
 export function TradeDetailTabs(props: Props) {
-  const [activeTab, setActiveTab] = useState<'summary' | 'executions' | 'ai'>('summary')
+  const [activeTab, setActiveTab] = useState<'summary' | 'executions' | 'ai'>('executions')
   const mergedExecutionLegs = mergeExecutionLegs(props.executionLegs)
 
   const [liveStopLoss, setLiveStopLoss] = useState<number | null>(props.initialStopLoss)
   const [liveRMultiple, setLiveRMultiple] = useState<number | null>(props.initialRMultiple)
+  const [markedForReview, setMarkedForReview] = useState<boolean>(props.needsReview)
+  const [reviewError, setReviewError] = useState<string | null>(null)
+
+  async function toggleReview() {
+    const next = !markedForReview
+    setMarkedForReview(next)
+    setReviewError(null)
+    try {
+      const res = await fetch(`/api/trades/${props.tradeId}/journal`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ setupTag: props.setupTag, notes: props.notes, needsReview: next }),
+      })
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}))
+        setReviewError(json.error ?? 'Failed to save revisit state')
+        setMarkedForReview(!next)
+      }
+    } catch {
+      setReviewError('Failed to save revisit state')
+      setMarkedForReview(!next)
+    }
+  }
 
   const displayR = liveRMultiple ?? (
     props.side && props.entryPrice != null && props.exitPrice != null && liveStopLoss != null
       ? computeR(props.side, props.entryPrice, props.exitPrice, liveStopLoss)
       : null
   )
-  const displayInitialRisk = initialRiskFromStopLoss(props.side, props.entryPrice, props.shares, liveStopLoss)
+  const riskShares = riskSharesForTrade({
+    side: props.side,
+    shares: props.shares,
+    exitTime: props.exitTime,
+    outcome: null,
+    executionLegs: props.executionLegs,
+  })
+  const displayInitialRisk = initialRiskFromStopLoss(props.side, props.entryPrice, riskShares, liveStopLoss)
 
   return (
     <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'summary' | 'executions' | 'ai')} className="w-full">
       <TabsList className="grid w-full grid-cols-3">
-        <TabsTrigger value="summary">Summary</TabsTrigger>
         <TabsTrigger value="executions">Executions</TabsTrigger>
+        <TabsTrigger value="summary">Summary</TabsTrigger>
         <TabsTrigger value="ai">AI Analyze</TabsTrigger>
       </TabsList>
 
@@ -152,7 +184,6 @@ export function TradeDetailTabs(props: Props) {
           exitPrice={props.exitPrice}
           pnl={props.pnl}
           pnlPct={props.pnlPct}
-          needsReview={props.needsReview}
           setupTag={props.setupTag}
           notes={props.notes}
           source={props.source}
@@ -160,15 +191,27 @@ export function TradeDetailTabs(props: Props) {
           initialRMultiple={props.initialRMultiple}
           initialMfe={props.initialMfe}
           initialMae={props.initialMae}
+          executionLegs={props.executionLegs}
           onStopLossSaved={(sl, r) => { setLiveStopLoss(sl); setLiveRMultiple(r) }}
         />
       </TabsContent>
 
       <TabsContent value="executions">
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
             <CardTitle className="text-sm font-medium">Execution Timeline</CardTitle>
+            <Button
+              type="button"
+              variant={markedForReview ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => { void toggleReview() }}
+            >
+              {markedForReview ? 'Marked for revisit' : 'Mark for revisit'}
+            </Button>
           </CardHeader>
+          {reviewError && (
+            <div className="px-6 pb-2 text-xs text-red-700">{reviewError}</div>
+          )}
           <CardContent className="space-y-3">
             <div className="rounded-lg border p-3">
               <div className="mb-1 text-xs text-muted-foreground">Direction</div>
