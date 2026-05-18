@@ -1,5 +1,6 @@
 'use client'
 
+import type React from 'react'
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
@@ -54,7 +55,11 @@ interface AnalysisData {
     tradeExpectancy: number
     avgNetTradePnl: number
     avgRealizedRMultiple: number
-    avgHoldTimeMin: number | null
+    avgHoldWinMin: number | null
+    avgHoldLossMin: number | null
+    payoffRatio: number
+    avgWin: number
+    avgLoss: number
   }
   closedTrades: ClosedTrade[]
 }
@@ -110,16 +115,14 @@ function fmtMoney(n: number) {
 }
 
 function fmtRatio(n: number) {
+  if (n === Infinity) return '∞'
   return Number.isFinite(n) ? n.toFixed(2) : '0.00'
 }
 
 function fmtHold(min: number | null) {
   if (min == null) return '—'
-  const total = Math.max(0, Math.round(min))
-  const d = Math.floor(total / 1440)
-  const h = Math.floor((total % 1440) / 60)
-  const m = total % 60
-  return `${d}d ${h}h ${m}m`
+  const days = Math.max(0, min) / 1440
+  return `${days.toFixed(1)}D`
 }
 
 function dateKeyInTimeZone(iso: string, timeZone: string) {
@@ -317,28 +320,45 @@ function SummaryGrid({
     avgTradeWinLoss: number
     maxDailyNetDrawdown: number
     profitFactor: number
-    avgHoldTimeMin: number | null
+    avgHoldWinMin: number | null
+    avgHoldLossMin: number | null
     avgRealizedRMultiple: number
     avgDailyNetDrawdown: number
+    avgWin: number
+    avgLoss: number
   }
 }) {
-  const items = [
+  const holdValue = (
+    <div className="flex flex-col gap-0.5 text-base sm:text-lg lg:text-xl">
+      <span className="whitespace-nowrap">
+        <span className="text-emerald-600">W</span> {fmtHold(summary.avgHoldWinMin)}
+      </span>
+      <span className="whitespace-nowrap">
+        <span className="text-red-600">L</span> {fmtHold(summary.avgHoldLossMin)}
+      </span>
+    </div>
+  )
+  const winLossValue = (
+    <div className="flex flex-col gap-0.5 text-base sm:text-lg lg:text-xl">
+      <span className="whitespace-nowrap text-emerald-600">{fmtMoney(summary.avgWin)}</span>
+      <span className="whitespace-nowrap text-red-600">{fmtMoney(summary.avgLoss)}</span>
+    </div>
+  )
+  const items: { label: string; value: React.ReactNode }[] = [
     { label: 'Net P&L', value: fmtMoney(summary.netPnl) },
-    { label: 'Win %', value: `${summary.winPct.toFixed(2)}%` },
-    { label: 'Avg daily net P&L', value: fmtMoney(summary.avgDailyNetPnl) },
-    { label: 'Avg hold time', value: fmtHold(summary.avgHoldTimeMin) },
-    { label: 'Avg net trade P&L', value: fmtMoney(summary.avgNetTradePnl) },
+    { label: 'Win %', value: `${summary.winPct.toFixed(1)}%` },
+    { label: 'Avg win / loss', value: winLossValue },
+    { label: 'Avg hold time (win / loss)', value: holdValue },
     { label: 'Avg win/loss rate', value: fmtRatio(summary.avgTradeWinLoss) },
     { label: 'Avg. realized r-multiple', value: `${summary.avgRealizedRMultiple.toFixed(2)}R` },
-    { label: 'Max daily net drawdown', value: fmtMoney(summary.maxDailyNetDrawdown) },
   ]
 
   return (
     <Card>
       <CardContent className="p-0">
-        <div className="grid grid-cols-2 sm:grid-cols-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3">
           {items.map((item) => (
-            <div key={item.label} className="border-b border-r p-4 last:border-b-0 [&:nth-child(4n)]:border-r-0 sm:[&:nth-last-child(-n+4)]:border-b-0">
+            <div key={item.label} className="border-b border-r p-4 last:border-b-0 [&:nth-child(3n)]:border-r-0 sm:[&:nth-last-child(-n+3)]:border-b-0">
               <div className="text-muted-foreground text-sm">{item.label}</div>
               <div className="text-xl leading-tight font-semibold tracking-tight sm:text-2xl lg:text-[1.6rem]">
                 {item.value}
@@ -474,7 +494,7 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
         avgDailyNetPnl,
         avgDailyVolume,
         avgDailyWinLoss,
-        avgTradeWinLoss,
+        avgTradeWinLoss: data.summaryBase.payoffRatio,
         avgPlannedRMultiple: 0,
         loggedDays: dayRows.length,
         maxDailyNetDrawdown,

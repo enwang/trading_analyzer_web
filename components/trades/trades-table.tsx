@@ -24,6 +24,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { riskSharesForTrade } from '@/lib/trades'
 import {
   DEFAULT_INITIAL_RISK_AMOUNT,
   initialRiskFromStopLoss,
@@ -31,7 +32,7 @@ import {
 } from '@/lib/market/stop-loss'
 import { createClient } from '@/lib/supabase/client'
 
-type OutcomeFilter = 'all' | 'win' | 'loss' | 'open' | 'marked'
+type OutcomeFilter = 'all' | 'win' | 'loss' | 'open' | 'marked' | 'lastweek'
 type SortKey =
   | 'symbol'
   | 'side'
@@ -216,7 +217,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
   const sortParam = searchParams.get('sort')
   const dirParam = searchParams.get('dir')
   const initialFilter: OutcomeFilter =
-    viewParam === 'win' || viewParam === 'loss' || viewParam === 'open' || viewParam === 'all' || viewParam === 'marked'
+    viewParam === 'win' || viewParam === 'loss' || viewParam === 'open' || viewParam === 'all' || viewParam === 'marked' || viewParam === 'lastweek'
       ? viewParam
       : 'all'
   const initialSortKey: SortKey = sortParam && SORT_KEYS.includes(sortParam as SortKey)
@@ -271,6 +272,14 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
     const visible = trades.filter((t) => !deletedIds.has(t.id))
     if (filter === 'all') return visible
     if (filter === 'marked') return visible.filter((t) => t.needsReview)
+    if (filter === 'lastweek') {
+      const cutoffMs = Date.now() - 7 * 24 * 60 * 60 * 1000
+      return visible.filter((t) => {
+        const entryMs = t.entryTime ? Date.parse(t.entryTime) : NaN
+        const exitMs = t.exitTime ? Date.parse(t.exitTime) : NaN
+        return (Number.isFinite(entryMs) && entryMs >= cutoffMs) || (Number.isFinite(exitMs) && exitMs >= cutoffMs)
+      })
+    }
     return visible.filter((t) => t.outcome === filter)
   }, [trades, filter, deletedIds])
 
@@ -491,7 +500,11 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
       ? 'Winning Trades'
       : filter === 'loss'
         ? 'Losing Trades'
-        : 'Open Trades'
+        : filter === 'lastweek'
+          ? 'Last Week'
+          : filter === 'marked'
+            ? 'Marked to Revisit'
+            : 'Open Trades'
 
   function initialAmount(t: Trade) {
     const shares = displayShares(t)
@@ -534,14 +547,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
   }
 
   function riskShares(t: Trade): number | null {
-    const isOpenTrade = t.exitTime == null || t.outcome === 'open'
-    if (!isOpenTrade) return t.shares
-    if (!t.side || !t.executionLegs || t.executionLegs.length === 0) return null
-    const openingAction = t.side === 'long' ? 'BUY' : 'SELL'
-    const openingShares = t.executionLegs
-      .filter((leg) => leg.action === openingAction)
-      .reduce((sum, leg) => sum + leg.shares, 0)
-    return openingShares > 0 ? openingShares : null
+    return riskSharesForTrade(t)
   }
 
   function initialRisk(t: Trade, stopLossOverride?: number | null) {
@@ -914,6 +920,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Trades</SelectItem>
+              <SelectItem value="lastweek">Last Week</SelectItem>
               <SelectItem value="marked">Marked to Revisit</SelectItem>
               <SelectItem value="win">Winners</SelectItem>
               <SelectItem value="loss">Losers</SelectItem>

@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { fetchFlexTrades } from '@/lib/ibkr/flex'
+import { fetchFlexAll } from '@/lib/ibkr/flex'
 import { enrichOpenTradesWithStopLosses } from '@/lib/market/stop-loss'
 import { createTradeSnapshot } from '@/lib/trade-snapshots'
 import { NextRequest, NextResponse } from 'next/server'
@@ -83,10 +83,29 @@ export async function POST(request: NextRequest) {
       reason: 'ibkr-sync',
     })
 
-    const trades = await fetchFlexTrades(token, queryId)
+    const { trades, navDaily, navChange } = await fetchFlexAll(token, queryId)
+
+    if (navDaily.length > 0) {
+      await supabase.from('account_nav_daily').upsert(
+        navDaily.map((r) => ({ ...r, user_id: user.id })),
+        { onConflict: 'user_id,report_date' }
+      )
+    }
+    if (navChange.length > 0) {
+      await supabase.from('account_nav_change').upsert(
+        navChange.map((r) => ({ ...r, user_id: user.id })),
+        { onConflict: 'user_id,from_date,to_date' }
+      )
+    }
 
     if (!trades.length) {
-      return NextResponse.json({ upserted: 0, skipped: 0, snapshotId: snapshot?.id ?? null })
+      return NextResponse.json({
+        upserted: 0,
+        skipped: 0,
+        navDaily: navDaily.length,
+        navChange: navChange.length,
+        snapshotId: snapshot?.id ?? null,
+      })
     }
 
     const rows: UpsertRow[] = trades.map(t => ({ ...t, user_id: user.id, needs_review: false }))

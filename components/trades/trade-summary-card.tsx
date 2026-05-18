@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { Info } from 'lucide-react'
 
-import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import {
@@ -12,6 +11,8 @@ import {
   initialRiskFromStopLoss,
   suggestedStopLossFromRisk,
 } from '@/lib/market/stop-loss'
+import { riskSharesForTrade } from '@/lib/trades'
+import type { ExecutionLeg } from '@/types/trade'
 
 type Side = 'long' | 'short' | null
 
@@ -26,7 +27,6 @@ interface Props {
   exitPrice: number | null
   pnl: number | null
   pnlPct: number | null
-  needsReview: boolean
   setupTag: string
   notes: string
   source: string
@@ -34,6 +34,7 @@ interface Props {
   initialRMultiple: number | null
   initialMfe: number | null
   initialMae: number | null
+  executionLegs: ExecutionLeg[] | null
   onStopLossSaved?: (stopLoss: number | null, rMultiple: number | null) => void
 }
 
@@ -102,7 +103,6 @@ export function TradeSummaryCard({
   exitPrice,
   pnl,
   pnlPct,
-  needsReview,
   setupTag,
   notes,
   source,
@@ -110,16 +110,27 @@ export function TradeSummaryCard({
   initialRMultiple,
   initialMfe,
   initialMae,
+  executionLegs,
   onStopLossSaved,
 }: Props) {
+  const riskShares = useMemo(
+    () =>
+      riskSharesForTrade({
+        side,
+        shares,
+        exitTime,
+        outcome: null,
+        executionLegs,
+      }),
+    [side, shares, exitTime, executionLegs]
+  )
   const [initialRiskInput, setInitialRiskInput] = useState(
     () => (
-      initialRiskFromStopLoss(side, entryPrice, shares, initialStopLoss)
+      initialRiskFromStopLoss(side, entryPrice, riskShares, initialStopLoss)
         ?? DEFAULT_INITIAL_RISK_AMOUNT
     ).toFixed(2)
   )
   const [savedR, setSavedR] = useState<number | null>(initialRMultiple)
-  const [markedForReview, setMarkedForReview] = useState<boolean>(needsReview)
   const [error, setError] = useState<string | null>(null)
   const [mfe, setMfe] = useState<number | null>(initialMfe)
   const [mae, setMae] = useState<number | null>(initialMae)
@@ -185,8 +196,8 @@ export function TradeSummaryCard({
 
   const stopLoss = useMemo(() => {
     if (initialRiskAmount == null) return null
-    return suggestedStopLossFromRisk(side, entryPrice, shares, initialRiskAmount)
-  }, [side, entryPrice, shares, initialRiskAmount])
+    return suggestedStopLossFromRisk(side, entryPrice, riskShares, initialRiskAmount)
+  }, [side, entryPrice, riskShares, initialRiskAmount])
 
   const riskPerShare = useMemo(() => {
     if (!side || entryPrice == null || stopLoss == null) return null
@@ -204,29 +215,6 @@ export function TradeSummaryCard({
     if (!side || entryPrice == null || exitPrice == null || stopLoss == null) return null
     return computeR(side, entryPrice, exitPrice, stopLoss)
   }, [side, entryPrice, exitPrice, stopLoss])
-
-  async function saveReviewState(nextNeedsReview: boolean) {
-    setError(null)
-    try {
-      const res = await fetch(`/api/trades/${tradeId}/journal`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          setupTag,
-          notes,
-          needsReview: nextNeedsReview,
-        }),
-      })
-      const json = await res.json()
-      if (!res.ok) {
-        setError(json.error ?? 'Failed to save revisit state')
-        setMarkedForReview(!nextNeedsReview)
-      }
-    } catch {
-      setError('Failed to save revisit state')
-      setMarkedForReview(!nextNeedsReview)
-    }
-  }
 
   async function saveRisk(nextStopLoss: number | null, nextR: number | null) {
     setError(null)
@@ -263,20 +251,8 @@ export function TradeSummaryCard({
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+      <CardHeader>
         <CardTitle className="text-sm font-medium">Trade Summary</CardTitle>
-        <Button
-          type="button"
-          variant={markedForReview ? 'default' : 'outline'}
-          size="sm"
-          onClick={() => {
-            const next = !markedForReview
-            setMarkedForReview(next)
-            void saveReviewState(next)
-          }}
-        >
-          {markedForReview ? 'Marked for revisit' : 'Mark for revisit'}
-        </Button>
       </CardHeader>
       <CardContent>
         <Row
@@ -289,7 +265,6 @@ export function TradeSummaryCard({
           value={fmtPct(pnlPct)}
           valueClassName={pnlPct != null ? (pnlPct >= 0 ? 'text-emerald-600' : 'text-red-600') : ''}
         />
-        <Row label="Revisit Later" value={markedForReview ? 'Yes' : 'No'} valueClassName={markedForReview ? 'text-amber-700' : ''} />
         <Row label="Side" value={side ?? '—'} />
         <Row label="Shares" value={shares ?? '—'} />
         <Row label="Entry Price" value={fmtMoney(entryPrice)} />

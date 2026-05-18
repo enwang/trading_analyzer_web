@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import { fetchFlexTrades } from '@/lib/ibkr/flex'
+import { fetchFlexAll } from '@/lib/ibkr/flex'
 import { enrichOpenTradesWithStopLosses } from '@/lib/market/stop-loss'
 import { createTradeSnapshot, pruneOldSnapshots } from '@/lib/trade-snapshots'
 import { NextResponse } from 'next/server'
@@ -72,7 +72,7 @@ export async function GET(request: Request) {
 
   const { data: settings, error } = await supabase
     .from('user_settings')
-    .select('user_id, ibkr_token, ibkr_query_id')
+    .select('user_id, ibkr_token, ibkr_query_id, ibkr_today_complete_date')
     .not('ibkr_token', 'is', null)
     .not('ibkr_query_id', 'is', null)
 
@@ -80,16 +80,46 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
+  const todayPt = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
+  const ptHour = Number(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Los_Angeles',
+      hour: 'numeric',
+      hour12: false,
+    }).format(new Date())
+  )
+  // After 4 AM PT, treat the prior trading day as complete even if we never
+  // saw any rows (no-trade days, holidays, etc.) so we stop hourly retries.
+  const giveUp = ptHour >= 4 && ptHour < 17
+
   const results = []
 
   for (const s of settings ?? []) {
     try {
+      if (s.ibkr_today_complete_date === todayPt) {
+        results.push({ user_id: s.user_id, skipped: 'today already complete' })
+        continue
+      }
+
       const snapshot = await createTradeSnapshot(supabase, s.user_id, {
         label: `Before scheduled sync ${new Date().toISOString()}`,
         reason: 'ibkr-sync',
       })
       await pruneOldSnapshots(supabase, s.user_id)
-      const trades = await fetchFlexTrades(s.ibkr_token, s.ibkr_query_id)
+      const { trades, navDaily, navChange } = await fetchFlexAll(s.ibkr_token, s.ibkr_query_id)
+
+      if (navDaily.length > 0) {
+        await supabase.from('account_nav_daily').upsert(
+          navDaily.map((r) => ({ ...r, user_id: s.user_id })),
+          { onConflict: 'user_id,report_date' }
+        )
+      }
+      if (navChange.length > 0) {
+        await supabase.from('account_nav_change').upsert(
+          navChange.map((r) => ({ ...r, user_id: s.user_id })),
+          { onConflict: 'user_id,from_date,to_date' }
+        )
+      }
 
       let upserted = 0
       if (trades.length) {
@@ -179,15 +209,31 @@ export async function GET(request: Request) {
         upserted = data?.length ?? 0
       }
 
+      const tradeDateInPt = (iso: string | null | undefined) =>
+        iso ? new Date(iso).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }) : null
+      const sawTodayData = trades.some(
+        (t) => tradeDateInPt(t.entry_time) === todayPt || tradeDateInPt(t.exit_time) === todayPt
+      )
+      const completeForToday = sawTodayData || giveUp
+
+      const settingsUpdate: Record<string, unknown> = {
+        ibkr_last_sync: new Date().toISOString().slice(0, 10),
+        updated_at: new Date().toISOString(),
+      }
+      if (completeForToday) settingsUpdate.ibkr_today_complete_date = todayPt
       await supabase
         .from('user_settings')
-        .update({
-          ibkr_last_sync: new Date().toISOString().slice(0, 10),
-          updated_at: new Date().toISOString(),
-        })
+        .update(settingsUpdate)
         .eq('user_id', s.user_id)
 
-      results.push({ user_id: s.user_id, upserted, skipped: trades.length - upserted, snapshotId: snapshot?.id ?? null })
+      results.push({
+        user_id: s.user_id,
+        upserted,
+        skipped: trades.length - upserted,
+        snapshotId: snapshot?.id ?? null,
+        completeForToday,
+        sawTodayData,
+      })
     } catch (e) {
       results.push({
         user_id: s.user_id,

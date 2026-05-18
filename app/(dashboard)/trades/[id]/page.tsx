@@ -23,7 +23,7 @@ export default async function TradeDetailsPage({
   const { id } = await params
   const { view, date, sort, dir, from } = await searchParams
   const fromOverview = from === 'overview'
-  const safeView = view === 'all' || view === 'win' || view === 'loss' || view === 'open' || view === 'marked'
+  const safeView = view === 'all' || view === 'win' || view === 'loss' || view === 'open' || view === 'marked' || view === 'lastweek'
     ? view
     : null
   const safeDate = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null

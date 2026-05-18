@@ -66,6 +66,19 @@ export async function fetchFlexTrades(
   }
 }
 
+export async function fetchFlexAll(
+  token: string,
+  queryId: string
+): Promise<FlexExtract> {
+  const { refCode, dlUrl } = await sendRequest(token, queryId)
+  const raw = await pollAndDownload(token, refCode, dlUrl)
+  const trimmed = raw.trimStart()
+  if (trimmed.startsWith('<')) {
+    return { trades: parseXml(raw), navDaily: [], navChange: [] }
+  }
+  return extractFlexCsv(raw)
+}
+
 // ---------------------------------------------------------------------------
 // Step 1: Send request
 // ---------------------------------------------------------------------------
@@ -151,9 +164,186 @@ async function pollAndDownload(
 }
 
 // ---------------------------------------------------------------------------
+// Multi-section CSV splitter
+// ---------------------------------------------------------------------------
+// IBKR Flex returns a single CSV body that concatenates one block per enabled
+// section. Each block starts with its own column header row. We detect section
+// boundaries by looking for "header-shaped" rows (those that begin with a
+// recognizable identifier column like ClientAccountID) and then identify each
+// section by its column signature.
+
+export interface NavDailyRow {
+  account_id: string
+  currency: string | null
+  report_date: string  // YYYY-MM-DD
+  total: number | null
+  total_long: number | null
+  total_short: number | null
+}
+
+export interface NavChangeRow {
+  account_id: string
+  currency: string | null
+  from_date: string
+  to_date: string
+  starting_value: number | null
+  ending_value: number | null
+  mtm: number | null
+  deposits_withdrawals: number | null
+  dividends: number | null
+  interest: number | null
+  other_fees: number | null
+  commissions: number | null
+}
+
+export interface FlexExtract {
+  trades: NormalizedTrade[]
+  navDaily: NavDailyRow[]
+  navChange: NavChangeRow[]
+}
+
+const SECTION_HEADER_HINTS = ['"ClientAccountID"', '"AccountId"', 'ClientAccountID,', 'AccountId,']
+
+function splitFlexCsvSections(csvStr: string): { header: string; body: string }[] {
+  const lines = csvStr.split(/\r?\n/)
+  const sections: { header: string; body: string }[] = []
+  let curHeader: string | null = null
+  let curBody: string[] = []
+
+  function flush() {
+    if (curHeader != null) sections.push({ header: curHeader, body: curBody.join('\n') })
+    curHeader = null
+    curBody = []
+  }
+
+  for (const line of lines) {
+    if (!line.trim()) continue
+    const looksLikeHeader = SECTION_HEADER_HINTS.some((h) => line.startsWith(h))
+    if (looksLikeHeader) {
+      flush()
+      curHeader = line
+    } else if (curHeader != null) {
+      curBody.push(line)
+    }
+  }
+  flush()
+  return sections
+}
+
+function classifySection(header: string): 'trades' | 'nav_daily' | 'nav_change' | 'unknown' {
+  const h = header.toLowerCase()
+  // Trades section is wide and includes Symbol + TradeID + OpenIndicator/OpenCloseIndicator
+  if (h.includes('"symbol"') && (h.includes('tradeid') || h.includes('"buysell"'))) return 'trades'
+  if (h.includes('"reportdate"') && h.includes('"total"')) return 'nav_daily'
+  if (h.includes('"fromdate"') && h.includes('"todate"') && h.includes('startingvalue')) return 'nav_change'
+  return 'unknown'
+}
+
+function num(v: string | undefined): number | null {
+  if (v == null || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) ? n : null
+}
+
+function dateOnly(v: string | undefined): string | null {
+  if (!v) return null
+  // Accept "YYYY-MM-DD" or "YYYY-MM-DD HH:MM:SS" or "YYYYMMDD"
+  const trimmed = v.trim()
+  if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) return trimmed.slice(0, 10)
+  if (/^\d{8}$/.test(trimmed)) return `${trimmed.slice(0, 4)}-${trimmed.slice(4, 6)}-${trimmed.slice(6, 8)}`
+  return null
+}
+
+function parseNavDailyCsv(csv: string): NavDailyRow[] {
+  const result = Papa.parse<Record<string, string>>(csv, {
+    header: true,
+    skipEmptyLines: true,
+    transformHeader: (h: string) => h.trim().toLowerCase(),
+  })
+  const rows: NavDailyRow[] = []
+  for (const row of (result.data ?? []) as Record<string, string>[]) {
+    const accountId = (row['clientaccountid'] ?? row['accountid'] ?? '').trim()
+    const reportDate = dateOnly(row['reportdate'])
+    if (!accountId || !reportDate) continue
+    rows.push({
+      account_id: accountId,
+      currency: row['currencyprimary']?.trim() || null,
+      report_date: reportDate,
+      total: num(row['total']),
+      total_long: num(row['totallong']),
+      total_short: num(row['totalshort']),
+    })
+  }
+  return rows
+}
+
+function parseNavChangeCsv(csv: string): NavChangeRow[] {
+  const result = Papa.parse<Record<string, string>>(csv, {
+    header: true,
+    skipEmptyLines: true,
+    transformHeader: (h: string) => h.trim().toLowerCase(),
+  })
+  const rows: NavChangeRow[] = []
+  for (const row of (result.data ?? []) as Record<string, string>[]) {
+    const accountId = (row['clientaccountid'] ?? row['accountid'] ?? '').trim()
+    const fromDate = dateOnly(row['fromdate'])
+    const toDate = dateOnly(row['todate'])
+    if (!accountId || !fromDate || !toDate) continue
+    rows.push({
+      account_id: accountId,
+      currency: row['currencyprimary']?.trim() || null,
+      from_date: fromDate,
+      to_date: toDate,
+      starting_value: num(row['startingvalue']),
+      ending_value: num(row['endingvalue']),
+      mtm: num(row['mtm']),
+      deposits_withdrawals: num(row['depositswithdrawals']),
+      dividends: num(row['dividends']),
+      interest: num(row['interest']),
+      other_fees: num(row['otherfees']),
+      commissions: num(row['commissions']),
+    })
+  }
+  return rows
+}
+
+function extractFlexCsv(csvStr: string): FlexExtract {
+  const sections = splitFlexCsvSections(csvStr)
+  // Fallback: when no recognizable section headers are present (e.g. older
+  // single-section trades exports that don't start with ClientAccountID), treat
+  // the whole CSV as a trades section so backwards-compat callers still work.
+  if (sections.length === 0) {
+    return { trades: parseTradesCsv(csvStr), navDaily: [], navChange: [] }
+  }
+
+  let trades: NormalizedTrade[] = []
+  const navDaily: NavDailyRow[] = []
+  const navChange: NavChangeRow[] = []
+
+  for (const sec of sections) {
+    const kind = classifySection(sec.header)
+    const csv = `${sec.header}\n${sec.body}`
+    if (kind === 'trades') {
+      trades = parseTradesCsv(csv)
+    } else if (kind === 'nav_daily') {
+      navDaily.push(...parseNavDailyCsv(csv))
+    } else if (kind === 'nav_change') {
+      navChange.push(...parseNavChangeCsv(csv))
+    }
+  }
+
+  return { trades, navDaily, navChange }
+}
+
+// ---------------------------------------------------------------------------
 // CSV parsing (primary path)
 // ---------------------------------------------------------------------------
 function parseCsv(csvStr: string): NormalizedTrade[] {
+  // Backwards-compat wrapper: pull just the trades from a possibly-multi-section CSV.
+  return extractFlexCsv(csvStr).trades
+}
+
+function parseTradesCsv(csvStr: string): NormalizedTrade[] {
   const result = Papa.parse<Record<string, string>>(csvStr, {
     header: true,
     skipEmptyLines: true,
@@ -161,7 +351,7 @@ function parseCsv(csvStr: string): NormalizedTrade[] {
   })
 
   const raw = result.data as Record<string, string>[]
-  if (!raw.length) throw new Error('No rows found in Flex CSV')
+  if (!raw.length) return []
 
   // Case-insensitive column lookup
   const keys = Object.keys(raw[0]).map(k => k.toLowerCase())

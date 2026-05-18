@@ -102,6 +102,19 @@ export function mergeOpenTradesForDisplay(trades: Trade[]): Trade[] {
   return trades
 }
 
+export function riskSharesForTrade(
+  trade: Pick<Trade, 'side' | 'shares' | 'exitTime' | 'outcome' | 'executionLegs'>
+): number | null {
+  const isOpenTrade = trade.exitTime == null || trade.outcome === 'open'
+  if (!isOpenTrade) return trade.shares
+  if (!trade.side || !trade.executionLegs || trade.executionLegs.length === 0) return trade.shares
+  const openingAction = trade.side === 'long' ? 'BUY' : 'SELL'
+  const openingShares = trade.executionLegs
+    .filter((leg) => leg.action === openingAction)
+    .reduce((sum, leg) => sum + leg.shares, 0)
+  return openingShares > 0 ? openingShares : trade.shares
+}
+
 function legKey(leg: ExecutionLeg): string {
   return `${leg.time}|${leg.action}|${leg.shares}|${leg.price}`
 }

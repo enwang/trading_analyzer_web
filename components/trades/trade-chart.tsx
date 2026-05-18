@@ -10,7 +10,6 @@ import {
 import type {
   IChartApi,
   UTCTimestamp,
-  SeriesMarker,
   ISeriesApi,
   SeriesType,
 } from 'lightweight-charts'
@@ -48,14 +47,6 @@ interface Candle {
   low:    number
   close:  number
   volume: number | null
-}
-
-interface PendingMarker {
-  time: UTCTimestamp
-  basePosition: 'aboveBar' | 'belowBar'
-  color: string
-  shape: 'arrowUp' | 'arrowDown'
-  text: string
 }
 
 interface ChartMeta {
@@ -143,19 +134,19 @@ function formatTradeDate(entryTime: string | null, timeZone: string) {
 }
 
 function nearestCandleTimeSec(candles: Candle[], targetSec: number): number | null {
+  // Each candle's `time` is the START of its bucket (e.g. 08:45 for a 08:45-08:50 5min bar).
+  // A fill at 08:48 should attach to the 08:45 bar — floor to the latest candle whose
+  // start time is <= target. Only when target precedes the first candle do we snap forward.
   if (!candles.length) return null
+  if (targetSec < candles[0].time) return candles[0].time
   let lo = 0
   let hi = candles.length - 1
   while (lo < hi) {
-    const mid = Math.floor((lo + hi) / 2)
-    if (candles[mid].time < targetSec) lo = mid + 1
-    else hi = mid
+    const mid = Math.ceil((lo + hi) / 2)
+    if (candles[mid].time <= targetSec) lo = mid
+    else hi = mid - 1
   }
-  const right = candles[lo]
-  const left = candles[Math.max(0, lo - 1)]
-  if (!left) return right?.time ?? null
-  if (!right) return left.time
-  return Math.abs(right.time - targetSec) < Math.abs(left.time - targetSec) ? right.time : left.time
+  return candles[lo].time
 }
 
 function mergeLegsForMarkers(legs: ExecutionLeg[]) {
@@ -183,51 +174,14 @@ function mergeLegsForMarkers(legs: ExecutionLeg[]) {
     .sort((a, b) => a.timeSec - b.timeSec)
 }
 
-function compactMarkerText(text: string, max = 18) {
-  if (text.length <= max) return text
-  return `${text.slice(0, max - 1)}…`
-}
-
-function resolveMarkerCollisions(markers: PendingMarker[]): SeriesMarker<UTCTimestamp>[] {
-  const byTime = new Map<number, PendingMarker[]>()
-  for (const m of markers) {
-    const t = Number(m.time)
-    const list = byTime.get(t) ?? []
-    list.push(m)
-    byTime.set(t, list)
-  }
-
-  const out: SeriesMarker<UTCTimestamp>[] = []
-  const cycle: Array<'aboveBar' | 'belowBar'> = ['aboveBar', 'belowBar']
-  const orderedTimes = Array.from(byTime.keys()).sort((a, b) => a - b)
-
-  for (const t of orderedTimes) {
-    const group = byTime.get(t) ?? []
-    // Place all markers on the same candle — alternate aboveBar/belowBar.
-    // Never shift to adjacent candles; that causes wrong placement on 1D charts
-    // when entry and exit happen on the same day.
-    for (let i = 0; i < group.length; i++) {
-      const m = group[i]
-      out.push({
-        time: m.time,
-        position: i === 0 ? m.basePosition : cycle[i % cycle.length],
-        color: m.color,
-        shape: m.shape,
-        text: compactMarkerText(m.text),
-        size: 1,
-      })
-    }
-  }
-
-  return out
-}
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exitPrice, executionLegs }: Props) {
-  const containerRef   = useRef<HTMLDivElement>(null)
-  const ohlcOverlayRef = useRef<HTMLDivElement>(null)
+  const containerRef     = useRef<HTMLDivElement>(null)
+  const ohlcOverlayRef   = useRef<HTMLDivElement>(null)
+  const arrowsOverlayRef = useRef<HTMLDivElement>(null)
 
   const [topTab,    setTopTab]    = useState<'chart' | 'notes' | 'running'>('chart')
   const [timeframe, setTimeframe] = useState<Timeframe>(() => getDefaultTimeframe(entryTime, exitTime))
@@ -347,6 +301,26 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
         timeVisible:    true,
         secondsVisible: false,
         rightOffset:    5,
+        // X-axis ticks: render in the user's local timezone (lightweight-charts
+        // defaults to UTC otherwise, so on 5min/1min the times don't match PST).
+        tickMarkFormatter: (time: number, tickMarkType: number) => {
+          const d = new Date(Number(time) * 1000)
+          if (tickMarkType === 0) {
+            return new Intl.DateTimeFormat('en-US', { timeZone: userTimeZone, year: 'numeric' }).format(d)
+          }
+          if (tickMarkType === 1) {
+            return new Intl.DateTimeFormat('en-US', { timeZone: userTimeZone, month: 'short' }).format(d)
+          }
+          if (tickMarkType === 2) {
+            return new Intl.DateTimeFormat('en-US', { timeZone: userTimeZone, month: 'short', day: 'numeric' }).format(d)
+          }
+          return new Intl.DateTimeFormat('en-US', {
+            timeZone: userTimeZone,
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false,
+          }).format(d)
+        },
       },
       localization: {
         locale: 'en-US',
@@ -369,6 +343,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
         width:  container.clientWidth,
         height: container.clientHeight,
       })
+      requestAnimationFrame(() => renderArrows())
     })
     ro.observe(container)
 
@@ -522,82 +497,110 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
       }
     }
 
-    // --- Execution markers ---
-    const pendingMarkers: PendingMarker[] = []
+    // --- Execution arrows (HTML overlay, horizontal triangles pointing at exact price) ---
+    type ArrowPoint = { timeSec: number; price: number; action: 'BUY' | 'SELL' }
+    const arrowPoints: ArrowPoint[] = []
 
     if (executionLegs && executionLegs.length > 0) {
       const mergedLegs = mergeLegsForMarkers(executionLegs)
       for (const leg of mergedLegs) {
         const markerSec = nearestCandleTimeSec(candles, leg.timeSec)
         if (markerSec == null) continue
-
-        const isBuy = leg.action === 'BUY'
-        pendingMarkers.push({
-          time: ts(markerSec),
-          basePosition: isBuy ? 'belowBar' : 'aboveBar',
-          color: isBuy ? '#16a34a' : '#dc2626',
-          shape: isBuy ? 'arrowUp' : 'arrowDown',
-          text: `${leg.action} ${leg.shares}@${leg.price.toFixed(2)}`,
-        })
+        arrowPoints.push({ timeSec: markerSec, price: leg.price, action: leg.action })
       }
     } else {
-      // Fallback when no execution legs are available.
-      if (meta.entryTimeSec) {
-        const isShort = side === 'short'
-        pendingMarkers.push({
-          time: ts(meta.entryTimeSec),
-          basePosition: 'belowBar',
-          color: isShort ? '#dc2626' : '#16a34a',
-          shape: 'arrowUp',
-          text: entryPrice != null
-            ? `${isShort ? 'SHORT' : 'BUY'} $${entryPrice.toFixed(2)}`
-            : (isShort ? 'SHORT' : 'BUY'),
+      const isShort = side === 'short'
+      if (meta.entryTimeSec && entryPrice != null) {
+        arrowPoints.push({
+          timeSec: meta.entryTimeSec,
+          price: entryPrice,
+          action: isShort ? 'SELL' : 'BUY',
         })
       }
-
-      if (meta.exitTimeSec && exitTime) {
-        const isShort = side === 'short'
-        pendingMarkers.push({
-          time: ts(meta.exitTimeSec),
-          basePosition: 'aboveBar',
-          color: isShort ? '#16a34a' : '#dc2626',
-          shape: 'arrowDown',
-          text: exitPrice != null
-            ? `${isShort ? 'COVER' : 'SELL'} $${exitPrice.toFixed(2)}`
-            : (isShort ? 'COVER' : 'SELL'),
+      if (meta.exitTimeSec && exitTime && exitPrice != null) {
+        arrowPoints.push({
+          timeSec: meta.exitTimeSec,
+          price: exitPrice,
+          action: isShort ? 'BUY' : 'SELL',
         })
       }
     }
 
-    const baseMarkers = resolveMarkerCollisions(pendingMarkers).sort(
-      (a, b) => Number(a.time) - Number(b.time)
-    )
-    const applyAdaptiveMarkers = () => {
-      if (baseMarkers.length === 0) {
-        main.setMarkers([])
-        return
-      }
+    main.setMarkers([])
 
-      const logical = chart.timeScale().getVisibleLogicalRange()
-      const from = logical ? Math.max(0, Math.floor(logical.from)) : 0
-      const to = logical ? Math.min(candles.length - 1, Math.ceil(logical.to)) : candles.length - 1
-      const visibleBars = Math.max(1, to - from + 1)
+    const renderArrows = () => {
+      const overlay = arrowsOverlayRef.current
+      if (!overlay) return
+      overlay.innerHTML = ''
+      if (arrowPoints.length === 0) return
 
-      const markerSize =
-        visibleBars > 340 ? 0.8 :
-        visibleBars > 260 ? 0.85 :
-        visibleBars > 180 ? 0.9 :
-        visibleBars > 120 ? 0.95 : 1
+      for (const pt of arrowPoints) {
+        const x = chart.timeScale().timeToCoordinate(ts(pt.timeSec))
+        const y = main.priceToCoordinate(pt.price)
+        if (x == null || y == null) continue
 
-      const markers = baseMarkers.map((m) => {
-        return {
-          ...m,
-          size: markerSize,
+        const isBuy = pt.action === 'BUY'
+        const color = isBuy ? '#16a34a' : '#dc2626'
+
+        // Wrapper enables pointer events for hover; bigger hit area than the triangle itself.
+        const wrapper = document.createElement('div')
+        wrapper.style.position = 'absolute'
+        wrapper.style.pointerEvents = 'auto'
+        wrapper.style.cursor = 'default'
+        wrapper.style.width = '24px'
+        wrapper.style.height = '20px'
+        wrapper.style.top = `${y - 10}px`
+        wrapper.style.left = `${isBuy ? x - 18 : x - 6}px`
+
+        const triangle = document.createElement('div')
+        triangle.style.position = 'absolute'
+        triangle.style.width = '0'
+        triangle.style.height = '0'
+        triangle.style.borderTop = '7px solid transparent'
+        triangle.style.borderBottom = '7px solid transparent'
+        triangle.style.filter = 'drop-shadow(0 0 1px rgba(255,255,255,0.95))'
+        triangle.style.top = '3px'
+        if (isBuy) {
+          triangle.style.borderLeft = `12px solid ${color}`
+          triangle.style.left = '6px'
+        } else {
+          triangle.style.borderRight = `12px solid ${color}`
+          triangle.style.left = '6px'
         }
-      })
+        wrapper.appendChild(triangle)
 
-      main.setMarkers(markers)
+        const label = document.createElement('span')
+        label.textContent = `$${pt.price.toFixed(2)}`
+        label.style.position = 'absolute'
+        label.style.whiteSpace = 'nowrap'
+        label.style.padding = '2px 6px'
+        label.style.borderRadius = '4px'
+        label.style.fontSize = '11px'
+        label.style.fontWeight = '600'
+        label.style.fontVariantNumeric = 'tabular-nums'
+        label.style.color = '#ffffff'
+        label.style.background = color
+        label.style.boxShadow = '0 1px 3px rgba(0,0,0,0.25)'
+        label.style.top = '-2px'
+        label.style.opacity = '0'
+        label.style.transition = 'opacity 120ms ease'
+        label.style.pointerEvents = 'none'
+        // Position label to the side the arrow points away from, so the tip stays visible.
+        if (isBuy) {
+          label.style.right = 'calc(100% + 4px)'
+        } else {
+          label.style.left = 'calc(100% + 4px)'
+        }
+        wrapper.appendChild(label)
+
+        wrapper.addEventListener('mouseenter', () => { label.style.opacity = '1' })
+        wrapper.addEventListener('mouseleave', () => { label.style.opacity = '0' })
+
+        overlay.appendChild(wrapper)
+      }
     }
+
+    const applyAdaptiveMarkers = renderArrows
 
     // --- OHLC overlay on crosshair move ---
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -651,12 +654,51 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
     }
 
     applyAdaptiveMarkers()
-    const handleVisibleRangeChange = () => applyAdaptiveMarkers()
-    chart.timeScale().subscribeVisibleLogicalRangeChange(handleVisibleRangeChange)
+
+    // Re-render arrows on every chart range change. We listen to BOTH the
+    // logical-range and time-range subscriptions because each fires at slightly
+    // different moments during smooth pan/zoom; missing either causes the HTML
+    // arrows to drift relative to the redrawn candles.
+    let pendingFrame = 0
+    const scheduleRerender = () => {
+      if (pendingFrame) return
+      pendingFrame = requestAnimationFrame(() => {
+        pendingFrame = 0
+        renderArrows()
+      })
+    }
+    chart.timeScale().subscribeVisibleLogicalRangeChange(scheduleRerender)
+    chart.timeScale().subscribeVisibleTimeRangeChange(scheduleRerender)
+    // Wheel + drag interactions: re-render continuously while the user is
+    // actively manipulating the chart so arrows track the candles frame-for-frame.
+    let interactionLoop = 0
+    const startInteractionLoop = () => {
+      if (interactionLoop) return
+      const tick = () => {
+        renderArrows()
+        interactionLoop = requestAnimationFrame(tick)
+      }
+      interactionLoop = requestAnimationFrame(tick)
+      const stop = () => {
+        if (interactionLoop) cancelAnimationFrame(interactionLoop)
+        interactionLoop = 0
+        renderArrows()
+        window.removeEventListener('mouseup', stop)
+      }
+      window.addEventListener('mouseup', stop)
+    }
+    container.addEventListener('mousedown', startInteractionLoop)
+    const wheelHandler = () => scheduleRerender()
+    container.addEventListener('wheel', wheelHandler, { passive: true })
 
     return () => {
       chart.unsubscribeCrosshairMove(handleCrosshair)
-      chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleVisibleRangeChange)
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(scheduleRerender)
+      chart.timeScale().unsubscribeVisibleTimeRangeChange(scheduleRerender)
+      container.removeEventListener('mousedown', startInteractionLoop)
+      container.removeEventListener('wheel', wheelHandler)
+      if (pendingFrame) cancelAnimationFrame(pendingFrame)
+      if (interactionLoop) cancelAnimationFrame(interactionLoop)
       ro.disconnect()
       chart.remove()
     }
@@ -804,6 +846,12 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
               <div
                 ref={containerRef}
                 className={`h-full w-full ${(loading || !candles) && !error ? 'invisible' : ''}`}
+              />
+
+              {/* Execution-arrow overlay — horizontal triangles drawn directly via DOM */}
+              <div
+                ref={arrowsOverlayRef}
+                className="pointer-events-none absolute inset-0 z-[5] overflow-hidden"
               />
 
               {/* OHLC crosshair overlay — updated directly via DOM to avoid re-renders */}

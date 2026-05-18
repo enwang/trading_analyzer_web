@@ -120,20 +120,23 @@ export async function GET(request: Request) {
     const toMs    = Math.max(entryMs, exitMs)
     spanMs        = Math.max(toMs - fromMs, 30 * 60_000)
     const padding = Math.max(spanMs * 0.5, 4 * 60 * 60_000)
+    // Post-exit context: always fetch ~5 calendar days past the exit so the user can
+    // see the following trend (not just up to a few hours after exit).
+    const postExitPadMs = 5 * 86_400_000
     period1 = Math.floor((fromMs - Math.max(padding, lookbackMs)) / 1000)
-    // For open trades (no exit), extend to now so live data is included.
-    // For closed trades, cap at exit + padding to avoid today's partial data bleeding in.
-    period2 = Math.ceil((hasExit ? toMs + padding : Math.max(toMs + padding, Date.now())) / 1000)
+    period2 = Math.ceil((hasExit
+      ? toMs + Math.max(padding, postExitPadMs)
+      : Math.max(toMs + padding, Date.now())
+    ) / 1000)
   }
 
   const interval = pickInterval(spanMs, period1 * 1000, timeframe)
 
-  // For 1D charts on closed trades: cap period2 at end of exit calendar day + 2 extra days.
-  // This prevents large spanMs padding from reaching today's partial candle while still
-  // providing post-trade context.
+  // For 1D charts on closed trades: cap period2 at end of exit calendar day + 5 extra days
+  // so the post-trade trend is visible (was 2 days previously).
   if (interval === '1d' && exitTime && !Number.isNaN(exitMs)) {
-    const exitDayEndSec = Math.ceil(exitMs / 86_400_000) * 86400 // midnight UTC after exit day
-    period2 = Math.min(period2, exitDayEndSec + 2 * 86400) // at most 2 extra days after exit
+    const exitDayEndSec = Math.ceil(exitMs / 86_400_000) * 86400
+    period2 = Math.min(period2, exitDayEndSec + 5 * 86400)
   }
 
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&period1=${period1}&period2=${period2}&includePrePost=false`
@@ -184,10 +187,9 @@ export async function GET(request: Request) {
   candles = await repairCorruptVolume(symbol, candles)
 
   const visiblePreMs = Math.max(spanMs * 0.8, Math.floor(lookbackMs * 0.6))
-  // For 1D charts, show 2 calendar days of context after exit so the outcome is easy to judge
-  const visiblePostMs = interval === '1d'
-    ? 2 * 86_400_000
-    : Math.max(spanMs * 0.4, 2 * 60 * 60_000)
+  // Show ~3 calendar days of context after exit on every timeframe so the trend
+  // following the trade is visible without manual scrolling.
+  const visiblePostMs = 3 * 86_400_000
   const visibleFrom = Math.floor((entryMs - visiblePreMs) / 1000)
   // For open trades (no exitTime), extend visible range to now so today's candles are visible
   const visibleToMs = exitTime ? exitMs : Math.max(exitMs, Date.now())
