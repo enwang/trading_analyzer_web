@@ -28,21 +28,30 @@ export function OpenPnlCard({ trades }: { trades: OpenTradeForPnl[] }) {
     [trades]
   )
   const [quotes, setQuotes] = useState<Record<string, number | null>>({})
+  const [quotesReady, setQuotesReady] = useState(symbols.length === 0)
 
   useEffect(() => {
     if (symbols.length === 0) {
       setQuotes({})
+      setQuotesReady(true)
       return
     }
 
     let canceled = false
+    setQuotesReady(false)
     fetch(`/api/market/quotes?symbols=${encodeURIComponent(symbols.join(','))}`, { cache: 'no-store' })
       .then((res) => res.ok ? res.json() : null)
       .then((json: { quotes?: Record<string, number | null> } | null) => {
-        if (!canceled) setQuotes(json?.quotes ?? {})
+        if (!canceled) {
+          setQuotes(json?.quotes ?? {})
+          setQuotesReady(true)
+        }
       })
       .catch(() => {
-        if (!canceled) setQuotes({})
+        if (!canceled) {
+          setQuotes({})
+          setQuotesReady(true)
+        }
       })
 
     return () => {
@@ -51,11 +60,9 @@ export function OpenPnlCard({ trades }: { trades: OpenTradeForPnl[] }) {
   }, [symbols])
 
   const partialGains = trades.reduce((sum, t) => sum + (t.realizedPnl ?? 0), 0)
-  let priced = 0
   const unrealized = trades.reduce((sum, t) => {
     const price = quotes[t.symbol.trim().toUpperCase()]
     if (!t.side || t.entryPrice == null || t.shares == null || price == null) return sum
-    priced += 1
     return sum + (t.side === 'long'
       ? (price - t.entryPrice) * t.shares
       : (t.entryPrice - price) * t.shares)
@@ -70,12 +77,21 @@ export function OpenPnlCard({ trades }: { trades: OpenTradeForPnl[] }) {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <p className={`text-2xl font-bold tabular-nums ${valueClass(total)}`}>
-          {fmtMoneySigned(total)}
-        </p>
-        <p className="text-muted-foreground mt-0.5 text-xs">
-          Unrealized {fmtMoneySigned(unrealized)} · Partial {fmtMoneySigned(partialGains)}
-        </p>
+        {quotesReady ? (
+          <>
+            <p className={`text-2xl font-bold tabular-nums ${valueClass(total)}`}>
+              {fmtMoneySigned(total)}
+            </p>
+            <p className="text-muted-foreground mt-0.5 text-xs">
+              Unrealized {fmtMoneySigned(unrealized)} · Partial {fmtMoneySigned(partialGains)}
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="text-muted-foreground text-2xl font-bold tabular-nums">—</p>
+            <p className="text-muted-foreground mt-0.5 text-xs">Loading quotes…</p>
+          </>
+        )}
         <p className="text-muted-foreground mt-0.5 text-xs">{trades.length} open</p>
       </CardContent>
     </Card>
