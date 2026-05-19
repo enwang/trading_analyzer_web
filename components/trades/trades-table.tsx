@@ -145,16 +145,6 @@ function saveStoredInitialRisk(id: string, value: string) {
   )
 }
 
-function impliedInitialRiskInput(t: Trade): string | null {
-  const risk = initialRiskFromStopLoss(
-    t.side,
-    t.entryPrice,
-    riskSharesForTrade(t),
-    t.stopLoss
-  )
-  return risk != null ? risk.toFixed(2) : null
-}
-
 function normalizeColumnOrder(value: unknown): ColumnId[] {
   if (!Array.isArray(value)) return DEFAULT_COLUMN_ORDER
   const normalized = value.map((c) => LEGACY_COLUMN_MAP[String(c)] ?? String(c))
@@ -244,12 +234,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
           {
             setupTag: t.setupTag ?? 'untagged',
             notes: t.notes ?? '',
-            // Source of truth is the saved stop_loss — when one exists, derive
-            // the displayed risk from it so this matches the trade detail view.
-            initialRisk:
-              impliedInitialRiskInput(t)
-              ?? storedInitialRisks[t.id]
-              ?? DEFAULT_INITIAL_RISK_INPUT,
+            initialRisk: storedInitialRisks[t.id] ?? DEFAULT_INITIAL_RISK_INPUT,
           },
         ])
       )
@@ -1018,7 +1003,6 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
             {sortedFiltered.map((t) => {
               const draftInitialRisk =
                 drafts[t.id]?.initialRisk
-                ?? impliedInitialRiskInput(t)
                 ?? DEFAULT_INITIAL_RISK_INPUT
               const parsedDraftInitialRisk = draftInitialRisk.trim() === '' ? null : Number(draftInitialRisk)
               const effectiveStopLoss =
