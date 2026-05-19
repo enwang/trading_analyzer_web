@@ -35,6 +35,7 @@ export interface StopLossEnrichmentRow {
   entry_price?: number | null
   shares?: number | null
   stop_loss?: number | null
+  execution_legs?: { action?: string; shares?: number; price?: number; time?: string }[] | null | unknown
 }
 
 export const DEFAULT_INITIAL_RISK_AMOUNT = 2000
@@ -162,17 +163,35 @@ export function initialRiskFromStopLoss(
   return round2(Math.abs(riskPerShare * absShares))
 }
 
+function openingSharesFromLegs(side: string | null, legs: unknown): number | null {
+  if (!Array.isArray(legs) || legs.length === 0 || !side) return null
+  const openingAction = side === 'long' ? 'BUY' : 'SELL'
+  let total = 0
+  for (const leg of legs) {
+    if (!leg || typeof leg !== 'object') continue
+    const l = leg as { action?: string; shares?: number }
+    if (l.action !== openingAction || typeof l.shares !== 'number') continue
+    total += l.shares
+  }
+  return total > 0 ? total : null
+}
+
 export async function enrichOpenTradesWithStopLosses<T extends StopLossEnrichmentRow>(
   rows: T[],
   _lookup: (symbol: string, entryTime: string) => Promise<PreEntryExtremes | null> = fetchPreEntryExtremes
 ): Promise<T[]> {
+  // Open trades default to a $2000 initial-risk stop. We always recompute on
+  // every sync — IBKR can revise entry_price (CostBasis re-weighting after
+  // partial closes), and the user expects Initial Risk to stay at the default.
+  // Risk is measured against opening shares, so a partial close doesn't widen
+  // the implied risk later in the trade.
   return Promise.all(
     rows.map(async (row) => {
       if (row.exit_time != null) return row
-      if (row.stop_loss != null) return row
       if (!row.side) return row
 
-      const stopLoss = suggestedStopLossFromRisk(row.side, row.entry_price, row.shares)
+      const sharesForRisk = openingSharesFromLegs(row.side, row.execution_legs) ?? row.shares
+      const stopLoss = suggestedStopLossFromRisk(row.side, row.entry_price, sharesForRisk)
       if (stopLoss == null) return row
       return { ...row, stop_loss: stopLoss }
     })
