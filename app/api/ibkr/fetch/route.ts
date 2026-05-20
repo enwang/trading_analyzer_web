@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { fetchFlexAll } from '@/lib/ibkr/flex'
 import { enrichOpenTradesWithStopLosses } from '@/lib/market/stop-loss'
 import { createTradeSnapshot } from '@/lib/trade-snapshots'
+import { filterOutHidden, loadHiddenTradeKeys } from '@/lib/hidden-trades'
 import { NextRequest, NextResponse } from 'next/server'
 
 type Leg = { action?: string; shares?: number; price?: number }
@@ -108,8 +109,11 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    const rows: UpsertRow[] = trades.map(t => ({ ...t, user_id: user.id, needs_review: false }))
+    let rows: UpsertRow[] = trades.map(t => ({ ...t, user_id: user.id, needs_review: false }))
     const touchedSymbols = [...new Set(rows.map(r => r.symbol))]
+
+    const hiddenKeys = await loadHiddenTradeKeys(supabase, user.id, touchedSymbols)
+    rows = filterOutHidden(rows, hiddenKeys)
 
     if (touchedSymbols.length > 0) {
       const normalizeTs = (t: string | null | undefined) => t ? t.slice(0, 19) : ''
