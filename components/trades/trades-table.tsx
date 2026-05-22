@@ -227,14 +227,15 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
   const [filter, setFilter] = useState<OutcomeFilter>(initialFilter)
   const initialDrafts = useMemo(
     () => {
-      const storedInitialRisks = loadStoredInitialRisks()
       return Object.fromEntries(
         trades.map((t) => [
           t.id,
           {
             setupTag: t.setupTag ?? 'untagged',
             notes: t.notes ?? '',
-            initialRisk: storedInitialRisks[t.id] ?? DEFAULT_INITIAL_RISK_INPUT,
+            initialRisk: (
+              initialRiskFromStopLoss(t.side, t.entryPrice, riskSharesForTrade(t), t.stopLoss) ?? DEFAULT_INITIAL_RISK_AMOUNT
+            ).toFixed(2),
           },
         ])
       )
