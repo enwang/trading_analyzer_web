@@ -232,18 +232,6 @@ export function TradeDetailTabs(props: Props) {
               </div>
             </div>
             <div className="rounded-lg border p-3">
-              <div className="mb-1 text-xs text-muted-foreground">Initial Risk</div>
-              <div className="text-sm font-medium text-red-600">
-                {fmtPrice(displayInitialRisk)}
-              </div>
-            </div>
-            <div className="rounded-lg border p-3">
-              <div className="mb-1 text-xs text-muted-foreground">R Multiple</div>
-              <div className={`text-sm font-medium ${displayR != null ? (displayR >= 0 ? 'text-emerald-600' : 'text-red-600') : ''}`}>
-                {displayR != null ? displayR.toFixed(2) : '—'}
-              </div>
-            </div>
-            <div className="rounded-lg border p-3">
               <div className="mb-2 text-xs text-muted-foreground">Executions (every fill)</div>
               {mergedExecutionLegs.length > 0 ? (
                 <div className="overflow-hidden rounded-md border">
