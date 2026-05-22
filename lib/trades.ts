@@ -106,7 +106,7 @@ export function riskSharesForTrade(
   trade: Pick<Trade, 'side' | 'shares' | 'exitTime' | 'outcome' | 'executionLegs'>
 ): number | null {
   const isOpenTrade = trade.exitTime == null || trade.outcome === 'open'
-  if (!isOpenTrade) return trade.shares
+  if (!isOpenTrade && trade.shares != null && trade.shares !== 0) return trade.shares
   if (!trade.side || !trade.executionLegs || trade.executionLegs.length === 0) return trade.shares
   const openingAction = trade.side === 'long' ? 'BUY' : 'SELL'
   const openingShares = trade.executionLegs
