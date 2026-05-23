@@ -39,6 +39,14 @@ export interface StopLossEnrichmentRow {
 }
 
 export const DEFAULT_INITIAL_RISK_AMOUNT = 2000
+export const DEFAULT_ADDON_RISK_AMOUNT = 1000
+
+// Returns the risk dollar amount for a given trade.
+// Add-on lots (later open entry for the same symbol) use a smaller risk.
+// Future: add date-based tiers here when needed.
+export function riskAmountForTrade(isAddon: boolean): number {
+  return isAddon ? DEFAULT_ADDON_RISK_AMOUNT : DEFAULT_INITIAL_RISK_AMOUNT
+}
 
 function round2(n: number) {
   return Math.round(n * 100) / 100
@@ -180,12 +188,22 @@ export async function enrichOpenTradesWithStopLosses<T extends StopLossEnrichmen
   rows: T[],
   _lookup: (symbol: string, entryTime: string) => Promise<PreEntryExtremes | null> = fetchPreEntryExtremes
 ): Promise<T[]> {
+  const openRows = rows.filter((r) => r.exit_time == null)
+  const earliestEntryBySymbol = new Map<string, string>()
+  for (const row of openRows) {
+    if (!row.symbol || !row.entry_time) continue
+    const prev = earliestEntryBySymbol.get(row.symbol)
+    if (!prev || row.entry_time < prev) earliestEntryBySymbol.set(row.symbol, row.entry_time)
+  }
+
   return Promise.all(
     rows.map(async (row) => {
       if (row.exit_time != null) return row
       if (!row.side) return row
-      const sharesForRisk = openingSharesFromLegs(row.side, row.execution_legs) ?? row.shares
-      const stopLoss = suggestedStopLossFromRisk(row.side, row.entry_price, sharesForRisk)
+      const isAddon = !!row.symbol && !!row.entry_time &&
+        row.entry_time > (earliestEntryBySymbol.get(row.symbol) ?? '')
+      const riskAmount = riskAmountForTrade(isAddon)
+      const stopLoss = suggestedStopLossFromRisk(row.side, row.entry_price, row.shares, riskAmount)
       if (stopLoss == null) return row
       return { ...row, stop_loss: stopLoss }
     })
