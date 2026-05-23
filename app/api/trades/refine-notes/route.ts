@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server'
 
-const FREE_MODELS = [
+// Ordered by preference — Claude Haiku used when OpenRouter account has credits,
+// falls back to the best-available free model.
+const MODELS = [
+  'anthropic/claude-haiku-4-5',
   'liquid/lfm-2.5-1.2b-instruct:free',
-  'google/gemma-3-27b-it:free',
-  'meta-llama/llama-3.2-3b-instruct:free',
 ]
 
 const PROMPT = (text: string) =>
@@ -22,8 +23,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'OPENROUTER_API_KEY not configured' }, { status: 500 })
     }
 
-    let lastError = 'All models failed'
-    for (const model of FREE_MODELS) {
+    let lastError = 'All models unavailable'
+    for (const model of MODELS) {
       const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: {

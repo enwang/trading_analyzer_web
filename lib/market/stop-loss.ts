@@ -39,6 +39,7 @@ export interface StopLossEnrichmentRow {
 }
 
 export const DEFAULT_INITIAL_RISK_AMOUNT = 2000
+export const DEFAULT_ADDON_RISK_AMOUNT = 1000
 
 function round2(n: number) {
   return Math.round(n * 100) / 100
@@ -180,18 +181,28 @@ export async function enrichOpenTradesWithStopLosses<T extends StopLossEnrichmen
   rows: T[],
   _lookup: (symbol: string, entryTime: string) => Promise<PreEntryExtremes | null> = fetchPreEntryExtremes
 ): Promise<T[]> {
-  // Open trades default to a $2000 initial-risk stop. We always recompute on
-  // every sync — IBKR can revise entry_price (CostBasis re-weighting after
-  // partial closes), and the user expects Initial Risk to stay at the default.
-  // Risk is measured against opening shares, so a partial close doesn't widen
-  // the implied risk later in the trade.
+  // Open trades default to a $2000 initial-risk stop. Add-on lots (a later
+  // open entry for the same symbol) use $1000. We always recompute on every
+  // sync — IBKR can revise entry_price (CostBasis re-weighting after partial
+  // closes), and the user expects Initial Risk to stay at the default.
+  const openRows = rows.filter((r) => r.exit_time == null)
+  const earliestEntryBySymbol = new Map<string, string>()
+  for (const row of openRows) {
+    if (!row.symbol || !row.entry_time) continue
+    const prev = earliestEntryBySymbol.get(row.symbol)
+    if (!prev || row.entry_time < prev) earliestEntryBySymbol.set(row.symbol, row.entry_time)
+  }
+
   return Promise.all(
     rows.map(async (row) => {
       if (row.exit_time != null) return row
       if (!row.side) return row
 
+      const isAddon = !!row.symbol && !!row.entry_time &&
+        row.entry_time > (earliestEntryBySymbol.get(row.symbol) ?? '')
+      const riskAmount = isAddon ? DEFAULT_ADDON_RISK_AMOUNT : DEFAULT_INITIAL_RISK_AMOUNT
       const sharesForRisk = openingSharesFromLegs(row.side, row.execution_legs) ?? row.shares
-      const stopLoss = suggestedStopLossFromRisk(row.side, row.entry_price, sharesForRisk)
+      const stopLoss = suggestedStopLossFromRisk(row.side, row.entry_price, sharesForRisk, riskAmount)
       if (stopLoss == null) return row
       return { ...row, stop_loss: stopLoss }
     })
