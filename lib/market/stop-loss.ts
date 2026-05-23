@@ -203,7 +203,8 @@ export async function enrichOpenTradesWithStopLosses<T extends StopLossEnrichmen
       const isAddon = !!row.symbol && !!row.entry_time &&
         row.entry_time > (earliestEntryBySymbol.get(row.symbol) ?? '')
       const riskAmount = riskAmountForTrade(isAddon)
-      const stopLoss = suggestedStopLossFromRisk(row.side, row.entry_price, row.shares, riskAmount)
+      const sharesForRisk = openingSharesFromLegs(row.side, row.execution_legs) ?? row.shares
+      const stopLoss = suggestedStopLossFromRisk(row.side, row.entry_price, sharesForRisk, riskAmount)
       if (stopLoss == null) return row
       return { ...row, stop_loss: stopLoss }
     })
