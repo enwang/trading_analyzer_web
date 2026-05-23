@@ -26,7 +26,6 @@ import {
 } from '@/components/ui/table'
 import { riskSharesForTrade } from '@/lib/trades'
 import {
-  DEFAULT_ADDON_RISK_AMOUNT,
   DEFAULT_INITIAL_RISK_AMOUNT,
   initialRiskFromStopLoss,
   suggestedStopLossFromRisk,
@@ -228,31 +227,17 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
   const [filter, setFilter] = useState<OutcomeFilter>(initialFilter)
   const initialDrafts = useMemo(
     () => {
-      const openTrades = trades.filter((t) => t.exitTime == null || t.outcome === 'open')
-      const earliestOpenEntryBySymbol = new Map<string, string>()
-      for (const t of openTrades) {
-        if (!t.symbol || !t.entryTime) continue
-        const prev = earliestOpenEntryBySymbol.get(t.symbol)
-        if (!prev || t.entryTime < prev) earliestOpenEntryBySymbol.set(t.symbol, t.entryTime)
-      }
-
       return Object.fromEntries(
-        trades.map((t) => {
-          const isOpen = t.exitTime == null || t.outcome === 'open'
-          const isAddon = isOpen && !!t.symbol && !!t.entryTime &&
-            t.entryTime > (earliestOpenEntryBySymbol.get(t.symbol) ?? '')
-          const fallbackRisk = isAddon ? DEFAULT_ADDON_RISK_AMOUNT : DEFAULT_INITIAL_RISK_AMOUNT
-          return [
-            t.id,
-            {
-              setupTag: t.setupTag ?? 'untagged',
-              notes: t.notes ?? '',
-              initialRisk: (
-                initialRiskFromStopLoss(t.side, t.entryPrice, riskSharesForTrade(t), t.stopLoss) ?? fallbackRisk
-              ).toFixed(2),
-            },
-          ]
-        })
+        trades.map((t) => [
+          t.id,
+          {
+            setupTag: t.setupTag ?? 'untagged',
+            notes: t.notes ?? '',
+            initialRisk: (
+              initialRiskFromStopLoss(t.side, t.entryPrice, riskSharesForTrade(t), t.stopLoss) ?? DEFAULT_INITIAL_RISK_AMOUNT
+            ).toFixed(2),
+          },
+        ])
       )
     },
     [trades]
