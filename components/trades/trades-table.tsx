@@ -234,9 +234,26 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
       const prev = earliest.get(t.symbol)
       if (!prev || t.entryTime < prev) earliest.set(t.symbol, t.entryTime)
     }
+
+    // Most recent closed trade per symbol — if it was a loss, later entries are not add-ons
+    const mostRecentClosed = new Map<string, { exitTime: string; pnl: number | null }>()
+    for (const t of trades) {
+      if (t.exitTime == null || t.outcome === 'open' || !t.symbol) continue
+      const prev = mostRecentClosed.get(t.symbol)
+      if (!prev || t.exitTime > prev.exitTime) {
+        mostRecentClosed.set(t.symbol, { exitTime: t.exitTime, pnl: t.pnl ?? null })
+      }
+    }
+
     return new Set(
       openTrades
-        .filter((t) => t.symbol && t.entryTime && t.entryTime > (earliest.get(t.symbol) ?? ''))
+        .filter((t) => {
+          if (!t.symbol || !t.entryTime) return false
+          if (t.entryTime <= (earliest.get(t.symbol) ?? '')) return false
+          const lastClosed = mostRecentClosed.get(t.symbol)
+          if (lastClosed?.pnl != null && lastClosed.pnl < 0) return false
+          return true
+        })
         .map((t) => t.id)
     )
   }, [trades])

@@ -35,6 +35,7 @@ export interface StopLossEnrichmentRow {
   entry_price?: number | null
   shares?: number | null
   stop_loss?: number | null
+  pnl?: number | null
   execution_legs?: { action?: string; shares?: number; price?: number; time?: string }[] | null | unknown
 }
 
@@ -196,11 +197,24 @@ export async function enrichOpenTradesWithStopLosses<T extends StopLossEnrichmen
     if (!prev || row.entry_time < prev) earliestEntryBySymbol.set(row.symbol, row.entry_time)
   }
 
+  // Most recent closed trade pnl per symbol — if it was a loss, later entries are not add-ons
+  const mostRecentClosedExitBySymbol = new Map<string, { exit_time: string; pnl: number | null }>()
+  for (const row of rows) {
+    if (row.exit_time == null || !row.symbol) continue
+    const prev = mostRecentClosedExitBySymbol.get(row.symbol)
+    if (!prev || row.exit_time > prev.exit_time) {
+      mostRecentClosedExitBySymbol.set(row.symbol, { exit_time: row.exit_time, pnl: row.pnl ?? null })
+    }
+  }
+
   return Promise.all(
     rows.map(async (row) => {
       if (row.exit_time != null) return row
       if (!row.side) return row
-      const isAddon = !!row.symbol && !!row.entry_time &&
+      const lastClosed = row.symbol ? mostRecentClosedExitBySymbol.get(row.symbol) : undefined
+      const lastClosedWasLoss = lastClosed?.pnl != null && lastClosed.pnl < 0
+      const isAddon = !lastClosedWasLoss &&
+        !!row.symbol && !!row.entry_time &&
         row.entry_time > (earliestEntryBySymbol.get(row.symbol) ?? '')
       const riskAmount = riskAmountForTrade(isAddon)
       const sharesForRisk = openingSharesFromLegs(row.side, row.execution_legs) ?? row.shares
