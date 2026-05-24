@@ -226,36 +226,34 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
     : 'exitTime'
   const initialSortDir: SortDir = dirParam === 'asc' || dirParam === 'desc' ? dirParam : 'desc'
   const [filter, setFilter] = useState<OutcomeFilter>(initialFilter)
-  const initialDrafts = useMemo(
-    () => {
-      const openTrades = trades.filter((t) => t.exitTime == null || t.outcome === 'open')
-      const earliestOpenEntryBySymbol = new Map<string, string>()
-      for (const t of openTrades) {
-        if (!t.symbol || !t.entryTime) continue
-        const prev = earliestOpenEntryBySymbol.get(t.symbol)
-        if (!prev || t.entryTime < prev) earliestOpenEntryBySymbol.set(t.symbol, t.entryTime)
-      }
+  const addonTradeIds = useMemo(() => {
+    const openTrades = trades.filter((t) => t.exitTime == null || t.outcome === 'open')
+    const earliest = new Map<string, string>()
+    for (const t of openTrades) {
+      if (!t.symbol || !t.entryTime) continue
+      const prev = earliest.get(t.symbol)
+      if (!prev || t.entryTime < prev) earliest.set(t.symbol, t.entryTime)
+    }
+    return new Set(
+      openTrades
+        .filter((t) => t.symbol && t.entryTime && t.entryTime > (earliest.get(t.symbol) ?? ''))
+        .map((t) => t.id)
+    )
+  }, [trades])
 
-      return Object.fromEntries(
-        trades.map((t) => {
-          const isOpen = t.exitTime == null || t.outcome === 'open'
-          const isAddon = isOpen && !!t.symbol && !!t.entryTime &&
-            t.entryTime > (earliestOpenEntryBySymbol.get(t.symbol) ?? '')
-          const fallbackRisk = riskAmountForTrade(isAddon)
-          return [
-            t.id,
-            {
-              setupTag: t.setupTag ?? 'untagged',
-              notes: t.notes ?? '',
-              initialRisk: (
-                initialRiskFromStopLoss(t.side, t.entryPrice, riskSharesForTrade(t), t.stopLoss) ?? fallbackRisk
-              ).toFixed(2),
-            },
-          ]
-        })
-      )
-    },
-    [trades]
+  const initialDrafts = useMemo(
+    () =>
+      Object.fromEntries(
+        trades.map((t) => [
+          t.id,
+          {
+            setupTag: t.setupTag ?? 'untagged',
+            notes: t.notes ?? '',
+            initialRisk: riskAmountForTrade(addonTradeIds.has(t.id)).toFixed(2),
+          },
+        ])
+      ),
+    [trades, addonTradeIds]
   )
   const [drafts, setDrafts] = useState<Record<string, { setupTag: string; notes: string; initialRisk: string }>>(
     () => initialDrafts
@@ -567,9 +565,10 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
   }
 
   function initialRisk(t: Trade, stopLossOverride?: number | null) {
-    const sharesForRisk = riskShares(t)
-    const stopLoss = stopLossOverride ?? t.stopLoss
-    return initialRiskFromStopLoss(t.side, t.entryPrice, sharesForRisk, stopLoss)
+    if (stopLossOverride != null) {
+      return initialRiskFromStopLoss(t.side, t.entryPrice, riskShares(t), stopLossOverride)
+    }
+    return riskAmountForTrade(addonTradeIds.has(t.id))
   }
 
   function initialRiskPct(t: Trade, stopLossOverride?: number | null) {
