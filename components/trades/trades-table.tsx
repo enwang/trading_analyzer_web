@@ -268,7 +268,9 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
           {
             setupTag: t.setupTag ?? 'untagged',
             notes: t.notes ?? '',
-            initialRisk: riskAmountForTrade(addonTradeIds.has(t.id)).toFixed(2),
+            initialRisk: t.initialRiskAmount != null
+              ? t.initialRiskAmount.toFixed(2)
+              : riskAmountForTrade(addonTradeIds.has(t.id)).toFixed(2),
           },
         ])
       ),
@@ -840,6 +842,8 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
       if (parsedInitialRisk != null && (!Number.isFinite(parsedInitialRisk) || parsedInitialRisk <= 0)) {
         return
       }
+      const systemDefaultRisk = riskAmountForTrade(addonTradeIds.has(id))
+      const isCustomRisk = parsedInitialRisk == null || parsedInitialRisk !== systemDefaultRisk
       const trade = tradeById.get(id)
       const parsedStopLoss = trade && parsedInitialRisk != null
         ? suggestedStopLossFromRisk(trade.side, trade.entryPrice, riskShares(trade), parsedInitialRisk)
@@ -848,7 +852,15 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
       const riskRes = await fetch(`/api/trades/${id}/risk`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stopLoss: parsedStopLoss, rMultiple: nextR }),
+        body: JSON.stringify({
+          stopLoss: parsedStopLoss,
+          rMultiple: nextR,
+          // Only persist custom risk amounts and lock stop_loss when user explicitly changed it
+          ...(isCustomRisk ? {
+            initialRiskAmount: parsedInitialRisk,
+            stopLossLocked: parsedInitialRisk != null,
+          } : {}),
+        }),
       })
       const riskJson = await riskRes.json()
       if (!riskRes.ok) {

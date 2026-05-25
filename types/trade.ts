@@ -23,6 +23,8 @@ export interface Trade {
   hourOfDay: number | null
   dayOfWeek: string | null
   stopLoss: number | null
+  stopLossLocked: boolean
+  initialRiskAmount: number | null
   rMultiple: number | null
   needsReview: boolean
   setupTag: string
@@ -53,6 +55,8 @@ export interface TradeRow {
   hour_of_day: number | null
   day_of_week: string | null
   stop_loss?: number | null
+  stop_loss_locked?: boolean | null
+  initial_risk_amount?: number | null
   r_multiple: number | null
   needs_review?: boolean | null
   setup_tag: string
@@ -83,6 +87,8 @@ export function rowToTrade(r: TradeRow): Trade {
     hourOfDay: r.hour_of_day,
     dayOfWeek: r.day_of_week,
     stopLoss: r.stop_loss ?? null,
+    stopLossLocked: r.stop_loss_locked ?? false,
+    initialRiskAmount: r.initial_risk_amount ?? null,
     rMultiple: r.r_multiple,
     needsReview: r.needs_review ?? false,
     setupTag: r.setup_tag ?? 'untagged',

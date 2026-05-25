@@ -9,8 +9,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { TradeSummaryCard } from '@/components/trades/trade-summary-card'
 import { TradeAiAnalyzer } from '@/components/trades/trade-ai-analyzer'
 import type { ExecutionLeg } from '@/types/trade'
-import { riskSharesForTrade } from '@/lib/trades'
-import { initialRiskFromStopLoss } from '@/lib/market/stop-loss'
 
 type Side = 'long' | 'short' | null
 
@@ -32,6 +30,7 @@ interface Props {
   source: string
   initialStopLoss: number | null
   initialRMultiple: number | null
+  initialRiskAmount: number | null
   initialMfe: number | null
   initialMae: number | null
   executionLegs: ExecutionLeg[] | null
@@ -155,15 +154,6 @@ export function TradeDetailTabs(props: Props) {
       ? computeR(props.side, props.entryPrice, props.exitPrice, liveStopLoss)
       : null
   )
-  const riskShares = riskSharesForTrade({
-    side: props.side,
-    shares: props.shares,
-    exitTime: props.exitTime,
-    outcome: null,
-    executionLegs: props.executionLegs,
-  })
-  const displayInitialRisk = initialRiskFromStopLoss(props.side, props.entryPrice, riskShares, liveStopLoss)
-
   return (
     <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'summary' | 'executions' | 'ai')} className="w-full">
       <TabsList className="grid w-full grid-cols-3">
@@ -189,6 +179,7 @@ export function TradeDetailTabs(props: Props) {
           source={props.source}
           initialStopLoss={props.initialStopLoss}
           initialRMultiple={props.initialRMultiple}
+          initialRiskAmount={props.initialRiskAmount}
           initialMfe={props.initialMfe}
           initialMae={props.initialMae}
           executionLegs={props.executionLegs}

@@ -8,7 +8,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import {
   DEFAULT_INITIAL_RISK_AMOUNT,
-  initialRiskFromStopLoss,
   suggestedStopLossFromRisk,
 } from '@/lib/market/stop-loss'
 import { riskSharesForTrade } from '@/lib/trades'
@@ -32,6 +31,7 @@ interface Props {
   source: string
   initialStopLoss: number | null
   initialRMultiple: number | null
+  initialRiskAmount: number | null
   initialMfe: number | null
   initialMae: number | null
   executionLegs: ExecutionLeg[] | null
@@ -108,6 +108,7 @@ export function TradeSummaryCard({
   source,
   initialStopLoss,
   initialRMultiple,
+  initialRiskAmount,
   initialMfe,
   initialMae,
   executionLegs,
@@ -125,10 +126,7 @@ export function TradeSummaryCard({
     [side, shares, exitTime, executionLegs]
   )
   const [initialRiskInput, setInitialRiskInput] = useState(
-    () => (
-      initialRiskFromStopLoss(side, entryPrice, riskShares, initialStopLoss)
-        ?? DEFAULT_INITIAL_RISK_AMOUNT
-    ).toFixed(2)
+    () => (initialRiskAmount ?? DEFAULT_INITIAL_RISK_AMOUNT).toFixed(2)
   )
   const [savedR, setSavedR] = useState<number | null>(initialRMultiple)
   const [error, setError] = useState<string | null>(null)
@@ -188,16 +186,16 @@ export function TradeSummaryCard({
     return () => { canceled = true }
   }, [tradeId, symbol, entryTime, exitTime, side, entryPrice, shares])
 
-  const initialRiskAmount = useMemo(() => {
+  const parsedInitialRisk = useMemo(() => {
     if (initialRiskInput.trim() === '') return null
     const n = Number(initialRiskInput)
     return Number.isFinite(n) && n > 0 ? n : null
   }, [initialRiskInput])
 
   const stopLoss = useMemo(() => {
-    if (initialRiskAmount == null) return null
-    return suggestedStopLossFromRisk(side, entryPrice, riskShares, initialRiskAmount)
-  }, [side, entryPrice, riskShares, initialRiskAmount])
+    if (parsedInitialRisk == null) return null
+    return suggestedStopLossFromRisk(side, entryPrice, riskShares, parsedInitialRisk)
+  }, [side, entryPrice, riskShares, parsedInitialRisk])
 
   const riskPerShare = useMemo(() => {
     if (!side || entryPrice == null || stopLoss == null) return null
@@ -216,13 +214,17 @@ export function TradeSummaryCard({
     return computeR(side, entryPrice, exitPrice, stopLoss)
   }, [side, entryPrice, exitPrice, stopLoss])
 
-  async function saveRisk(nextStopLoss: number | null, nextR: number | null) {
+  async function saveRisk(nextStopLoss: number | null, nextR: number | null, nextInitialRisk?: number | null) {
     setError(null)
     try {
       const res = await fetch(`/api/trades/${tradeId}/risk`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stopLoss: nextStopLoss, rMultiple: nextR }),
+        body: JSON.stringify({
+          stopLoss: nextStopLoss,
+          rMultiple: nextR,
+          ...(nextInitialRisk !== undefined ? { initialRiskAmount: nextInitialRisk } : {}),
+        }),
       })
       const json = await res.json()
       if (!res.ok) {
@@ -243,11 +245,11 @@ export function TradeSummaryCard({
     if (currentKey === lastSavedKey) return
 
     const timer = setTimeout(() => {
-      void saveRisk(stopLoss, liveR)
+      void saveRisk(stopLoss, liveR, parsedInitialRisk)
     }, 700)
 
     return () => clearTimeout(timer)
-  }, [stopLoss, liveR, lastSavedKey])
+  }, [stopLoss, liveR, lastSavedKey, parsedInitialRisk])
 
   return (
     <Card>

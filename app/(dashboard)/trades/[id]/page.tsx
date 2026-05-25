@@ -82,6 +82,7 @@ export default async function TradeDetailsPage({
           source={trade.source}
           initialStopLoss={trade.stopLoss}
           initialRMultiple={trade.rMultiple}
+          initialRiskAmount={trade.initialRiskAmount}
           initialMfe={trade.mfe}
           initialMae={trade.mae}
           executionLegs={trade.executionLegs}
