@@ -330,19 +330,21 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
         timeFormatter: (time: number) => {
           const ms = Number(time) * 1000
           const d = new Date(ms)
-          if (timeframe === '1D') {
-            return new Intl.DateTimeFormat('en-US', {
-              timeZone: userTimeZone,
-              weekday: 'short',
-              month: 'short',
-              day: 'numeric',
-              year: '2-digit',
-            }).format(d)
-          }
-          const weekday = new Intl.DateTimeFormat('en-US', { timeZone: userTimeZone, weekday: 'short' }).format(d)
-          const date = new Intl.DateTimeFormat('en-US', { timeZone: userTimeZone, month: 'short', day: 'numeric' }).format(d)
-          const time = new Intl.DateTimeFormat('en-US', { timeZone: userTimeZone, hour: '2-digit', minute: '2-digit', hour12: false }).format(d)
-          return `${weekday}, ${date} ${time}`
+          const datePart = new Intl.DateTimeFormat('en-US', {
+            timeZone: userTimeZone,
+            weekday: 'short',
+            month: 'short',
+            day: 'numeric',
+            year: '2-digit',
+          }).format(d)
+          if (timeframe === '1D') return datePart
+          const timePart = new Intl.DateTimeFormat('en-US', {
+            timeZone: userTimeZone,
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false,
+          }).format(d)
+          return `${datePart} ${timePart}`
         },
       },
     })

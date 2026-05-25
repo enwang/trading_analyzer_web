@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server'
 
-// Ordered by preference — Claude Haiku used when OpenRouter account has credits,
-// falls back to the best-available free model.
+// Ordered by preference. Free models tried in sequence; first success wins.
 const MODELS = [
-  'anthropic/claude-haiku-4-5',
+  'qwen/qwen3-next-80b-a3b-instruct:free',
+  'meta-llama/llama-3.3-70b-instruct:free',
+  'google/gemma-4-26b-a4b-it:free',
+  'google/gemma-4-31b-it:free',
   'liquid/lfm-2.5-1.2b-instruct:free',
 ]
 
@@ -48,7 +50,8 @@ export async function POST(request: Request) {
         continue
       }
 
-      const refined = json.choices?.[0]?.message?.content?.trim()
+      const raw = json.choices?.[0]?.message?.content ?? ''
+      const refined = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
       if (refined) return NextResponse.json({ refined })
     }
 
