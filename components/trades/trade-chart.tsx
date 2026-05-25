@@ -312,8 +312,11 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
             return new Intl.DateTimeFormat('en-US', { timeZone: userTimeZone, month: 'short' }).format(d)
           }
           if (tickMarkType === 2) {
-            return new Intl.DateTimeFormat('en-US', { timeZone: userTimeZone, month: 'short', day: 'numeric' }).format(d)
+            const weekday = new Intl.DateTimeFormat('en-US', { timeZone: userTimeZone, weekday: 'short' }).format(d)
+            const day = new Intl.DateTimeFormat('en-US', { timeZone: userTimeZone, day: 'numeric' }).format(d)
+            return `${weekday} ${day}`
           }
+          if (timeframe === '1D') return ''
           return new Intl.DateTimeFormat('en-US', {
             timeZone: userTimeZone,
             hour: '2-digit',
@@ -326,6 +329,16 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
         locale: 'en-US',
         timeFormatter: (time: number) => {
           const ms = Number(time) * 1000
+          const d = new Date(ms)
+          if (timeframe === '1D') {
+            return new Intl.DateTimeFormat('en-US', {
+              timeZone: userTimeZone,
+              weekday: 'short',
+              month: 'short',
+              day: 'numeric',
+              year: '2-digit',
+            }).format(d)
+          }
           return new Intl.DateTimeFormat('en-US', {
             timeZone: userTimeZone,
             month: '2-digit',
@@ -333,7 +346,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
             hour: '2-digit',
             minute: '2-digit',
             hour12: false,
-          }).format(new Date(ms))
+          }).format(d)
         },
       },
     })
