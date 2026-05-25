@@ -136,16 +136,18 @@ export function TradeSummaryCard({
   const [maePct, setMaePct] = useState<number | null>(null)
   const [mfeMaeDebug, setMfeMaeDebug] = useState<{ maxHigh: number; minLow: number; interval: string; maxHighTime: string; minLowTime: string } | null>(null)
   const [mfeMaeLoading, setMfeMaeLoading] = useState(false)
+  const [openTradeR, setOpenTradeR] = useState<number | null>(null)
   const [lastSavedKey, setLastSavedKey] = useState(
     JSON.stringify({ stopLoss: initialStopLoss, rMultiple: initialRMultiple })
   )
 
-  // Fetch fresh MFE/MAE from market data. For open trades, use current time as exit.
-  // Also captures lastPrice (current market price) for open-trade R computation.
+  // Fetch fresh MFE/MAE from market data for open trades only.
+  // Closed trades read initialMfe/initialMae from DB (no Yahoo fetch needed).
   useEffect(() => {
+    if (exitTime != null) return
     if (!entryTime || !side || entryPrice == null || shares == null) return
 
-    const effectiveExitTime = exitTime ?? new Date().toISOString()
+    const effectiveExitTime = new Date().toISOString()
     let canceled = false
 
     async function fetchMfeMae() {
@@ -186,7 +188,7 @@ export function TradeSummaryCard({
 
     void fetchMfeMae()
     return () => { canceled = true }
-  }, [tradeId, symbol, entryTime, exitTime, side, entryPrice, shares])
+  }, [tradeId, symbol, entryTime, side, entryPrice, shares])
 
   const parsedInitialRisk = useMemo(() => {
     if (initialRiskInput.trim() === '') return null
@@ -242,6 +244,31 @@ export function TradeSummaryCard({
     }
   }
 
+  // For open trades: fetch current price from quotes API and compute R using
+  // the same formula as the trades table (totalCurrentPnl / initialRisk).
+  useEffect(() => {
+    if (exitTime != null) return
+    if (!side || entryPrice == null || parsedInitialRisk == null || parsedInitialRisk <= 0) return
+    const absShares = Math.abs(shares ?? 0)
+    if (absShares === 0) return
+
+    let canceled = false
+    async function fetchR() {
+      const res = await fetch(`/api/market/quotes?symbols=${encodeURIComponent(symbol)}`)
+      if (canceled || !res.ok) return
+      const json = await res.json() as { quotes: Record<string, number | null> }
+      const price = json.quotes?.[symbol.trim().toUpperCase()] ?? null
+      if (price == null || canceled) return
+      const unrealized = side === 'long'
+        ? (price - entryPrice!) * absShares
+        : (entryPrice! - price) * absShares
+      const r = ((pnl ?? 0) + unrealized) / parsedInitialRisk!
+      if (Number.isFinite(r)) setOpenTradeR(r)
+    }
+    void fetchR()
+    return () => { canceled = true }
+  }, [exitTime, symbol, side, entryPrice, shares, pnl, parsedInitialRisk])
+
   useEffect(() => {
     if (stopLoss == null) return
     const currentKey = JSON.stringify({ stopLoss, rMultiple: liveR })
@@ -293,7 +320,11 @@ export function TradeSummaryCard({
         </div>
 
         <Row label="Initial Risk %" value={initialRiskPct != null ? `${initialRiskPct.toFixed(2)}%` : '—'} />
-        <Row label="R Multiple" value={savedR != null ? savedR.toFixed(2) : '—'} />
+        <Row label="R Multiple" value={
+          exitTime == null
+            ? ((openTradeR ?? savedR) != null ? (openTradeR ?? savedR)!.toFixed(2) : '—')
+            : (savedR != null ? savedR.toFixed(2) : '—')
+        } />
 
         <div className="border-b py-2">
           <div className="flex items-center justify-between">

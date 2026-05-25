@@ -37,17 +37,14 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Invalid entryTime or exitTime' }, { status: 400 })
   }
 
-  // Choose interval by age only — never by duration.
-  // Daily bars capture the full session range including before-entry / after-exit time,
-  // which gives wrong MFE/MAE for multi-day trades that enter/exit mid-session.
-  // Use the finest available resolution so the candle-overlap filter is precise.
+  // Choose interval by age — finest resolution available for the data's age.
   const ageMs = Date.now() - entryMs
-  const DAY = 86_400_000
+  const DAY   = 86_400_000
 
   let interval: string
-  if (ageMs <= 7 * DAY)  interval = '1m'
-  else if (ageMs <= 60 * DAY) interval = '5m'
-  else interval = '1d'
+  if (ageMs <= 7 * DAY)        interval = '1m'
+  else if (ageMs <= 60 * DAY)  interval = '5m'
+  else                         interval = '1d'
 
   // Fetch slightly wider than the trade to ensure the boundary candles are included
   const period1 = Math.floor((entryMs - 60_000) / 1000)   // pull back so entry candle is fetched
