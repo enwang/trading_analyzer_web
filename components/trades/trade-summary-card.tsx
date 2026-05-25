@@ -136,23 +136,26 @@ export function TradeSummaryCard({
   const [maePct, setMaePct] = useState<number | null>(null)
   const [mfeMaeDebug, setMfeMaeDebug] = useState<{ maxHigh: number; minLow: number; interval: string; maxHighTime: string; minLowTime: string } | null>(null)
   const [mfeMaeLoading, setMfeMaeLoading] = useState(false)
+  const [liveCurrentPrice, setLiveCurrentPrice] = useState<number | null>(null)
   const [lastSavedKey, setLastSavedKey] = useState(
     JSON.stringify({ stopLoss: initialStopLoss, rMultiple: initialRMultiple })
   )
 
-  // Always fetch fresh MFE/MAE from market data so stale stored values are corrected.
-  // Display is always from the fresh fetch; DB is updated whenever the value changes.
+  // Fetch fresh MFE/MAE from market data. For open trades, use current time as exit.
+  // Also captures lastPrice (current market price) for open-trade R computation.
   useEffect(() => {
-    if (!entryTime || !exitTime || !side || entryPrice == null || shares == null) return
+    if (!entryTime || !side || entryPrice == null || shares == null) return
 
+    const effectiveExitTime = exitTime ?? new Date().toISOString()
     let canceled = false
+
     async function fetchMfeMae() {
       setMfeMaeLoading(true)
       try {
         const params = new URLSearchParams({
           symbol,
           entryTime: entryTime!,
-          exitTime: exitTime!,
+          exitTime: effectiveExitTime,
           side: side!,
           entryPrice: String(entryPrice),
           shares: String(shares),
@@ -160,13 +163,14 @@ export function TradeSummaryCard({
         const res = await fetch(`/api/market/mfe-mae?${params}`)
         if (canceled) return
         if (!res.ok) return
-        const json = await res.json() as { mfe: number; mae: number; mfePct: number; maePct: number; maxHigh: number; minLow: number; interval: string; maxHighTime: string; minLowTime: string }
+        const json = await res.json() as { mfe: number; mae: number; mfePct: number; maePct: number; maxHigh: number; minLow: number; interval: string; maxHighTime: string; minLowTime: string; lastPrice: number | null }
         if (canceled) return
         setMfe(json.mfe)
         setMae(json.mae)
         setMfePct(json.mfePct)
         setMaePct(json.maePct)
         setMfeMaeDebug({ maxHigh: json.maxHigh, minLow: json.minLow, interval: json.interval, maxHighTime: json.maxHighTime, minLowTime: json.minLowTime })
+        if (json.lastPrice != null) setLiveCurrentPrice(json.lastPrice)
         // Persist to DB if value changed
         if (json.mfe !== initialMfe || json.mae !== initialMae) {
           await fetch(`/api/trades/${tradeId}/mfe-mae`, {
@@ -213,6 +217,12 @@ export function TradeSummaryCard({
     if (!side || entryPrice == null || exitPrice == null || stopLoss == null) return null
     return computeR(side, entryPrice, exitPrice, stopLoss)
   }, [side, entryPrice, exitPrice, stopLoss])
+
+  const openTradeR = useMemo(() => {
+    if (exitTime != null) return null
+    if (!side || entryPrice == null || liveCurrentPrice == null || stopLoss == null) return null
+    return computeR(side, entryPrice, liveCurrentPrice, stopLoss)
+  }, [exitTime, side, entryPrice, liveCurrentPrice, stopLoss])
 
   async function saveRisk(nextStopLoss: number | null, nextR: number | null, nextInitialRisk?: number | null) {
     setError(null)
@@ -290,7 +300,11 @@ export function TradeSummaryCard({
         </div>
 
         <Row label="Initial Risk %" value={initialRiskPct != null ? `${initialRiskPct.toFixed(2)}%` : '—'} />
-        <Row label="R Multiple" value={savedR != null ? savedR.toFixed(2) : '—'} />
+        <Row label="R Multiple" value={
+          exitTime == null
+            ? (openTradeR != null ? openTradeR.toFixed(2) : '—')
+            : (savedR != null ? savedR.toFixed(2) : '—')
+        } />
 
         <div className="border-b py-2">
           <div className="flex items-center justify-between">

@@ -3,11 +3,15 @@ import { NextResponse } from 'next/server'
 interface YahooChartResponse {
   chart?: {
     result?: Array<{
+      meta?: {
+        regularMarketPrice?: number | null
+      }
       timestamp?: number[]
       indicators?: {
         quote?: Array<{
           high?: Array<number | null>
           low?: Array<number | null>
+          close?: Array<number | null>
         }>
       }
     }>
@@ -64,10 +68,12 @@ export async function GET(request: Request) {
 
   const payload    = (await response.json()) as YahooChartResponse
   const result     = payload.chart?.result?.[0]
-  const timestamps = result?.timestamp ?? []
-  const quote      = result?.indicators?.quote?.[0]
-  const highs      = quote?.high ?? []
-  const lows       = quote?.low  ?? []
+  const timestamps  = result?.timestamp ?? []
+  const quote       = result?.indicators?.quote?.[0]
+  const highs       = quote?.high   ?? []
+  const lows        = quote?.low    ?? []
+  const closes      = quote?.close  ?? []
+  const marketPrice = result?.meta?.regularMarketPrice
 
   if (!timestamps.length) {
     return NextResponse.json({ error: 'No market data available for this symbol/timeframe' }, { status: 404 })
@@ -87,6 +93,7 @@ export async function GET(request: Request) {
   let minLow     = +Infinity
   let maxHighMs  = 0
   let minLowMs   = 0
+  let lastClose: number | null = null
   let hasData    = false
 
   for (let i = 0; i < timestamps.length; i++) {
@@ -99,6 +106,8 @@ export async function GET(request: Request) {
     if (h == null || !Number.isFinite(h) || l == null || !Number.isFinite(l)) continue
     if (h > maxHigh) { maxHigh = h; maxHighMs = candleMs }
     if (l < minLow)  { minLow  = l; minLowMs  = candleMs }
+    const c = closes[i]
+    if (c != null && Number.isFinite(c)) lastClose = c
     hasData = true
   }
 
@@ -123,5 +132,9 @@ export async function GET(request: Request) {
   const mfePct = cost > 0 ? mfe / cost : 0
   const maePct = cost > 0 ? mae / cost : 0
 
-  return NextResponse.json({ mfe, mae, mfePct, maePct, interval, maxHigh, minLow, maxHighTime: new Date(maxHighMs).toISOString(), minLowTime: new Date(minLowMs).toISOString() })
+  const lastPrice = (typeof marketPrice === 'number' && Number.isFinite(marketPrice))
+    ? marketPrice
+    : lastClose
+
+  return NextResponse.json({ mfe, mae, mfePct, maePct, interval, maxHigh, minLow, maxHighTime: new Date(maxHighMs).toISOString(), minLowTime: new Date(minLowMs).toISOString(), lastPrice })
 }
