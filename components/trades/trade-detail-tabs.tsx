@@ -112,19 +112,10 @@ function fmtPrice(n: number | null) {
   return `$${n.toFixed(2)}`
 }
 
-function computeR(side: Side, entry: number, exit: number, stop: number): number | null {
-  const risk = side === 'long' ? entry - stop : stop - entry
-  if (risk <= 0) return null
-  const reward = side === 'long' ? exit - entry : entry - exit
-  return reward / risk
-}
-
 export function TradeDetailTabs(props: Props) {
   const [activeTab, setActiveTab] = useState<'summary' | 'executions' | 'ai'>('executions')
   const mergedExecutionLegs = mergeExecutionLegs(props.executionLegs)
 
-  const [liveStopLoss, setLiveStopLoss] = useState<number | null>(props.initialStopLoss)
-  const [liveRMultiple, setLiveRMultiple] = useState<number | null>(props.initialRMultiple)
   const [markedForReview, setMarkedForReview] = useState<boolean>(props.needsReview)
   const [reviewError, setReviewError] = useState<string | null>(null)
 
@@ -149,11 +140,6 @@ export function TradeDetailTabs(props: Props) {
     }
   }
 
-  const displayR = liveRMultiple ?? (
-    props.side && props.entryPrice != null && props.exitPrice != null && liveStopLoss != null
-      ? computeR(props.side, props.entryPrice, props.exitPrice, liveStopLoss)
-      : null
-  )
   return (
     <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'summary' | 'executions' | 'ai')} className="w-full">
       <TabsList className="grid w-full grid-cols-3">
@@ -183,7 +169,6 @@ export function TradeDetailTabs(props: Props) {
           initialMfe={props.initialMfe}
           initialMae={props.initialMae}
           executionLegs={props.executionLegs}
-          onStopLossSaved={(sl, r) => { setLiveStopLoss(sl); setLiveRMultiple(r) }}
         />
       </TabsContent>
 

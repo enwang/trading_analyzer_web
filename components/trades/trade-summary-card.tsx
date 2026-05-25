@@ -290,7 +290,7 @@ export function TradeSummaryCard({
         </div>
 
         <Row label="Initial Risk %" value={initialRiskPct != null ? `${initialRiskPct.toFixed(2)}%` : '—'} />
-        <Row label="R Multiple" value={liveR != null ? liveR.toFixed(2) : savedR != null ? savedR.toFixed(2) : '—'} />
+        <Row label="R Multiple" value={savedR != null ? savedR.toFixed(2) : '—'} />
 
         <div className="border-b py-2">
           <div className="flex items-center justify-between">
