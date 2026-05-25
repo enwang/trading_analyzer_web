@@ -1063,9 +1063,11 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                 className={isMarkedForReview ? 'bg-amber-50/80 hover:bg-amber-100/80' : 'hover:bg-muted/40'}
               >
                 {visibleColumnOrder.map((col) => {
+                  const tableR = computedR(t, effectiveStopLoss) ?? t.rMultiple
                   const detailsHref = `/trades/${t.id}?${(() => {
                     const params = new URLSearchParams(searchParamsString)
                     params.set('view', filter)
+                    if (tableR != null) params.set('r', tableR.toFixed(4))
                     return params.toString()
                   })()}`
                   if (col === 'symbol') {

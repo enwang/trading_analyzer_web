@@ -136,7 +136,6 @@ export function TradeSummaryCard({
   const [maePct, setMaePct] = useState<number | null>(null)
   const [mfeMaeDebug, setMfeMaeDebug] = useState<{ maxHigh: number; minLow: number; interval: string; maxHighTime: string; minLowTime: string } | null>(null)
   const [mfeMaeLoading, setMfeMaeLoading] = useState(false)
-  const [liveCurrentPrice, setLiveCurrentPrice] = useState<number | null>(null)
   const [lastSavedKey, setLastSavedKey] = useState(
     JSON.stringify({ stopLoss: initialStopLoss, rMultiple: initialRMultiple })
   )
@@ -170,7 +169,6 @@ export function TradeSummaryCard({
         setMfePct(json.mfePct)
         setMaePct(json.maePct)
         setMfeMaeDebug({ maxHigh: json.maxHigh, minLow: json.minLow, interval: json.interval, maxHighTime: json.maxHighTime, minLowTime: json.minLowTime })
-        if (json.lastPrice != null) setLiveCurrentPrice(json.lastPrice)
         // Persist to DB if value changed
         if (json.mfe !== initialMfe || json.mae !== initialMae) {
           await fetch(`/api/trades/${tradeId}/mfe-mae`, {
@@ -218,11 +216,6 @@ export function TradeSummaryCard({
     return computeR(side, entryPrice, exitPrice, stopLoss)
   }, [side, entryPrice, exitPrice, stopLoss])
 
-  const openTradeR = useMemo(() => {
-    if (exitTime != null) return null
-    if (!side || entryPrice == null || liveCurrentPrice == null || stopLoss == null) return null
-    return computeR(side, entryPrice, liveCurrentPrice, stopLoss)
-  }, [exitTime, side, entryPrice, liveCurrentPrice, stopLoss])
 
   async function saveRisk(nextStopLoss: number | null, nextR: number | null, nextInitialRisk?: number | null) {
     setError(null)
@@ -300,11 +293,7 @@ export function TradeSummaryCard({
         </div>
 
         <Row label="Initial Risk %" value={initialRiskPct != null ? `${initialRiskPct.toFixed(2)}%` : '—'} />
-        <Row label="R Multiple" value={
-          exitTime == null
-            ? (openTradeR != null ? openTradeR.toFixed(2) : '—')
-            : (savedR != null ? savedR.toFixed(2) : '—')
-        } />
+        <Row label="R Multiple" value={savedR != null ? savedR.toFixed(2) : '—'} />
 
         <div className="border-b py-2">
           <div className="flex items-center justify-between">

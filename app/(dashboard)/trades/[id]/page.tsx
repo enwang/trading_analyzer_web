@@ -18,10 +18,10 @@ export default async function TradeDetailsPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ view?: string; date?: string; sort?: string; dir?: string; from?: string }>
+  searchParams: Promise<{ view?: string; date?: string; sort?: string; dir?: string; from?: string; r?: string }>
 }) {
   const { id } = await params
-  const { view, date, sort, dir, from } = await searchParams
+  const { view, date, sort, dir, from, r: rParam } = await searchParams
   const fromOverview = from === 'overview'
   const safeView = view === 'all' || view === 'win' || view === 'loss' || view === 'open' || view === 'marked' || view === 'lastweek'
     ? view
@@ -50,6 +50,8 @@ export default async function TradeDetailsPage({
   if (!row) notFound()
 
   const trade = rowToTrade(row)
+  const passedR = rParam != null ? Number(rParam) : null
+  const initialRMultiple = (passedR != null && Number.isFinite(passedR)) ? passedR : trade.rMultiple
 
   return (
     <div className="space-y-4">
@@ -81,7 +83,7 @@ export default async function TradeDetailsPage({
           notes={trade.notes}
           source={trade.source}
           initialStopLoss={trade.stopLoss}
-          initialRMultiple={trade.rMultiple}
+          initialRMultiple={initialRMultiple}
           initialRiskAmount={trade.initialRiskAmount}
           initialMfe={trade.mfe}
           initialMae={trade.mae}
