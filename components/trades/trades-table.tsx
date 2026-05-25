@@ -249,9 +249,11 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
       openTrades
         .filter((t) => {
           if (!t.symbol || !t.entryTime) return false
-          if (t.entryTime <= (earliest.get(t.symbol) ?? '')) return false
+          const earliestOpen = earliest.get(t.symbol) ?? ''
+          if (t.entryTime <= earliestOpen) return false
           const lastClosed = mostRecentClosed.get(t.symbol)
-          if (lastClosed?.pnl != null && lastClosed.pnl < 0) return false
+          // Only block add-on if the loss closed AFTER the earliest open entry
+          if (lastClosed?.pnl != null && lastClosed.pnl < 0 && lastClosed.exitTime > earliestOpen) return false
           return true
         })
         .map((t) => t.id)

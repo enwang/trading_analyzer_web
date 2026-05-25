@@ -35,6 +35,7 @@ export interface StopLossEnrichmentRow {
   entry_price?: number | null
   shares?: number | null
   stop_loss?: number | null
+  stop_loss_locked?: boolean | null
   pnl?: number | null
   execution_legs?: { action?: string; shares?: number; price?: number; time?: string }[] | null | unknown
 }
@@ -187,11 +188,15 @@ function openingSharesFromLegs(side: string | null, legs: unknown): number | nul
 
 export async function enrichOpenTradesWithStopLosses<T extends StopLossEnrichmentRow>(
   rows: T[],
+  contextRows: StopLossEnrichmentRow[] = [],
   _lookup: (symbol: string, entryTime: string) => Promise<PreEntryExtremes | null> = fetchPreEntryExtremes
 ): Promise<T[]> {
-  const openRows = rows.filter((r) => r.exit_time == null)
+  // Use rows + contextRows for add-on detection so older open trades from DB are visible
+  const allForDetection = [...rows, ...contextRows]
+
+  const openForDetection = allForDetection.filter((r) => r.exit_time == null)
   const earliestEntryBySymbol = new Map<string, string>()
-  for (const row of openRows) {
+  for (const row of openForDetection) {
     if (!row.symbol || !row.entry_time) continue
     const prev = earliestEntryBySymbol.get(row.symbol)
     if (!prev || row.entry_time < prev) earliestEntryBySymbol.set(row.symbol, row.entry_time)
@@ -199,7 +204,7 @@ export async function enrichOpenTradesWithStopLosses<T extends StopLossEnrichmen
 
   // Most recent closed trade pnl per symbol — if it was a loss, later entries are not add-ons
   const mostRecentClosedExitBySymbol = new Map<string, { exit_time: string; pnl: number | null }>()
-  for (const row of rows) {
+  for (const row of allForDetection) {
     if (row.exit_time == null || !row.symbol) continue
     const prev = mostRecentClosedExitBySymbol.get(row.symbol)
     if (!prev || row.exit_time > prev.exit_time) {
@@ -211,11 +216,16 @@ export async function enrichOpenTradesWithStopLosses<T extends StopLossEnrichmen
     rows.map(async (row) => {
       if (row.exit_time != null) return row
       if (!row.side) return row
+      if (row.stop_loss_locked) return row  // preserve manually locked stop_loss
+      const earliestOpen = earliestEntryBySymbol.get(row.symbol) ?? ''
       const lastClosed = row.symbol ? mostRecentClosedExitBySymbol.get(row.symbol) : undefined
-      const lastClosedWasLoss = lastClosed?.pnl != null && lastClosed.pnl < 0
+      // Only block add-on if the loss closed AFTER the earliest open entry — an old loss from months
+      // ago (before the current position was opened) should not affect add-on detection.
+      const lastClosedWasLoss = !!lastClosed && lastClosed.pnl != null && lastClosed.pnl < 0 &&
+        lastClosed.exit_time > earliestOpen
       const isAddon = !lastClosedWasLoss &&
         !!row.symbol && !!row.entry_time &&
-        row.entry_time > (earliestEntryBySymbol.get(row.symbol) ?? '')
+        row.entry_time > earliestOpen
       const riskAmount = riskAmountForTrade(isAddon)
       const sharesForRisk = openingSharesFromLegs(row.side, row.execution_legs) ?? row.shares
       const stopLoss = suggestedStopLossFromRisk(row.side, row.entry_price, sharesForRisk, riskAmount)

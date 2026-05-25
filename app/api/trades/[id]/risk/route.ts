@@ -27,6 +27,7 @@ export async function PATCH(
     .from('trades')
     .update({
       stop_loss: payload.stopLoss,
+      stop_loss_locked: payload.stopLoss != null,
       r_multiple: payload.rMultiple,
     })
     .eq('id', id)

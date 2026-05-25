@@ -136,11 +136,11 @@ export async function GET(request: Request) {
           // Fetch ALL existing trades (open and closed) to preserve manual fields
           const { data: existingRows } = await supabase
             .from('trades')
-            .select('symbol, entry_time, exit_time, stop_loss, r_multiple, setup_tag, notes, needs_review, execution_legs')
+            .select('symbol, entry_time, exit_time, side, stop_loss, stop_loss_locked, r_multiple, setup_tag, notes, needs_review, execution_legs, pnl')
             .eq('user_id', s.user_id)
             .in('symbol', touchedSymbols)
 
-          type ExistingRow = { symbol: string; entry_time: string | null; exit_time: string | null; stop_loss: number | null; r_multiple: number | null; setup_tag: string | null; notes: string | null; needs_review: boolean | null; execution_legs: unknown | null }
+          type ExistingRow = { symbol: string; entry_time: string | null; exit_time: string | null; side: string | null; stop_loss: number | null; stop_loss_locked: boolean | null; r_multiple: number | null; setup_tag: string | null; notes: string | null; needs_review: boolean | null; execution_legs: unknown | null; pnl: number | null }
           const openRowsBySymbol = new Map<string, ExistingRow[]>()
           for (const existing of existingRows ?? []) {
             if (existing.exit_time != null) continue
@@ -172,6 +172,7 @@ export async function GET(request: Request) {
             if (!row.notes && existing.notes) row.notes = existing.notes
             if (!row.needs_review && existing.needs_review) row.needs_review = existing.needs_review
             if (row.stop_loss == null && existing.stop_loss != null) row.stop_loss = existing.stop_loss
+            if (existing.stop_loss_locked) row.stop_loss_locked = true
             if (row.r_multiple == null && existing.r_multiple != null) row.r_multiple = existing.r_multiple
             // Preserve manually-corrected execution_legs (and derived shares/pnl) for trades flagged for review or with notes
             if ((existing.needs_review || existing.notes) && existing.execution_legs != null) {
@@ -184,7 +185,13 @@ export async function GET(request: Request) {
             }
           }
 
-          const enrichedRows = await enrichOpenTradesWithStopLosses(rows)
+          // Pass existing DB rows as context so add-on detection sees all open trades,
+          // not just those returned in the current IBKR sync window.
+          const rowEntryKeys = new Set(rows.filter(r => r.exit_time == null).map(r => `${r.symbol}|${normalizeTs(r.entry_time)}`))
+          const contextRows = (existingRows ?? []).filter(r =>
+            r.exit_time == null && !rowEntryKeys.has(`${r.symbol}|${normalizeTs(r.entry_time)}`)
+          )
+          const enrichedRows = await enrichOpenTradesWithStopLosses(rows, contextRows)
           rows.splice(0, rows.length, ...enrichedRows)
 
           // Delete open rows for symbols with new open data OR symbols that just closed.
