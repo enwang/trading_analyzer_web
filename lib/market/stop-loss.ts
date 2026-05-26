@@ -36,6 +36,7 @@ export interface StopLossEnrichmentRow {
   shares?: number | null
   stop_loss?: number | null
   stop_loss_locked?: boolean | null
+  initial_risk_amount?: number | null
   pnl?: number | null
   execution_legs?: { action?: string; shares?: number; price?: number; time?: string }[] | null | unknown
 }
@@ -226,7 +227,11 @@ export async function enrichOpenTradesWithStopLosses<T extends StopLossEnrichmen
       const isAddon = !lastClosedWasLoss &&
         !!row.symbol && !!row.entry_time &&
         row.entry_time > earliestOpen
-      const riskAmount = riskAmountForTrade(isAddon)
+      // Respect a saved initial_risk_amount from DB — lets users override addon defaults
+      const savedRiskAmount = (typeof row.initial_risk_amount === 'number' && Number.isFinite(row.initial_risk_amount) && row.initial_risk_amount > 0)
+        ? row.initial_risk_amount
+        : null
+      const riskAmount = savedRiskAmount ?? riskAmountForTrade(isAddon)
       const sharesForRisk = openingSharesFromLegs(row.side, row.execution_legs) ?? row.shares
       const stopLoss = suggestedStopLossFromRisk(row.side, row.entry_price, sharesForRisk, riskAmount)
       if (stopLoss == null) return row
