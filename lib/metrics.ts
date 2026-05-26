@@ -5,6 +5,71 @@ export function closedTrades(trades: Trade[]): Trade[] {
   return trades.filter(t => t.outcome !== 'open' && t.pnl != null)
 }
 
+export interface CoreStats {
+  netPnl: number
+  winCount: number
+  lossCount: number
+  breakevenCount: number
+  /** wins + losses + breakevenCount — use this as the denominator for win rate */
+  totalCount: number
+  /** 0–100 */
+  winPct: number
+  grossProfit: number
+  /** Absolute (positive) gross loss */
+  grossLoss: number
+  /** Positive dollar average */
+  avgWin: number
+  /** Positive dollar average (absolute) */
+  avgLoss: number
+  payoffRatio: number
+  profitFactor: number
+  avgHoldWinMin: number | null
+  avgHoldLossMin: number | null
+}
+
+/**
+ * Core per-trade stats from any array of trade-like objects.
+ * Single source of truth used by computeSummary and the analysis summary tab.
+ * avgLoss is always positive (absolute value).
+ */
+export function computeCoreStats(
+  trades: Array<{ pnl: number | null; outcome: string | null; holdTimeMin: number | null }>
+): CoreStats {
+  let netPnl = 0, grossProfit = 0, grossLoss = 0
+  let winCount = 0, lossCount = 0, breakevenCount = 0
+  let holdWinSum = 0, holdWinCount = 0, holdLossSum = 0, holdLossCount = 0
+
+  for (const t of trades) {
+    const pnl = t.pnl ?? 0
+    netPnl += pnl
+    if (t.outcome === 'win') {
+      grossProfit += pnl; winCount++
+      if (t.holdTimeMin != null) { holdWinSum += t.holdTimeMin; holdWinCount++ }
+    } else if (t.outcome === 'loss') {
+      grossLoss += Math.abs(pnl); lossCount++
+      if (t.holdTimeMin != null) { holdLossSum += t.holdTimeMin; holdLossCount++ }
+    } else if (t.outcome === 'breakeven') {
+      breakevenCount++
+    }
+  }
+
+  const totalCount = winCount + lossCount + breakevenCount
+  const avgWin = winCount > 0 ? grossProfit / winCount : 0
+  const avgLoss = lossCount > 0 ? grossLoss / lossCount : 0
+
+  return {
+    netPnl,
+    winCount, lossCount, breakevenCount, totalCount,
+    winPct: totalCount > 0 ? (winCount / totalCount) * 100 : 0,
+    grossProfit, grossLoss,
+    avgWin, avgLoss,
+    payoffRatio: avgLoss > 0 ? avgWin / avgLoss : 0,
+    profitFactor: grossLoss > 0 ? grossProfit / grossLoss : Infinity,
+    avgHoldWinMin: holdWinCount > 0 ? holdWinSum / holdWinCount : null,
+    avgHoldLossMin: holdLossCount > 0 ? holdLossSum / holdLossCount : null,
+  }
+}
+
 export function computeSummary(trades: Trade[]): SummaryStats {
   const closed = closedTrades(trades)
   if (closed.length === 0) {
@@ -18,25 +83,14 @@ export function computeSummary(trades: Trade[]): SummaryStats {
     }
   }
 
-  const wins = closed.filter(t => t.outcome === 'win')
-  const losses = closed.filter(t => t.outcome === 'loss')
-  const nWins = wins.length
-  const nLosses = losses.length
-  const nBreakevens = closed.filter(t => t.outcome === 'breakeven').length
-  const total = closed.length
+  const core = computeCoreStats(closed)
+  const { winCount: nWins, lossCount: nLosses, breakevenCount: nBreakevens, totalCount: total } = core
   const winRate = total > 0 ? nWins / total : 0
-
-  const grossProfit = wins.reduce((s, t) => s + (t.pnl ?? 0), 0)
-  const grossLoss = Math.abs(losses.reduce((s, t) => s + (t.pnl ?? 0), 0))
-  const netPnl = closed.reduce((s, t) => s + (t.pnl ?? 0), 0)
-  const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : Infinity
-
-  const avgWin = nWins > 0 ? grossProfit / nWins : 0
-  const avgLoss = nLosses > 0 ? -(grossLoss / nLosses) : 0
-  const payoffRatio = nLosses > 0 && avgLoss !== 0 ? Math.abs(avgWin / avgLoss) : Infinity
-
   const lossRate = total > 0 ? nLosses / total : 0
-  const expectancy = winRate * avgWin + lossRate * avgLoss
+
+  // SummaryStats convention: avgLoss is negative so expectancy = winRate*avgWin + lossRate*avgLoss
+  const avgLossNeg = -core.avgLoss
+  const expectancy = winRate * core.avgWin + lossRate * avgLossNeg
 
   const pnls = closed.map(t => t.pnl ?? 0)
   const largestWin = pnls.length > 0 ? Math.max(...pnls) : 0
@@ -52,7 +106,7 @@ export function computeSummary(trades: Trade[]): SummaryStats {
     if (dd > maxDrawdown) maxDrawdown = dd
   }
 
-  // Consecutive streaks — must be sorted by exit date so streaks are chronological
+  // Consecutive streaks — sorted by exit date
   const outcomes = [...closed]
     .sort((a, b) => {
       const ta = a.exitTime ?? a.entryTime ?? ''
@@ -63,21 +117,10 @@ export function computeSummary(trades: Trade[]): SummaryStats {
   let maxConsecWins = 0, maxConsecLosses = 0, cur = 0
   let prevOutcome: string | null = ''
   for (const o of outcomes) {
-    if (o === prevOutcome) {
-      cur++
-    } else {
-      cur = 1
-      prevOutcome = o
-    }
+    if (o === prevOutcome) { cur++ } else { cur = 1; prevOutcome = o }
     if (o === 'win' && cur > maxConsecWins) maxConsecWins = cur
     if (o === 'loss' && cur > maxConsecLosses) maxConsecLosses = cur
   }
-
-  // Avg hold time
-  const winHolds = wins.map(t => t.holdTimeMin).filter((v): v is number => v != null)
-  const lossHolds = losses.map(t => t.holdTimeMin).filter((v): v is number => v != null)
-  const avgHoldWinMin = winHolds.length > 0 ? winHolds.reduce((s, v) => s + v, 0) / winHolds.length : null
-  const avgHoldLossMin = lossHolds.length > 0 ? lossHolds.reduce((s, v) => s + v, 0) / lossHolds.length : null
 
   // Date range
   const times = closed
@@ -90,11 +133,12 @@ export function computeSummary(trades: Trade[]): SummaryStats {
 
   return {
     totalTrades: total, nWins, nLosses, nBreakevens, winRate,
-    netPnl, grossProfit, grossLoss, profitFactor,
-    avgWin, avgLoss, payoffRatio, expectancy,
+    netPnl: core.netPnl, grossProfit: core.grossProfit, grossLoss: core.grossLoss,
+    profitFactor: core.profitFactor,
+    avgWin: core.avgWin, avgLoss: avgLossNeg, payoffRatio: core.payoffRatio, expectancy,
     largestWin, largestLoss, maxDrawdown,
     maxConsecWins, maxConsecLosses,
-    avgHoldWinMin, avgHoldLossMin, dateRange,
+    avgHoldWinMin: core.avgHoldWinMin, avgHoldLossMin: core.avgHoldLossMin, dateRange,
   }
 }
 

@@ -36,6 +36,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { DEFAULT_INITIAL_RISK_AMOUNT } from '@/lib/market/stop-loss'
+import { computeCoreStats } from '@/lib/metrics'
 
 type ClosedTrade = {
   id: string
@@ -403,21 +404,12 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
       return ta < tb ? -1 : ta > tb ? 1 : 0
     })
 
-    const dayMap = new Map<string, { date: string; pnl: number; wins: number; losses: number; winPnl: number; lossAbsPnl: number }>()
-    let winPnl = 0, winCount = 0, lossAbs = 0, lossCount = 0, breakevenCount = 0
-    let netPnl = 0, holdWinSum = 0, holdWinCount = 0, holdLossSum = 0, holdLossCount = 0
+    // Core stats via shared function — single source of truth
+    const core = computeCoreStats(sorted)
 
+    // Day-level bucketing for trend charts
+    const dayMap = new Map<string, { date: string; pnl: number; wins: number; losses: number; winPnl: number; lossAbsPnl: number }>()
     for (const t of sorted) {
-      netPnl += t.pnl
-      if (t.outcome === 'win') {
-        winPnl += t.pnl; winCount++
-        if (t.holdTimeMin != null) { holdWinSum += t.holdTimeMin; holdWinCount++ }
-      } else if (t.outcome === 'loss') {
-        lossAbs += Math.abs(t.pnl); lossCount++
-        if (t.holdTimeMin != null) { holdLossSum += t.holdTimeMin; holdLossCount++ }
-      } else if (t.outcome === 'breakeven') {
-        breakevenCount++
-      }
       if (!t.exitTime) continue
       const key = dateKeyInTimeZone(t.exitTime, timeZone)
       const bucket = dayMap.get(key) ?? { date: key, pnl: 0, wins: 0, losses: 0, winPnl: 0, lossAbsPnl: 0 }
@@ -450,11 +442,7 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
       }
     })
 
-    const totalCount = winCount + lossCount + breakevenCount
-    const avgWin = winCount > 0 ? winPnl / winCount : 0
-    const avgLoss = lossCount > 0 ? lossAbs / lossCount : 0
-    const payoffRatio = avgLoss > 0 ? avgWin / avgLoss : 0
-    const tradeExpectancy = totalCount > 0 ? netPnl / totalCount : 0
+    const tradeExpectancy = core.totalCount > 0 ? core.netPnl / core.totalCount : 0
     const dayPnls = dayRows.map((d) => d.pnl)
     const avgDailyNetPnl = dayPnls.length ? dayPnls.reduce((s, v) => s + v, 0) / dayPnls.length : 0
     const lossDays = dayPnls.filter((v) => v < 0)
@@ -463,18 +451,18 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
     return {
       trends,
       summary: {
-        netPnl,
-        winPct: totalCount > 0 ? (winCount / totalCount) * 100 : 0,
-        profitFactor: lossAbs > 0 ? winPnl / lossAbs : 0,
+        netPnl: core.netPnl,
+        winPct: core.winPct,
+        profitFactor: core.profitFactor,
         tradeExpectancy,
-        avgNetTradePnl: totalCount > 0 ? netPnl / totalCount : 0,
+        avgNetTradePnl: tradeExpectancy,
         avgRealizedRMultiple: tradeExpectancy / DEFAULT_INITIAL_RISK_AMOUNT,
-        avgHoldWinMin: holdWinCount > 0 ? holdWinSum / holdWinCount : null,
-        avgHoldLossMin: holdLossCount > 0 ? holdLossSum / holdLossCount : null,
-        payoffRatio,
-        avgWin,
-        avgLoss,
-        avgTradeWinLoss: payoffRatio,
+        avgHoldWinMin: core.avgHoldWinMin,
+        avgHoldLossMin: core.avgHoldLossMin,
+        payoffRatio: core.payoffRatio,
+        avgWin: core.avgWin,
+        avgLoss: core.avgLoss,
+        avgTradeWinLoss: core.payoffRatio,
         avgDailyNetPnl,
         avgDailyVolume: 0,
         loggedDays: dayRows.length,
