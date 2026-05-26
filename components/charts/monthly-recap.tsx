@@ -18,7 +18,7 @@ function fmtMoney(n: number | null): string {
 
 function fmtDays(n: number | null): string {
   if (n == null) return '—'
-  return n.toFixed(2)
+  return `${n.toFixed(2)}D`
 }
 
 function returnClass(n: number | null) {

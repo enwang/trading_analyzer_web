@@ -404,7 +404,7 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
     })
 
     const dayMap = new Map<string, { date: string; pnl: number; wins: number; losses: number; winPnl: number; lossAbsPnl: number }>()
-    let winPnl = 0, winCount = 0, lossAbs = 0, lossCount = 0
+    let winPnl = 0, winCount = 0, lossAbs = 0, lossCount = 0, breakevenCount = 0
     let netPnl = 0, holdWinSum = 0, holdWinCount = 0, holdLossSum = 0, holdLossCount = 0
 
     for (const t of sorted) {
@@ -415,6 +415,8 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
       } else if (t.outcome === 'loss') {
         lossAbs += Math.abs(t.pnl); lossCount++
         if (t.holdTimeMin != null) { holdLossSum += t.holdTimeMin; holdLossCount++ }
+      } else if (t.outcome === 'breakeven') {
+        breakevenCount++
       }
       if (!t.exitTime) continue
       const key = dateKeyInTimeZone(t.exitTime, timeZone)
@@ -448,7 +450,7 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
       }
     })
 
-    const totalCount = winCount + lossCount
+    const totalCount = winCount + lossCount + breakevenCount
     const avgWin = winCount > 0 ? winPnl / winCount : 0
     const avgLoss = lossCount > 0 ? lossAbs / lossCount : 0
     const payoffRatio = avgLoss > 0 ? avgWin / avgLoss : 0
