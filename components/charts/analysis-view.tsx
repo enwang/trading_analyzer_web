@@ -64,6 +64,7 @@ interface AnalysisData {
     avgLoss: number
   }
   closedTrades: ClosedTrade[]
+  summaryClosedTrades: ClosedTrade[]
 }
 
 type TrendPoint = {
@@ -382,16 +383,17 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
   const initialTab = searchParams.get('tab') ?? 'summary'
 
   // Trades filtered by the summary-tab date range (Days/Trades tabs remain unfiltered)
+  // Uses normalized trades (same as overview) so metrics are consistent
   const summaryTrades = useMemo(() => {
-    if (!dateFrom && !dateTo) return data.closedTrades
-    return data.closedTrades.filter((t) => {
+    if (!dateFrom && !dateTo) return data.summaryClosedTrades
+    return data.summaryClosedTrades.filter((t) => {
       const exitDate = t.exitTime ? dateKeyInTimeZone(t.exitTime, timeZone) : null
       if (!exitDate) return true
       if (dateFrom && exitDate < dateFrom) return false
       if (dateTo && exitDate > dateTo) return false
       return true
     })
-  }, [data.closedTrades, dateFrom, dateTo, timeZone])
+  }, [data.summaryClosedTrades, dateFrom, dateTo, timeZone])
 
   // Recompute summary stats and trend series from the (possibly filtered) trades
   const filteredSummaryData = useMemo(() => {

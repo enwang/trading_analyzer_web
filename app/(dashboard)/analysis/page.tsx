@@ -78,7 +78,20 @@ export default async function AnalysisPage() {
       avgWin: summary.avgWin,
       avgLoss: summary.avgLoss,
     },
+    // Days/Trades tabs use raw (non-aggregated) rows — each partial exit is its own row
     closedTrades: rawClosed.map((t) => ({
+      id: t.id,
+      symbol: t.symbol,
+      entryTime: t.entryTime,
+      exitTime: t.exitTime,
+      pnl: t.pnl ?? 0,
+      outcome: t.outcome,
+      shares: t.shares ?? 0,
+      rMultiple: t.rMultiple,
+      holdTimeMin: t.holdTimeMin,
+    })),
+    // Summary tab uses normalized trades (same as overview) so metrics match
+    summaryClosedTrades: normalizedClosed.map((t) => ({
       id: t.id,
       symbol: t.symbol,
       entryTime: t.entryTime,

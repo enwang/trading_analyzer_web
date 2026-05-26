@@ -32,6 +32,8 @@ export interface MonthlyStatsRow {
   monthLabel: string
   avgGainPct: number | null
   avgLossPct: number | null
+  avgWin: number | null
+  avgLoss: number | null
   winPct: number
   lossPct: number
   wins: number
@@ -47,6 +49,8 @@ export interface YearlyAveragesRow {
   year: string
   avgGainPct: number | null
   avgLossPct: number | null
+  avgWin: number | null
+  avgLoss: number | null
   winPct: number
   lossPct: number
   wins: number
@@ -194,10 +198,14 @@ function statsForTrades(trades: Trade[]): Omit<MonthlyStatsRow, 'monthKey' | 'mo
 
   const avgGainPct = mean(winPcts)
   const avgLossPct = mean(lossPcts.map((v) => Math.abs(v)))
+  const winPnls = wins.map((t) => t.pnl ?? 0)
+  const lossPnls = losses.map((t) => Math.abs(t.pnl ?? 0))
 
   return {
     avgGainPct,
     avgLossPct: avgLossPct != null ? avgLossPct : null,
+    avgWin: winPnls.length > 0 ? mean(winPnls) : null,
+    avgLoss: lossPnls.length > 0 ? mean(lossPnls) : null,
     winPct: total > 0 ? (wins.length / total) * 100 : 0,
     lossPct: total > 0 ? (losses.length / total) * 100 : 0,
     wins: wins.length,

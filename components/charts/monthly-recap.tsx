@@ -94,7 +94,9 @@ export function MonthlyRecap({ year, returns, stats, yearly }: Props) {
                 <tr>
                   <th className="px-3 py-2 text-left">Month</th>
                   <th className="px-3 py-2 text-right">Avg Gain %</th>
+                  <th className="px-3 py-2 text-right">Avg Win $</th>
                   <th className="px-3 py-2 text-right">Avg Loss %</th>
+                  <th className="px-3 py-2 text-right">Avg Loss $</th>
                   <th className="px-3 py-2 text-right">Win %</th>
                   <th className="px-3 py-2 text-right">Loss %</th>
                   <th className="px-3 py-2 text-right">Wins</th>
@@ -102,15 +104,17 @@ export function MonthlyRecap({ year, returns, stats, yearly }: Props) {
                   <th className="px-3 py-2 text-right">Trades</th>
                   <th className="px-3 py-2 text-right">LG Gain</th>
                   <th className="px-3 py-2 text-right">LG Loss</th>
-                  <th className="px-3 py-2 text-right">Avg Days Gain</th>
-                  <th className="px-3 py-2 text-right">Avg Days Loss</th>
+                  <th className="px-3 py-2 text-right">Avg Hold Win</th>
+                  <th className="px-3 py-2 text-right">Avg Hold Loss</th>
                 </tr>
               </thead>
               <tbody>
                 <tr className="border-t bg-muted/30 font-semibold">
                   <td className="px-3 py-2">{yearly.year}</td>
                   <td className="px-3 py-2 text-right font-mono text-emerald-600">{fmtPct(yearly.avgGainPct)}</td>
+                  <td className="px-3 py-2 text-right font-mono text-emerald-600">{fmtMoney(yearly.avgWin)}</td>
                   <td className="px-3 py-2 text-right font-mono text-red-600">{fmtPct(yearly.avgLossPct)}</td>
+                  <td className="px-3 py-2 text-right font-mono text-red-600">{fmtMoney(yearly.avgLoss)}</td>
                   <td className="px-3 py-2 text-right font-mono">{fmtPct(yearly.winPct)}</td>
                   <td className="px-3 py-2 text-right font-mono">{fmtPct(yearly.lossPct)}</td>
                   <td className="px-3 py-2 text-right font-mono">{yearly.wins}</td>
@@ -125,7 +129,9 @@ export function MonthlyRecap({ year, returns, stats, yearly }: Props) {
                   <tr key={row.monthKey} className="border-t">
                     <td className="px-3 py-2 font-medium">{row.monthLabel}</td>
                     <td className="px-3 py-2 text-right font-mono text-emerald-600">{fmtPct(row.avgGainPct)}</td>
+                    <td className="px-3 py-2 text-right font-mono text-emerald-600">{fmtMoney(row.avgWin)}</td>
                     <td className="px-3 py-2 text-right font-mono text-red-600">{fmtPct(row.avgLossPct)}</td>
+                    <td className="px-3 py-2 text-right font-mono text-red-600">{fmtMoney(row.avgLoss)}</td>
                     <td className="px-3 py-2 text-right font-mono">{fmtPct(row.winPct)}</td>
                     <td className="px-3 py-2 text-right font-mono">{fmtPct(row.lossPct)}</td>
                     <td className="px-3 py-2 text-right font-mono">{row.wins}</td>
