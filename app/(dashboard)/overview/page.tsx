@@ -139,8 +139,7 @@ export default async function OverviewPage() {
               : undefined
           }
         />
-        <KpiCard label="Max Drawdown" value={fmtMoney(stats.maxDrawdown)} trend="down" />
-        <KpiCard
+<KpiCard
           label="Consec Wins"
           value={String(stats.maxConsecWins)}
           sub="max streak"

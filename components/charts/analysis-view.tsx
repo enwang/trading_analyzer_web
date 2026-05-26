@@ -19,6 +19,7 @@ import { Plus, Settings2 } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import {
   Table,
   TableBody,
@@ -34,6 +35,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { DEFAULT_INITIAL_RISK_AMOUNT } from '@/lib/market/stop-loss'
 
 type ClosedTrade = {
   id: string
@@ -374,8 +376,115 @@ function SummaryGrid({
 export function AnalysisView({ data }: { data: AnalysisData }) {
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
   const [expandedDay, setExpandedDay] = useState<string | null>(null)
+  const [dateFrom, setDateFrom] = useState('2026-01-01')
+  const [dateTo, setDateTo] = useState(() => new Date().toLocaleDateString('en-CA'))
   const searchParams = useSearchParams()
   const initialTab = searchParams.get('tab') ?? 'summary'
+
+  // Trades filtered by the summary-tab date range (Days/Trades tabs remain unfiltered)
+  const summaryTrades = useMemo(() => {
+    if (!dateFrom && !dateTo) return data.closedTrades
+    return data.closedTrades.filter((t) => {
+      const exitDate = t.exitTime ? dateKeyInTimeZone(t.exitTime, timeZone) : null
+      if (!exitDate) return true
+      if (dateFrom && exitDate < dateFrom) return false
+      if (dateTo && exitDate > dateTo) return false
+      return true
+    })
+  }, [data.closedTrades, dateFrom, dateTo, timeZone])
+
+  // Recompute summary stats and trend series from the (possibly filtered) trades
+  const filteredSummaryData = useMemo(() => {
+    const sorted = [...summaryTrades].sort((a, b) => {
+      const ta = a.exitTime ?? a.entryTime ?? ''
+      const tb = b.exitTime ?? b.entryTime ?? ''
+      return ta < tb ? -1 : ta > tb ? 1 : 0
+    })
+
+    const dayMap = new Map<string, { date: string; pnl: number; wins: number; losses: number; winPnl: number; lossAbsPnl: number }>()
+    let winPnl = 0, winCount = 0, lossAbs = 0, lossCount = 0
+    let netPnl = 0, holdWinSum = 0, holdWinCount = 0, holdLossSum = 0, holdLossCount = 0
+
+    for (const t of sorted) {
+      netPnl += t.pnl
+      if (t.outcome === 'win') {
+        winPnl += t.pnl; winCount++
+        if (t.holdTimeMin != null) { holdWinSum += t.holdTimeMin; holdWinCount++ }
+      } else if (t.outcome === 'loss') {
+        lossAbs += Math.abs(t.pnl); lossCount++
+        if (t.holdTimeMin != null) { holdLossSum += t.holdTimeMin; holdLossCount++ }
+      }
+      if (!t.exitTime) continue
+      const key = dateKeyInTimeZone(t.exitTime, timeZone)
+      const bucket = dayMap.get(key) ?? { date: key, pnl: 0, wins: 0, losses: 0, winPnl: 0, lossAbsPnl: 0 }
+      bucket.pnl += t.pnl
+      if (t.outcome === 'win') { bucket.wins++; bucket.winPnl += t.pnl }
+      else if (t.outcome === 'loss') { bucket.losses++; bucket.lossAbsPnl += Math.abs(t.pnl) }
+      dayMap.set(key, bucket)
+    }
+
+    const dayRows = Array.from(dayMap.values()).sort((a, b) => (a.date < b.date ? -1 : 1))
+
+    let cumNet = 0, cumWins = 0, cumTrades = 0, cumWinPnl = 0, cumWinCount = 0, cumLossAbs = 0, cumLossCount = 0
+    const trends: TrendPoint[] = dayRows.map((row, idx) => {
+      cumNet += row.pnl
+      cumWins += row.wins
+      cumTrades += row.wins + row.losses
+      cumWinPnl += row.winPnl
+      cumWinCount += row.wins
+      cumLossAbs += row.lossAbsPnl
+      cumLossCount += row.losses
+      const avgWin = cumWinCount > 0 ? cumWinPnl / cumWinCount : 0
+      const avgLoss = cumLossCount > 0 ? cumLossAbs / cumLossCount : 0
+      return {
+        date: row.date,
+        label: shortDateLabel(row.date),
+        winPctCum: cumTrades > 0 ? (cumWins / cumTrades) * 100 : 0,
+        avgTradeWinLossCum: avgLoss > 0 ? avgWin / avgLoss : 0,
+        cumulativeNetPnl: cumNet,
+        avgDailyNetPnlCum: cumNet / (idx + 1),
+      }
+    })
+
+    const totalCount = winCount + lossCount
+    const avgWin = winCount > 0 ? winPnl / winCount : 0
+    const avgLoss = lossCount > 0 ? lossAbs / lossCount : 0
+    const payoffRatio = avgLoss > 0 ? avgWin / avgLoss : 0
+    const tradeExpectancy = totalCount > 0 ? netPnl / totalCount : 0
+    const dayPnls = dayRows.map((d) => d.pnl)
+    const avgDailyNetPnl = dayPnls.length ? dayPnls.reduce((s, v) => s + v, 0) / dayPnls.length : 0
+    const lossDays = dayPnls.filter((v) => v < 0)
+    const winDays = dayPnls.filter((v) => v > 0)
+
+    return {
+      trends,
+      summary: {
+        netPnl,
+        winPct: totalCount > 0 ? (winCount / totalCount) * 100 : 0,
+        profitFactor: lossAbs > 0 ? winPnl / lossAbs : 0,
+        tradeExpectancy,
+        avgNetTradePnl: totalCount > 0 ? netPnl / totalCount : 0,
+        avgRealizedRMultiple: tradeExpectancy / DEFAULT_INITIAL_RISK_AMOUNT,
+        avgHoldWinMin: holdWinCount > 0 ? holdWinSum / holdWinCount : null,
+        avgHoldLossMin: holdLossCount > 0 ? holdLossSum / holdLossCount : null,
+        payoffRatio,
+        avgWin,
+        avgLoss,
+        avgTradeWinLoss: payoffRatio,
+        avgDailyNetPnl,
+        avgDailyVolume: 0,
+        loggedDays: dayRows.length,
+        maxDailyNetDrawdown: dayPnls.length ? Math.min(...dayPnls) : 0,
+        avgDailyNetDrawdown: lossDays.length
+          ? lossDays.reduce((s, v) => s + v, 0) / lossDays.length
+          : 0,
+        dayWinCount: winDays.length,
+        dayLossCount: lossDays.length,
+        dayCount: dayRows.length,
+        avgDailyWinPct: dayRows.length ? (winDays.length / dayRows.length) * 100 : 0,
+      },
+    }
+  }, [summaryTrades, timeZone])
 
   const computed = useMemo(() => {
     const sorted = [...data.closedTrades].sort((a, b) => {
@@ -521,17 +630,41 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
       </TabsList>
 
       <TabsContent value="summary" className="space-y-4">
-        <SummaryGrid summary={computed.summary} />
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm text-muted-foreground">From</span>
+          <Input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            className="h-8 w-[150px]"
+          />
+          <span className="text-sm text-muted-foreground">To</span>
+          <Input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            className="h-8 w-[150px]"
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => { setDateFrom('2026-01-01'); setDateTo(new Date().toLocaleDateString('en-CA')) }}
+          >
+            Reset
+          </Button>
+        </div>
+
+        <SummaryGrid summary={filteredSummaryData.summary} />
 
         <div className="grid gap-4 xl:grid-cols-2">
           <MetricChartCard
             title="Win %"
-            points={computed.trends}
+            points={filteredSummaryData.trends}
             defaultMetric="winPctCum"
           />
           <MetricChartCard
             title="Avg trade win/loss"
-            points={computed.trends}
+            points={filteredSummaryData.trends}
             defaultMetric="avgTradeWinLossCum"
           />
         </div>

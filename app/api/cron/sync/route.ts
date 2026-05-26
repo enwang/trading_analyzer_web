@@ -136,11 +136,11 @@ export async function GET(request: Request) {
           // Fetch ALL existing trades (open and closed) to preserve manual fields
           const { data: existingRows } = await supabase
             .from('trades')
-            .select('symbol, entry_time, exit_time, side, stop_loss, stop_loss_locked, r_multiple, setup_tag, notes, needs_review, execution_legs, pnl')
+            .select('symbol, entry_time, exit_time, side, stop_loss, stop_loss_locked, r_multiple, setup_tag, notes, needs_review, execution_legs, pnl, initial_risk_amount')
             .eq('user_id', s.user_id)
             .in('symbol', touchedSymbols)
 
-          type ExistingRow = { symbol: string; entry_time: string | null; exit_time: string | null; side: string | null; stop_loss: number | null; stop_loss_locked: boolean | null; r_multiple: number | null; setup_tag: string | null; notes: string | null; needs_review: boolean | null; execution_legs: unknown | null; pnl: number | null }
+          type ExistingRow = { symbol: string; entry_time: string | null; exit_time: string | null; side: string | null; stop_loss: number | null; stop_loss_locked: boolean | null; r_multiple: number | null; setup_tag: string | null; notes: string | null; needs_review: boolean | null; execution_legs: unknown | null; pnl: number | null; initial_risk_amount: number | null }
           const openRowsBySymbol = new Map<string, ExistingRow[]>()
           for (const existing of existingRows ?? []) {
             if (existing.exit_time != null) continue
@@ -174,6 +174,9 @@ export async function GET(request: Request) {
             if (row.stop_loss == null && existing.stop_loss != null) row.stop_loss = existing.stop_loss
             if (existing.stop_loss_locked) row.stop_loss_locked = true
             if (row.r_multiple == null && existing.r_multiple != null) row.r_multiple = existing.r_multiple
+            if ((row as Record<string, unknown>).initial_risk_amount == null && existing.initial_risk_amount != null) {
+              (row as Record<string, unknown>).initial_risk_amount = existing.initial_risk_amount
+            }
             // Preserve manually-corrected execution_legs (and derived shares/pnl) for trades flagged for review or with notes
             if ((existing.needs_review || existing.notes) && existing.execution_legs != null) {
               row.execution_legs = existing.execution_legs
