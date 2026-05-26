@@ -235,13 +235,15 @@ export function TradeDetailTabs(props: Props) {
   const [mfeMaeLoading, setMfeMaeLoading] = useState(false)
 
   useEffect(() => {
-    if (exitTime != null) return
+    // Closed trades with data already in DB: skip fetch
+    if (exitTime != null && initialMfe != null && initialMae != null) return
     if (!entryTime || !side || entryPrice == null || shares == null) return
     let canceled = false
     async function fetchMfeMae() {
       setMfeMaeLoading(true)
       try {
-        const params = new URLSearchParams({ symbol, entryTime: entryTime!, exitTime: new Date().toISOString(), side: side!, entryPrice: String(entryPrice), shares: String(shares) })
+        const effectiveExit = exitTime ?? new Date().toISOString()
+        const params = new URLSearchParams({ symbol, entryTime: entryTime!, exitTime: effectiveExit, side: side!, entryPrice: String(entryPrice), shares: String(shares) })
         const res = await fetch(`/api/market/mfe-mae?${params}`)
         if (canceled || !res.ok) return
         const json = await res.json() as { mfe: number; mae: number; mfePct: number; maePct: number; maxHigh: number; minLow: number; interval: string; maxHighTime: string; minLowTime: string }
