@@ -235,8 +235,6 @@ export function TradeDetailTabs(props: Props) {
   const [mfeMaeLoading, setMfeMaeLoading] = useState(false)
 
   useEffect(() => {
-    // Closed trades with data already in DB: skip fetch
-    if (exitTime != null && initialMfe != null && initialMae != null) return
     if (!entryTime || !side || entryPrice == null || shares == null) return
     let canceled = false
     async function fetchMfeMae() {
