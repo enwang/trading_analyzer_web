@@ -52,17 +52,6 @@ function fmtPct(n: number | null) {
   return `${(n * 100).toFixed(2)}%`
 }
 
-function formatDuration(min: number | null) {
-  if (min == null) return '—'
-  if (min < 60) return `${min.toFixed(0)}m`
-  const totalMinutes = Math.round(min)
-  const days = Math.floor(totalMinutes / 1440)
-  const hours = Math.floor((totalMinutes % 1440) / 60)
-  const minutes = totalMinutes % 60
-  if (days > 0) return `${days}d ${hours}h ${minutes}m`
-  return `${hours}h ${minutes}m`
-}
-
 function computeRiskPerShare(side: Side, entry: number, stop: number) {
   if (side === 'long') return entry - stop
   if (side === 'short') return stop - entry
@@ -120,15 +109,6 @@ function InfoTooltip({ text }: { text: string }) {
         {text}
       </span>
     </span>
-  )
-}
-
-function KpiCell({ label, children, className = '' }: { label: string; children: React.ReactNode; className?: string }) {
-  return (
-    <div className={`flex flex-col gap-0.5 ${className}`}>
-      <span className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</span>
-      <span className="text-sm font-semibold leading-tight">{children}</span>
-    </div>
   )
 }
 
@@ -344,43 +324,6 @@ export function TradeDetailTabs(props: Props) {
             </div>
             {reviewError && <div className="mt-1 text-xs text-red-700">{reviewError}</div>}
 
-            {/* KPI strip: R | MFE | MAE | Capture */}
-            <div className="mt-3 grid grid-cols-4 gap-1 rounded-lg border bg-muted/30 px-3 py-2">
-              <KpiCell label="R">{displayR}</KpiCell>
-              <KpiCell label="MFE" className="text-emerald-600">
-                {mfeMaeLoading ? '…' : mfe != null ? `$${mfe.toFixed(0)}` : '—'}
-              </KpiCell>
-              <KpiCell label="MAE" className="text-red-600">
-                {mfeMaeLoading ? '…' : mae != null ? `$${mae.toFixed(0)}` : '—'}
-              </KpiCell>
-              <KpiCell label="Capture">
-                {captureDisplay ?? '—'}
-              </KpiCell>
-            </div>
-
-            {/* Trade details */}
-            <SectionTitle>Trade</SectionTitle>
-            <div className="rounded-md border px-3 py-1">
-              <Row label="Direction"><span className="capitalize">{side ?? '—'}</span></Row>
-              <Row label="Shares">{shares ?? '—'}</Row>
-              <Row label="Entry">
-                <span className="flex flex-col items-end gap-0.5">
-                  <span>{fmtMoney(entryPrice)}</span>
-                  <LocalTime date={entryTime} className="font-mono text-[11px] text-muted-foreground" />
-                </span>
-              </Row>
-              <Row label="Exit">
-                {exitPrice != null ? (
-                  <span className="flex flex-col items-end gap-0.5">
-                    <span>{fmtMoney(exitPrice)}</span>
-                    <LocalTime date={exitTime} className="font-mono text-[11px] text-muted-foreground" />
-                  </span>
-                ) : '—'}
-              </Row>
-              <Row label="Duration">{formatDuration(holdTimeMin)}</Row>
-              <Row label="Source">{source}</Row>
-            </div>
-
             {/* Risk */}
             <SectionTitle>Risk</SectionTitle>
             <div className="rounded-md border px-3 py-2">
@@ -398,6 +341,13 @@ export function TradeDetailTabs(props: Props) {
                 </span>
               </div>
               {riskError && <div className="mb-1 text-xs text-red-700">{riskError}</div>}
+
+              <div className="border-t pt-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">R Multiple</span>
+                  <span className="text-xs font-medium">{displayR}</span>
+                </div>
+              </div>
 
               {/* MFE row */}
               <div className="border-t pt-2">
@@ -432,6 +382,15 @@ export function TradeDetailTabs(props: Props) {
                   </div>
                 )}
               </div>
+
+              {captureDisplay != null && (
+                <div className="border-t pt-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">Capture</span>
+                    <span className="text-xs font-medium">{captureDisplay}</span>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Setup & Notes */}
