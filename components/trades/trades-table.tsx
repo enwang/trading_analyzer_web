@@ -1139,11 +1139,15 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                   if (col === 'setupTag') {
                     return (
                       <TableCell key={col}>
-                        <input
-                          className="h-8 w-[110px] rounded-md border px-2 text-xs"
+                        <select
+                          className="h-8 w-[110px] rounded-md border px-2 text-xs bg-background"
                           value={drafts[t.id]?.setupTag ?? t.setupTag}
                           onChange={(e) => updateDraft(t.id, 'setupTag', e.target.value)}
-                        />
+                        >
+                          <option value="untagged">None</option>
+                          <option value="pullback">Pullback</option>
+                          <option value="breakout">Breakout</option>
+                        </select>
                       </TableCell>
                     )
                   }
