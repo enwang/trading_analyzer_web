@@ -101,6 +101,7 @@ export default async function OverviewPage() {
           sub={stats.nBreakevens > 0 ? `${stats.nWins}W / ${stats.nLosses}L / ${stats.nBreakevens}B` : `${stats.nWins}W / ${stats.nLosses}L`}
         />
         <KpiCard label="Avg Win/Loss" value={fmtPf(stats.payoffRatio)} />
+        <KpiCard label="Profit Factor" value={fmtPf(stats.profitFactor)} />
         <KpiCard
           label="Avg net trade P&L"
           value={fmtMoney(stats.expectancy)}

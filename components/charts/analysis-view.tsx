@@ -351,6 +351,7 @@ function SummaryGrid({
   const items: { label: string; value: React.ReactNode }[] = [
     { label: 'Net P&L', value: fmtMoney(summary.netPnl) },
     { label: 'Win %', value: `${summary.winPct.toFixed(1)}%` },
+    { label: 'Profit Factor', value: fmtRatio(summary.profitFactor) },
     { label: 'Avg win / loss', value: winLossValue },
     { label: 'Avg hold time (win / loss)', value: holdValue },
     { label: 'Avg win/loss rate', value: fmtRatio(summary.avgTradeWinLoss) },
