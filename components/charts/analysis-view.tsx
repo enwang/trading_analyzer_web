@@ -330,6 +330,7 @@ function SummaryGrid({
     avgDailyNetDrawdown: number
     avgWin: number
     avgLoss: number
+    totalTrades: number
   }
 }) {
   const holdValue = (
@@ -356,6 +357,8 @@ function SummaryGrid({
     { label: 'Avg hold time (win / loss)', value: holdValue },
     { label: 'Avg win/loss rate', value: fmtRatio(summary.avgTradeWinLoss) },
     { label: 'Avg. realized r-multiple', value: `${summary.avgRealizedRMultiple.toFixed(2)}R` },
+    { label: 'Avg net trade P&L', value: fmtMoney(summary.tradeExpectancy) },
+    { label: 'Trades', value: String(summary.totalTrades) },
   ]
 
   return (
@@ -475,6 +478,7 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
         dayLossCount: lossDays.length,
         dayCount: dayRows.length,
         avgDailyWinPct: dayRows.length ? (winDays.length / dayRows.length) * 100 : 0,
+        totalTrades: core.totalCount,
       },
     }
   }, [summaryTrades, timeZone])
