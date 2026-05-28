@@ -37,7 +37,7 @@ interface Props {
   executionLegs?: ExecutionLeg[] | null
 }
 
-type Timeframe  = '1' | '5' | '15' | '30' | '60' | '1D'
+type Timeframe  = '15' | '60' | '1D' | '1W'
 type ChartStyle = 'candles' | 'hollow' | 'bars' | 'line' | 'area'
 
 interface Candle {
@@ -59,16 +59,14 @@ interface ChartMeta {
 // Constants
 // ---------------------------------------------------------------------------
 const QUICK_TIMEFRAMES: Array<{ value: Timeframe; label: string }> = [
-  { value: '1',  label: '1m'  },
-  { value: '5',  label: '5m'  },
   { value: '15', label: '15m' },
-  { value: '30', label: '30m' },
   { value: '60', label: '1h'  },
   { value: '1D', label: '1D'  },
+  { value: '1W', label: 'W'   },
 ]
 
 const TF_TO_BACKEND: Record<Timeframe, string> = {
-  '1': '1m', '5': '5m', '15': '15m', '30': '30m', '60': '1h', '1D': '1d',
+  '15': '15m', '60': '1h', '1D': '1d', '1W': '1wk',
 }
 const CHART_STYLE_STORAGE_KEY = 'trade-chart-style-v1'
 
@@ -316,7 +314,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
             const day = new Intl.DateTimeFormat('en-US', { timeZone: userTimeZone, day: 'numeric' }).format(d)
             return `${weekday} ${day}`
           }
-          if (timeframe === '1D') return ''
+          if (timeframe === '1D' || timeframe === '1W') return ''
           return new Intl.DateTimeFormat('en-US', {
             timeZone: userTimeZone,
             hour: '2-digit',
@@ -337,7 +335,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
             day: 'numeric',
             year: '2-digit',
           }).format(d)
-          if (timeframe === '1D') return datePart
+          if (timeframe === '1D' || timeframe === '1W') return datePart
           const timePart = new Intl.DateTimeFormat('en-US', {
             timeZone: userTimeZone,
             hour: '2-digit',
