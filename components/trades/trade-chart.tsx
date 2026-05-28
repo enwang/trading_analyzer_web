@@ -37,7 +37,7 @@ interface Props {
   executionLegs?: ExecutionLeg[] | null
 }
 
-type Timeframe  = '15' | '60' | '1D' | '1W'
+type Timeframe  = '5' | '60' | '1D' | '1W'
 type ChartStyle = 'candles' | 'hollow' | 'bars' | 'line' | 'area'
 
 interface Candle {
@@ -59,14 +59,14 @@ interface ChartMeta {
 // Constants
 // ---------------------------------------------------------------------------
 const QUICK_TIMEFRAMES: Array<{ value: Timeframe; label: string }> = [
-  { value: '15', label: '15m' },
+  { value: '5',  label: '5m'  },
   { value: '60', label: '1h'  },
   { value: '1D', label: '1D'  },
   { value: '1W', label: 'W'   },
 ]
 
 const TF_TO_BACKEND: Record<Timeframe, string> = {
-  '15': '15m', '60': '1h', '1D': '1d', '1W': '1wk',
+  '5': '5m', '60': '1h', '1D': '1d', '1W': '1wk',
 }
 const CHART_STYLE_STORAGE_KEY = 'trade-chart-style-v1'
 
