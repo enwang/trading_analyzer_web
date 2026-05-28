@@ -234,14 +234,23 @@ export function TradeDetailTabs(props: Props) {
   const [mfeMaeDebug, setMfeMaeDebug] = useState<{ maxHigh: number; minLow: number; interval: string; maxHighTime: string; minLowTime: string } | null>(null)
   const [mfeMaeLoading, setMfeMaeLoading] = useState(false)
 
+  // Opening shares = sum of all opening-direction legs; falls back to trade shares.
+  // MFE/MAE must use the initial full position, not a partial-exit lot's shares.
+  const openingShares = useMemo(() => {
+    if (!executionLegs || executionLegs.length === 0 || !side) return shares
+    const openingAction = side === 'long' ? 'BUY' : 'SELL'
+    const total = executionLegs.filter(l => l.action === openingAction).reduce((s, l) => s + l.shares, 0)
+    return total > 0 ? total : shares
+  }, [executionLegs, side, shares])
+
   useEffect(() => {
-    if (!entryTime || !side || entryPrice == null || shares == null) return
+    if (!entryTime || !side || entryPrice == null || openingShares == null) return
     let canceled = false
     async function fetchMfeMae() {
       setMfeMaeLoading(true)
       try {
         const effectiveExit = exitTime ?? new Date().toISOString()
-        const params = new URLSearchParams({ symbol, entryTime: entryTime!, exitTime: effectiveExit, side: side!, entryPrice: String(entryPrice), shares: String(shares) })
+        const params = new URLSearchParams({ symbol, entryTime: entryTime!, exitTime: effectiveExit, side: side!, entryPrice: String(entryPrice), shares: String(openingShares) })
         const res = await fetch(`/api/market/mfe-mae?${params}`)
         if (canceled || !res.ok) return
         const json = await res.json() as { mfe: number; mae: number; mfePct: number; maePct: number; maxHigh: number; minLow: number; interval: string; maxHighTime: string; minLowTime: string }
@@ -255,7 +264,7 @@ export function TradeDetailTabs(props: Props) {
     }
     void fetchMfeMae()
     return () => { canceled = true }
-  }, [tradeId, symbol, entryTime, side, entryPrice, shares])
+  }, [tradeId, symbol, entryTime, side, entryPrice, openingShares])
 
   // ── open-trade live R ─────────────────────────────────────────────────────
   const [openTradeR, setOpenTradeR] = useState<number | null>(null)
