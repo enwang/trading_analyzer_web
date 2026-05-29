@@ -1108,7 +1108,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                   if (col === 'entryPrice') return <TableCell key={col} className="text-right">{fmtPrice(t.entryPrice)}</TableCell>
                   if (col === 'pnl') {
                     const isOpen = t.exitTime == null || t.outcome === 'open'
-                    let displayPnl: number | null = t.pnl
+                    let displayPnl: number | null = isOpen ? null : t.pnl
                     if (isOpen) {
                       const price = currentPrice(t)
                       const remain = currentRemainShares(t)
@@ -1120,7 +1120,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                   }
                   if (col === 'pnlPct') {
                     const isOpen = t.exitTime == null || t.outcome === 'open'
-                    let displayPct: number | null = t.pnlPct
+                    let displayPct: number | null = isOpen ? null : t.pnlPct
                     if (isOpen) {
                       const price = currentPrice(t)
                       if (t.entryPrice != null && price != null && t.entryPrice > 0) {
