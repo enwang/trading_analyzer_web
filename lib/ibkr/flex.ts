@@ -514,13 +514,20 @@ function parseTradesCsv(csvStr: string): NormalizedTrade[] {
     })
   }
 
-  // Use C-rows, or fall back to rows with non-zero realized P/L
-  const closeRows = cRaw.length > 0
+  // Use C-rows, or fall back to rows with non-zero realized P/L.
+  // Sort chronologically so earlier closes deplete earlier lots first — prevents
+  // a future close from consuming a lot that a prior close should have taken.
+  const closeRows = (cRaw.length > 0
     ? cRaw
     : raw.filter(row => {
         const pnl = parseNum(col(row, 'realized p/l', 'fifopnlrealized', 'realized p&l'))
         return pnl != null && pnl !== 0
       })
+  ).sort((a, b) => {
+    const ta = col(a, 'date/time', 'datetime', 'tradedatetime') || ''
+    const tb = col(b, 'date/time', 'datetime', 'tradedatetime') || ''
+    return ta < tb ? -1 : ta > tb ? 1 : 0
+  })
 
   if (!closeRows.length) throw new Error('No closing trades found in Flex CSV')
 
