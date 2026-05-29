@@ -1108,13 +1108,10 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                   if (col === 'entryPrice') return <TableCell key={col} className="text-right">{fmtPrice(t.entryPrice)}</TableCell>
                   if (col === 'pnl') {
                     const isOpen = t.exitTime == null || t.outcome === 'open'
-                    let displayPnl: number | null = isOpen ? null : t.pnl
+                    let displayPnl: number | null = t.pnl
                     if (isOpen) {
-                      const price = currentPrice(t)
-                      const remain = currentRemainShares(t)
-                      if (t.entryPrice != null && price != null && remain != null) {
-                        displayPnl = (t.side === 'long' ? price - t.entryPrice : t.entryPrice - price) * remain
-                      }
+                      const win = currentWin(t)
+                      if (win != null) displayPnl = win
                     }
                     return <TableCell key={col} className={`text-right font-medium ${signedValueClass(displayPnl) || pnlClass(t.outcome)}`}>{displayPnl != null ? `${displayPnl >= 0 ? '+' : ''}$${displayPnl.toFixed(2)}` : '—'}</TableCell>
                   }
