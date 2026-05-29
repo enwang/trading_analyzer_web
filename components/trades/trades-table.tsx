@@ -1108,17 +1108,24 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                   if (col === 'entryPrice') return <TableCell key={col} className="text-right">{fmtPrice(t.entryPrice)}</TableCell>
                   if (col === 'pnl') {
                     const isOpen = t.exitTime == null || t.outcome === 'open'
-                    const displayPnl = isOpen ? currentWin(t) : t.pnl
+                    let displayPnl: number | null = t.pnl
+                    if (isOpen) {
+                      const price = currentPrice(t)
+                      const remain = currentRemainShares(t)
+                      if (t.entryPrice != null && price != null && remain != null) {
+                        displayPnl = (t.side === 'long' ? price - t.entryPrice : t.entryPrice - price) * remain
+                      }
+                    }
                     return <TableCell key={col} className={`text-right font-medium ${signedValueClass(displayPnl) || pnlClass(t.outcome)}`}>{displayPnl != null ? `${displayPnl >= 0 ? '+' : ''}$${displayPnl.toFixed(2)}` : '—'}</TableCell>
                   }
                   if (col === 'pnlPct') {
                     const isOpen = t.exitTime == null || t.outcome === 'open'
                     let displayPct: number | null = t.pnlPct
                     if (isOpen) {
-                      const win = currentWin(t)
-                      const remain = currentRemainShares(t)
-                      const base = t.entryPrice != null && remain != null ? Math.abs(t.entryPrice * remain) : null
-                      displayPct = win != null && base != null && base > 0 ? win / base : null
+                      const price = currentPrice(t)
+                      if (t.entryPrice != null && price != null && t.entryPrice > 0) {
+                        displayPct = t.side === 'long' ? (price - t.entryPrice) / t.entryPrice : (t.entryPrice - price) / t.entryPrice
+                      }
                     }
                     return <TableCell key={col} className={`text-right ${signedValueClass(displayPct) || pnlClass(t.outcome)}`}>{displayPct != null ? `${(displayPct * 100).toFixed(2)}%` : '—'}</TableCell>
                   }
