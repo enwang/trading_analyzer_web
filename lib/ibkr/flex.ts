@@ -844,14 +844,16 @@ function appendOpenPositions(
         }
       }
     }
-    // Accumulate realized P&L and closed shares from partial exits into the lot
-    // tracker — but keep the individual closed trade rows visible in the journal.
-    for (const t of trades) {
+    // Absorb partial-exit closed rows back into the open lot so that each open
+    // position shows as a single row with cumulative realized P&L.
+    for (let i = trades.length - 1; i >= 0; i--) {
+      const t = trades[i]
       if (!t.exit_time || !t.entry_time) continue
       const lotKey = `${t.symbol}|${t.entry_time}`
       if (openKeys.has(lotKey)) {
         realizedByOpenLot.set(lotKey, (realizedByOpenLot.get(lotKey) ?? 0) + (t.pnl ?? 0))
         closedSharesByOpenLot.set(lotKey, (closedSharesByOpenLot.get(lotKey) ?? 0) + Math.abs(t.shares ?? 0))
+        trades.splice(i, 1)
       }
     }
 
@@ -897,8 +899,7 @@ function appendOpenPositions(
           shares: lot.remainingShares,
           entry_price: lot.avgPrice,
           exit_price: null,
-          // Partial-exit P&L is now shown on individual closed trade rows.
-          pnl: null,
+          pnl: realizedPnl || null,
           pnl_pct: null,
           outcome: 'open',
           hold_days: null,
