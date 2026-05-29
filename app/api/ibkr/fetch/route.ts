@@ -158,8 +158,9 @@ export async function POST(request: NextRequest) {
         if (!row.needs_review && existing.needs_review) row.needs_review = existing.needs_review
         if (row.stop_loss == null && existing.stop_loss != null) row.stop_loss = existing.stop_loss
         if (row.r_multiple == null && existing.r_multiple != null) row.r_multiple = existing.r_multiple
-        // Preserve manually-corrected execution_legs (and derived shares/pnl) for trades flagged for review or with notes
-        if ((existing.needs_review || existing.notes) && existing.execution_legs != null) {
+        // Preserve manually-corrected execution_legs (and derived shares/pnl) only for trades explicitly flagged for review.
+        // Notes alone do not indicate manual leg correction — they are user observations.
+        if (existing.needs_review && existing.execution_legs != null) {
           row.execution_legs = existing.execution_legs
           row.shares = computeOpenSharesFromLegs(existing.execution_legs) ?? row.shares
           if (row.exit_time == null) {
