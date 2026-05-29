@@ -79,6 +79,11 @@ export async function fetchFlexAll(
   return extractFlexCsv(raw)
 }
 
+export async function fetchFlexRaw(token: string, queryId: string): Promise<string> {
+  const { refCode, dlUrl } = await sendRequest(token, queryId)
+  return pollAndDownload(token, refCode, dlUrl)
+}
+
 // ---------------------------------------------------------------------------
 // Step 1: Send request
 // ---------------------------------------------------------------------------
@@ -204,7 +209,7 @@ export interface FlexExtract {
 
 const SECTION_HEADER_HINTS = ['"ClientAccountID"', '"AccountId"', 'ClientAccountID,', 'AccountId,']
 
-function splitFlexCsvSections(csvStr: string): { header: string; body: string }[] {
+export function splitFlexCsvSections(csvStr: string): { header: string; body: string }[] {
   const lines = csvStr.split(/\r?\n/)
   const sections: { header: string; body: string }[] = []
   let curHeader: string | null = null
@@ -839,17 +844,16 @@ function appendOpenPositions(
         }
       }
     }
-    // Hide partial-close rows only when that exact lot is still open.
-    for (let i = trades.length - 1; i >= 0; i--) {
-      const t = trades[i]
+    // Accumulate realized P&L and closed shares from partial exits into the lot
+    // tracker — but keep the individual closed trade rows visible in the journal.
+    for (const t of trades) {
       if (!t.exit_time || !t.entry_time) continue
       const lotKey = `${t.symbol}|${t.entry_time}`
-        if (openKeys.has(lotKey)) {
-          realizedByOpenLot.set(lotKey, (realizedByOpenLot.get(lotKey) ?? 0) + (t.pnl ?? 0))
-          closedSharesByOpenLot.set(lotKey, (closedSharesByOpenLot.get(lotKey) ?? 0) + Math.abs(t.shares ?? 0))
-          trades.splice(i, 1)
-        }
+      if (openKeys.has(lotKey)) {
+        realizedByOpenLot.set(lotKey, (realizedByOpenLot.get(lotKey) ?? 0) + (t.pnl ?? 0))
+        closedSharesByOpenLot.set(lotKey, (closedSharesByOpenLot.get(lotKey) ?? 0) + Math.abs(t.shares ?? 0))
       }
+    }
 
     for (const [sym, lots] of openLotsBySymbol) {
       for (const lot of lots) {
@@ -893,8 +897,8 @@ function appendOpenPositions(
           shares: lot.remainingShares,
           entry_price: lot.avgPrice,
           exit_price: null,
-          // Show realized P&L from partial closes on this still-open lot.
-          pnl: realizedPnl,
+          // Partial-exit P&L is now shown on individual closed trade rows.
+          pnl: null,
           pnl_pct: null,
           outcome: 'open',
           hold_days: null,

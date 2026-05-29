@@ -15,8 +15,8 @@ const csv = fs.readFileSync(csvPath, 'utf8')
 const trades = parseFlexCsv(csv)
 
 const wins = trades.filter((t) => t.outcome === 'win').length
-if (wins !== 12) {
-  fail(`expected 12 winners, got ${wins}`)
+if (wins !== 14) {
+  fail(`expected 14 winners, got ${wins}`)
 }
 
 const losses = trades.filter((t) => t.outcome === 'loss').length
@@ -30,17 +30,17 @@ if (open.length !== 4) {
 }
 
 const closed = trades.filter((t) => t.exit_time != null)
-if (closed.length !== 50) {
-  fail(`expected 50 closed trades, got ${closed.length}`)
+if (closed.length !== 52) {
+  fail(`expected 52 closed trades, got ${closed.length}`)
 }
 
-if (trades.length !== 54) {
-  fail(`expected 54 total trades, got ${trades.length}`)
+if (trades.length !== 56) {
+  fail(`expected 56 total trades, got ${trades.length}`)
 }
 
 const netClosedPnl = closed.reduce((s, t) => s + (t.pnl ?? 0), 0)
-if (Math.abs(netClosedPnl - (-41966.3962)) > 1e-4) {
-  fail(`expected net closed pnl -41966.3962, got ${netClosedPnl}`)
+if (Math.abs(netClosedPnl - (-40373.06019999999)) > 1e-4) {
+  fail(`expected net closed pnl -40373.06019999999, got ${netClosedPnl}`)
 }
 
 const expectedOpenShares = new Map([
@@ -138,13 +138,17 @@ O,XYZ,10,2026-03-01 10:00:00,,BUY,20,
 C,XYZ,10,2026-03-03 10:00:00,2026-03-01 10:00:00,SELL,21,200
 `
 const afterSellAddonTrades = parseFlexCsv(afterSellAddonCsv)
-const armClosedHigh = afterSellAddonTrades.find((t) => t.symbol === 'ARM' && t.exit_time != null)
-if (!armClosedHigh || armClosedHigh.entry_price !== 120 || armClosedHigh.shares !== 100 || armClosedHigh.pnl !== 1000) {
+const armAllClosed = afterSellAddonTrades.filter((t) => t.symbol === 'ARM' && t.exit_time != null)
+if (armAllClosed.length !== 2) {
+  fail(`expected 2 closed ARM trades (partial exit + addon close), got ${JSON.stringify(armAllClosed)}`)
+}
+const armClosedHigh = armAllClosed.find((t) => t.entry_price === 120)
+if (!armClosedHigh || armClosedHigh.shares !== 100 || armClosedHigh.pnl !== 1000) {
   fail(`expected ARM later add-on to close as separate 100 @ 120 lot for +1000, got ${JSON.stringify(armClosedHigh)}`)
 }
 const armOpenLow = afterSellAddonTrades.find((t) => t.symbol === 'ARM' && t.outcome === 'open')
-if (!armOpenLow || armOpenLow.entry_price !== 100 || armOpenLow.shares !== 50 || armOpenLow.pnl !== 500) {
-  fail(`expected original ARM lot to remain open with 50 shares and +500 partial P&L, got ${JSON.stringify(armOpenLow)}`)
+if (!armOpenLow || armOpenLow.entry_price !== 100 || armOpenLow.shares !== 50 || armOpenLow.pnl !== null) {
+  fail(`expected original ARM lot to remain open with 50 shares and null pnl, got ${JSON.stringify(armOpenLow)}`)
 }
 
 const sameDaySellAddonCsv = `Open/CloseIndicator,Symbol,Quantity,Date/Time,Open Date/Time,Buy/Sell,T. Price,Basis
@@ -155,14 +159,14 @@ O,XYZ,10,2026-03-01 10:00:00,,BUY,20,
 C,XYZ,10,2026-03-03 10:00:00,2026-03-01 10:00:00,SELL,21,200
 `
 const sameDaySellAddonTrades = parseFlexCsv(sameDaySellAddonCsv)
-const armSameDayRows = sameDaySellAddonTrades.filter((t) => t.symbol === 'ARM')
+const armSameDayRows = sameDaySellAddonTrades.filter((t) => t.symbol === 'ARM' && t.outcome === 'open')
 if (armSameDayRows.length !== 2) {
   fail(`expected same-day ARM add after sell to split into 2 open trades, got ${JSON.stringify(armSameDayRows)}`)
 }
-if (!armSameDayRows.some((t) => t.entry_price === 100 && t.shares === 50 && t.pnl === 500)) {
-  fail(`expected original same-day ARM lot to remain open with 50 shares and +500 partial P&L, got ${JSON.stringify(armSameDayRows)}`)
+if (!armSameDayRows.some((t) => t.entry_price === 100 && t.shares === 50 && t.pnl === null)) {
+  fail(`expected original same-day ARM lot to remain open with 50 shares and null pnl, got ${JSON.stringify(armSameDayRows)}`)
 }
-if (!armSameDayRows.some((t) => t.entry_price === 120 && t.shares === 100 && t.pnl === 0)) {
+if (!armSameDayRows.some((t) => t.entry_price === 120 && t.shares === 100 && t.pnl === null)) {
   fail(`expected same-day ARM add-on to become separate open 100 @ 120 trade, got ${JSON.stringify(armSameDayRows)}`)
 }
 
