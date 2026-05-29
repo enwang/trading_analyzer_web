@@ -1106,8 +1106,22 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                   if (col === 'holdDays') return <TableCell key={col} className="text-right">{fmtHoldDuration(effectiveHoldTimeMin(t), t.holdDays)}</TableCell>
                   if (col === 'shares') return <TableCell key={col} className="text-right">{displayShares(t) ?? '—'}</TableCell>
                   if (col === 'entryPrice') return <TableCell key={col} className="text-right">{fmtPrice(t.entryPrice)}</TableCell>
-                  if (col === 'pnl') return <TableCell key={col} className={`text-right font-medium ${signedValueClass(t.pnl) || pnlClass(t.outcome)}`}>{t.pnl != null ? `${t.pnl >= 0 ? '+' : ''}$${t.pnl.toFixed(2)}` : '—'}</TableCell>
-                  if (col === 'pnlPct') return <TableCell key={col} className={`text-right ${signedValueClass(t.pnlPct) || pnlClass(t.outcome)}`}>{t.pnlPct != null ? `${(t.pnlPct * 100).toFixed(2)}%` : '—'}</TableCell>
+                  if (col === 'pnl') {
+                    const isOpen = t.exitTime == null || t.outcome === 'open'
+                    const displayPnl = isOpen ? currentWin(t) : t.pnl
+                    return <TableCell key={col} className={`text-right font-medium ${signedValueClass(displayPnl) || pnlClass(t.outcome)}`}>{displayPnl != null ? `${displayPnl >= 0 ? '+' : ''}$${displayPnl.toFixed(2)}` : '—'}</TableCell>
+                  }
+                  if (col === 'pnlPct') {
+                    const isOpen = t.exitTime == null || t.outcome === 'open'
+                    let displayPct: number | null = t.pnlPct
+                    if (isOpen) {
+                      const win = currentWin(t)
+                      const remain = currentRemainShares(t)
+                      const base = t.entryPrice != null && remain != null ? Math.abs(t.entryPrice * remain) : null
+                      displayPct = win != null && base != null && base > 0 ? win / base : null
+                    }
+                    return <TableCell key={col} className={`text-right ${signedValueClass(displayPct) || pnlClass(t.outcome)}`}>{displayPct != null ? `${(displayPct * 100).toFixed(2)}%` : '—'}</TableCell>
+                  }
                   if (col === 'initialAmount') return <TableCell key={col} className="text-right">{initialAmount(t) != null ? fmtMoney(initialAmount(t) as number) : '—'}</TableCell>
                   if (col === 'initialRisk') {
                     return (
