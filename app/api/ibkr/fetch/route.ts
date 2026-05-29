@@ -191,6 +191,21 @@ export async function POST(request: NextRequest) {
           .is('exit_time', null)
           .in('symbol', symbolsToDeleteOpen)
       }
+
+      // Clean up stale partial-exit rows: for each incoming open position, delete any
+      // existing closed row that shares the same entry_time. These arise when a previous
+      // sync had the parser bug (unsorted C-rows), which caused partial exits to be
+      // recorded as separate closed rows instead of being absorbed into the open trade.
+      const incomingOpenRows = rows.filter(r => r.exit_time == null && r.entry_time)
+      for (const openRow of incomingOpenRows) {
+        await supabase
+          .from('trades')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('symbol', openRow.symbol as string)
+          .eq('entry_time', openRow.entry_time as string)
+          .not('exit_time', 'is', null)
+      }
     }
 
     const { error, data } = await supabase
