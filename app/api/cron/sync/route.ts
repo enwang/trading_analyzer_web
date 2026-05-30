@@ -107,7 +107,7 @@ export async function GET(request: Request) {
         reason: 'ibkr-sync',
       })
       await pruneOldSnapshots(supabase, s.user_id)
-      const { trades, navDaily, navChange } = await fetchFlexAll(s.ibkr_token, s.ibkr_query_id)
+      const { trades, navDaily, navChange, cashTransactions } = await fetchFlexAll(s.ibkr_token, s.ibkr_query_id)
 
       if (navDaily.length > 0) {
         await supabase.from('account_nav_daily').upsert(
@@ -119,6 +119,12 @@ export async function GET(request: Request) {
         await supabase.from('account_nav_change').upsert(
           navChange.map((r) => ({ ...r, user_id: s.user_id })),
           { onConflict: 'user_id,from_date,to_date' }
+        )
+      }
+      if (cashTransactions.length > 0) {
+        await supabase.from('account_cash_transactions').upsert(
+          cashTransactions.map((r) => ({ ...r, user_id: s.user_id })),
+          { onConflict: 'user_id,transaction_ts,amount' }
         )
       }
 

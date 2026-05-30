@@ -4,7 +4,7 @@ import { computeSummary, equityCurve } from '@/lib/metrics'
 import { normalizeTradesForDisplay } from '@/lib/trades'
 import { KpiCard } from '@/components/kpi/kpi-card'
 import { EquityCurve } from '@/components/charts/equity-curve'
-import { DailyPnlByTimezone } from '@/components/charts/daily-pnl-by-timezone'
+import { AccountEquityCurve } from '@/components/charts/account-equity-curve'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { OverviewSyncButton } from '@/components/overview/overview-sync-button'
 import { OpenPnlCard } from '@/components/overview/open-pnl-card'
@@ -47,17 +47,69 @@ function fmtHoverDate(iso: string | null) {
   })
 }
 
+async function fetchTickerReturns(symbol: string, startDate: string, endDate: string): Promise<{ date: string; pct: number }[]> {
+  try {
+    const p1 = Math.floor(new Date(startDate + 'T00:00:00Z').getTime() / 1000) - 86400 * 7
+    const p2 = Math.floor(new Date(endDate + 'T23:59:59Z').getTime() / 1000) + 86400
+    const res = await fetch(
+      `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?period1=${p1}&period2=${p2}&interval=1d`,
+      { next: { revalidate: 3600 }, headers: { 'User-Agent': 'Mozilla/5.0' } }
+    )
+    if (!res.ok) return []
+    const json = await res.json()
+    const result = json?.chart?.result?.[0]
+    if (!result) return []
+    const timestamps: number[] = result.timestamp ?? []
+    const closes: number[] = result.indicators?.adjclose?.[0]?.adjclose ?? []
+    if (!timestamps.length || !closes.length) return []
+    // Find last close on or before startDate to use as baseline (pct = 0 on first NAV day)
+    let baseIdx = 0
+    for (let i = 0; i < timestamps.length; i++) {
+      const d = new Date(timestamps[i] * 1000).toISOString().slice(0, 10)
+      if (d <= startDate) baseIdx = i
+      else break
+    }
+    const baseClose = closes[baseIdx]
+    if (!baseClose) return []
+    return timestamps
+      .map((ts, i) => {
+        const date = new Date(ts * 1000).toISOString().slice(0, 10)
+        const close = closes[i]
+        if (!close || date < startDate) return null
+        return { date, pct: ((close - baseClose) / baseClose) * 100 }
+      })
+      .filter((r): r is { date: string; pct: number } => r !== null)
+  } catch {
+    return []
+  }
+}
+
 export default async function OverviewPage() {
   const supabase = await createClient()
   const {
     data: { user },
   } = await supabase.auth.getUser()
 
-  const { data: rows } = await supabase
-    .from('trades')
-    .select('*')
-    .eq('user_id', user!.id)
-    .order('entry_time', { ascending: true })
+  const [{ data: rows }, { data: navRows }, { data: navChangeRows }, { data: cashTxRows }] = await Promise.all([
+    supabase
+      .from('trades')
+      .select('*')
+      .eq('user_id', user!.id)
+      .order('entry_time', { ascending: true }),
+    supabase
+      .from('account_nav_daily')
+      .select('report_date,total')
+      .eq('user_id', user!.id)
+      .order('report_date', { ascending: true }),
+    supabase
+      .from('account_nav_change')
+      .select('from_date,to_date,deposits_withdrawals')
+      .eq('user_id', user!.id),
+    supabase
+      .from('account_cash_transactions')
+      .select('transaction_ts,amount,type')
+      .eq('user_id', user!.id),
+  ])
 
   const trades = normalizeTradesForDisplay((rows ?? []).map(rowToTrade))
   const stats = computeSummary(trades)
@@ -78,7 +130,30 @@ export default async function OverviewPage() {
   const largestLossTrade = closedTrades.length
     ? closedTrades.reduce((worst, t) => ((worst == null || (t.pnl ?? Infinity) < (worst.pnl ?? Infinity)) ? t : worst), null as typeof closedTrades[number] | null)
     : null
-  const dailyTrades = trades.map((t) => ({ symbol: t.symbol, exitTime: t.exitTime, pnl: t.pnl }))
+  const navData = navRows ?? []
+  const navChanges = navChangeRows ?? []
+
+  // Fetch SPY/QQQ benchmark returns for the same date range as the NAV data
+  const navStart = navData.find(r => r.report_date >= '2026-01-01')?.report_date ?? navData[0]?.report_date ?? '2026-01-01'
+  const navEnd = navData[navData.length - 1]?.report_date ?? new Date().toISOString().slice(0, 10)
+  const [spyReturns, qqqReturns] = await Promise.all([
+    fetchTickerReturns('SPY', navStart, navEnd),
+    fetchTickerReturns('QQQ', navStart, navEnd),
+  ])
+
+  // Only pass capital deposits/withdrawals to the equity curve — exclude dividends, interest, fees
+  const cashDeposits = (cashTxRows ?? [])
+    .filter((r) => {
+      const t = (r.type as string | null)?.toLowerCase() ?? ''
+      // If type info is present, require it to be a deposit or withdrawal
+      if (t) return t.includes('deposit') || t.includes('withdrawal') || t.includes('transfer')
+      // If no type, include everything above $500 (heuristic fallback)
+      return Math.abs(r.amount as number) >= 500
+    })
+    .map((r) => ({
+      transaction_ts: r.transaction_ts as string,
+      amount: r.amount as number,
+    }))
 
   return (
     <div className="space-y-6">
@@ -155,19 +230,19 @@ export default async function OverviewPage() {
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm font-medium">Cumulative P&L</CardTitle>
+            <CardTitle className="text-sm font-medium">Account Equity</CardTitle>
           </CardHeader>
           <CardContent>
-            <EquityCurve data={equity} />
+            <AccountEquityCurve data={navData} changes={navChanges} deposits={cashDeposits} spy={spyReturns} qqq={qqqReturns} height={240} />
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm font-medium">Daily P&L</CardTitle>
+            <CardTitle className="text-sm font-medium">Cumulative P&L</CardTitle>
           </CardHeader>
           <CardContent>
-            <DailyPnlByTimezone trades={dailyTrades} height={240} />
+            <EquityCurve data={equity} />
           </CardContent>
         </Card>
       </div>

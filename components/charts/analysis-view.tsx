@@ -379,6 +379,57 @@ function SummaryGrid({
   )
 }
 
+type DayRow = {
+  date: string
+  pnl: number
+  trades: number
+  wins: number
+  losses: number
+  volume: number
+  winPnl: number
+  lossAbsPnl: number
+}
+
+function buildDayTrends(
+  trades: ClosedTrade[],
+  timeZone: string
+): { dayRows: DayRow[]; trends: TrendPoint[] } {
+  const dayMap = new Map<string, DayRow>()
+  for (const t of trades) {
+    if (!t.exitTime) continue
+    const key = dateKeyInTimeZone(t.exitTime, timeZone)
+    const bucket = dayMap.get(key) ?? { date: key, pnl: 0, trades: 0, wins: 0, losses: 0, volume: 0, winPnl: 0, lossAbsPnl: 0 }
+    bucket.pnl += t.pnl
+    bucket.trades += 1
+    bucket.volume += Math.abs(t.shares)
+    if (t.outcome === 'win') { bucket.wins++; bucket.winPnl += t.pnl }
+    else if (t.outcome === 'loss') { bucket.losses++; bucket.lossAbsPnl += Math.abs(t.pnl) }
+    dayMap.set(key, bucket)
+  }
+  const dayRows = Array.from(dayMap.values()).sort((a, b) => (a.date < b.date ? -1 : 1))
+  let cumNet = 0, cumWins = 0, cumTrades = 0, cumWinPnl = 0, cumWinCount = 0, cumLossAbs = 0, cumLossCount = 0
+  const trends: TrendPoint[] = dayRows.map((row, idx) => {
+    cumNet += row.pnl
+    cumWins += row.wins
+    cumTrades += row.trades
+    cumWinPnl += row.winPnl
+    cumWinCount += row.wins
+    cumLossAbs += row.lossAbsPnl
+    cumLossCount += row.losses
+    const avgWin = cumWinCount > 0 ? cumWinPnl / cumWinCount : 0
+    const avgLoss = cumLossCount > 0 ? cumLossAbs / cumLossCount : 0
+    return {
+      date: row.date,
+      label: shortDateLabel(row.date),
+      winPctCum: cumTrades > 0 ? (cumWins / cumTrades) * 100 : 0,
+      avgTradeWinLossCum: avgLoss > 0 ? avgWin / avgLoss : 0,
+      cumulativeNetPnl: cumNet,
+      avgDailyNetPnlCum: cumNet / (idx + 1),
+    }
+  })
+  return { dayRows, trends }
+}
+
 export function AnalysisView({ data }: { data: AnalysisData }) {
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
   const [expandedDay, setExpandedDay] = useState<string | null>(null)
@@ -407,51 +458,13 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
       const tb = b.exitTime ?? b.entryTime ?? ''
       return ta < tb ? -1 : ta > tb ? 1 : 0
     })
-
-    // Core stats via shared function — single source of truth
     const core = computeCoreStats(sorted)
-
-    // Day-level bucketing for trend charts
-    const dayMap = new Map<string, { date: string; pnl: number; wins: number; losses: number; winPnl: number; lossAbsPnl: number }>()
-    for (const t of sorted) {
-      if (!t.exitTime) continue
-      const key = dateKeyInTimeZone(t.exitTime, timeZone)
-      const bucket = dayMap.get(key) ?? { date: key, pnl: 0, wins: 0, losses: 0, winPnl: 0, lossAbsPnl: 0 }
-      bucket.pnl += t.pnl
-      if (t.outcome === 'win') { bucket.wins++; bucket.winPnl += t.pnl }
-      else if (t.outcome === 'loss') { bucket.losses++; bucket.lossAbsPnl += Math.abs(t.pnl) }
-      dayMap.set(key, bucket)
-    }
-
-    const dayRows = Array.from(dayMap.values()).sort((a, b) => (a.date < b.date ? -1 : 1))
-
-    let cumNet = 0, cumWins = 0, cumTrades = 0, cumWinPnl = 0, cumWinCount = 0, cumLossAbs = 0, cumLossCount = 0
-    const trends: TrendPoint[] = dayRows.map((row, idx) => {
-      cumNet += row.pnl
-      cumWins += row.wins
-      cumTrades += row.wins + row.losses
-      cumWinPnl += row.winPnl
-      cumWinCount += row.wins
-      cumLossAbs += row.lossAbsPnl
-      cumLossCount += row.losses
-      const avgWin = cumWinCount > 0 ? cumWinPnl / cumWinCount : 0
-      const avgLoss = cumLossCount > 0 ? cumLossAbs / cumLossCount : 0
-      return {
-        date: row.date,
-        label: shortDateLabel(row.date),
-        winPctCum: cumTrades > 0 ? (cumWins / cumTrades) * 100 : 0,
-        avgTradeWinLossCum: avgLoss > 0 ? avgWin / avgLoss : 0,
-        cumulativeNetPnl: cumNet,
-        avgDailyNetPnlCum: cumNet / (idx + 1),
-      }
-    })
-
+    const { dayRows, trends } = buildDayTrends(sorted, timeZone)
     const tradeExpectancy = core.totalCount > 0 ? core.netPnl / core.totalCount : 0
     const dayPnls = dayRows.map((d) => d.pnl)
     const avgDailyNetPnl = dayPnls.length ? dayPnls.reduce((s, v) => s + v, 0) / dayPnls.length : 0
     const lossDays = dayPnls.filter((v) => v < 0)
     const winDays = dayPnls.filter((v) => v > 0)
-
     return {
       trends,
       summary: {
@@ -471,9 +484,7 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
         avgDailyVolume: 0,
         loggedDays: dayRows.length,
         maxDailyNetDrawdown: dayPnls.length ? Math.min(...dayPnls) : 0,
-        avgDailyNetDrawdown: lossDays.length
-          ? lossDays.reduce((s, v) => s + v, 0) / lossDays.length
-          : 0,
+        avgDailyNetDrawdown: lossDays.length ? lossDays.reduce((s, v) => s + v, 0) / lossDays.length : 0,
         dayWinCount: winDays.length,
         dayLossCount: lossDays.length,
         dayCount: dayRows.length,
@@ -489,130 +500,12 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
       const tb = b.exitTime ?? b.entryTime ?? ''
       return ta < tb ? -1 : ta > tb ? 1 : 0
     })
-
-    const dayMap = new Map<
-      string,
-      {
-        date: string
-        pnl: number
-        trades: number
-        wins: number
-        losses: number
-        volume: number
-        winPnl: number
-        lossAbsPnl: number
-      }
-    >()
-
-    let winPnl = 0
-    let winCount = 0
-    let lossAbsPnl = 0
-    let lossCount = 0
-
-    for (const t of sorted) {
-      if (!t.exitTime) continue
-      const key = dateKeyInTimeZone(t.exitTime, timeZone)
-      const bucket = dayMap.get(key) ?? {
-        date: key,
-        pnl: 0,
-        trades: 0,
-        wins: 0,
-        losses: 0,
-        volume: 0,
-        winPnl: 0,
-        lossAbsPnl: 0,
-      }
-
-      bucket.pnl += t.pnl
-      bucket.trades += 1
-      bucket.volume += Math.abs(t.shares)
-      if (t.outcome === 'win') {
-        bucket.wins += 1
-        bucket.winPnl += t.pnl
-        winPnl += t.pnl
-        winCount += 1
-      } else if (t.outcome === 'loss') {
-        bucket.losses += 1
-        bucket.lossAbsPnl += Math.abs(t.pnl)
-        lossAbsPnl += Math.abs(t.pnl)
-        lossCount += 1
-      }
-
-      dayMap.set(key, bucket)
-    }
-
-    const dayRows = Array.from(dayMap.values()).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
-
-    let cumNet = 0
-    let cumWins = 0
-    let cumTrades = 0
-    let cumWinPnl = 0
-    let cumWinCount = 0
-    let cumLossAbs = 0
-    let cumLossCount = 0
-
-    const trends: TrendPoint[] = dayRows.map((row, idx) => {
-      cumNet += row.pnl
-      cumWins += row.wins
-      cumTrades += row.trades
-      cumWinPnl += row.winPnl
-      cumWinCount += row.wins
-      cumLossAbs += row.lossAbsPnl
-      cumLossCount += row.losses
-
-      const avgWin = cumWinCount > 0 ? cumWinPnl / cumWinCount : 0
-      const avgLoss = cumLossCount > 0 ? cumLossAbs / cumLossCount : 0
-
-      return {
-        date: row.date,
-        label: shortDateLabel(row.date),
-        winPctCum: cumTrades > 0 ? (cumWins / cumTrades) * 100 : 0,
-        avgTradeWinLossCum: avgLoss > 0 ? avgWin / avgLoss : 0,
-        cumulativeNetPnl: cumNet,
-        avgDailyNetPnlCum: cumNet / (idx + 1),
-      }
-    })
-
-    const dayPnls = dayRows.map((d) => d.pnl)
-    const avgDailyNetPnl = dayPnls.length ? dayPnls.reduce((s, v) => s + v, 0) / dayPnls.length : 0
-    const avgDailyVolume = dayRows.length
-      ? dayRows.reduce((s, d) => s + d.volume, 0) / dayRows.length
-      : 0
-    const winDays = dayPnls.filter((v) => v > 0)
-    const lossDaysAbs = dayPnls.filter((v) => v < 0).map((v) => Math.abs(v))
-    const avgDailyWinLoss = winDays.length && lossDaysAbs.length
-      ? (winDays.reduce((s, v) => s + v, 0) / winDays.length) /
-        (lossDaysAbs.reduce((s, v) => s + v, 0) / lossDaysAbs.length)
-      : 0
-
-    const avgTradeWinLoss = winCount && lossCount ? (winPnl / winCount) / (lossAbsPnl / lossCount) : 0
-    const maxDailyNetDrawdown = dayPnls.length ? Math.min(...dayPnls) : 0
-    const lossDays = dayPnls.filter((v) => v < 0)
-    const avgDailyNetDrawdown = lossDays.length
-      ? lossDays.reduce((s, v) => s + v, 0) / lossDays.length
-      : 0
-
+    const { dayRows } = buildDayTrends(sorted, timeZone)
     return {
       dayRows: [...dayRows].reverse(),
-      trends,
-      summary: {
-        ...data.summaryBase,
-        avgDailyNetPnl,
-        avgDailyVolume,
-        avgDailyWinLoss,
-        avgTradeWinLoss: data.summaryBase.payoffRatio,
-        avgPlannedRMultiple: 0,
-        loggedDays: dayRows.length,
-        maxDailyNetDrawdown,
-        avgDailyNetDrawdown,
-        dayWinCount: winDays.length,
-        dayLossCount: lossDays.length,
-        dayCount: dayRows.length,
-        avgDailyWinPct: dayRows.length ? (winDays.length / dayRows.length) * 100 : 0,
-      },
       trades: [...sorted].reverse(),
     }
-  }, [data.closedTrades, data.summaryBase, timeZone])
+  }, [data.closedTrades, timeZone])
 
   if (!data.closedTrades.length) {
     return <div className="text-muted-foreground text-sm">No closed trades to analyze yet.</div>

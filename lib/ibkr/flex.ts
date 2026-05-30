@@ -74,7 +74,7 @@ export async function fetchFlexAll(
   const raw = await pollAndDownload(token, refCode, dlUrl)
   const trimmed = raw.trimStart()
   if (trimmed.startsWith('<')) {
-    return { trades: parseXml(raw), navDaily: [], navChange: [] }
+    return { trades: parseXml(raw), navDaily: [], navChange: [], cashTransactions: [] }
   }
   return extractFlexCsv(raw)
 }
@@ -201,13 +201,27 @@ export interface NavChangeRow {
   commissions: number | null
 }
 
+export interface CashTransactionRow {
+  account_id: string
+  currency: string | null
+  transaction_ts: string   // ISO 8601 UTC
+  type: string | null      // 'Deposits', 'Withdrawals', etc.
+  amount: number
+  description: string | null
+}
+
 export interface FlexExtract {
   trades: NormalizedTrade[]
   navDaily: NavDailyRow[]
   navChange: NavChangeRow[]
+  cashTransactions: CashTransactionRow[]
 }
 
-const SECTION_HEADER_HINTS = ['"ClientAccountID"', '"AccountId"', 'ClientAccountID,', 'AccountId,']
+const SECTION_HEADER_HINTS = [
+  '"ClientAccountID"', '"AccountId"', 'ClientAccountID,', 'AccountId,',
+  // Cash Transactions section omits ClientAccountID and starts with CurrencyPrimary
+  '"CurrencyPrimary","Description"',
+]
 
 export function splitFlexCsvSections(csvStr: string): { header: string; body: string }[] {
   const lines = csvStr.split(/\r?\n/)
@@ -235,12 +249,19 @@ export function splitFlexCsvSections(csvStr: string): { header: string; body: st
   return sections
 }
 
-function classifySection(header: string): 'trades' | 'nav_daily' | 'nav_change' | 'unknown' {
+function classifySection(header: string): 'trades' | 'nav_daily' | 'nav_change' | 'cash_transactions' | 'unknown' {
   const h = header.toLowerCase()
   // Trades section is wide and includes Symbol + TradeID + OpenIndicator/OpenCloseIndicator
   if (h.includes('"symbol"') && (h.includes('tradeid') || h.includes('"buysell"'))) return 'trades'
   if (h.includes('"reportdate"') && h.includes('"total"')) return 'nav_daily'
   if (h.includes('"fromdate"') && h.includes('"todate"') && h.includes('startingvalue')) return 'nav_change'
+  // Cash Transactions section: has Amount + Date/Time but NOT Symbol or TradeID
+  // Handle both quoted ("Amount") and unquoted (Amount,) column headers
+  const hasAmount = h.includes('"amount"') || h.includes(',amount,') || h.includes(',amount"') || h.endsWith(',amount')
+  const hasDate = h.includes('date/time') || h.includes('datetime') || h.includes('settledate')
+  const noSymbol = !h.includes('"symbol"') && !h.includes(',symbol,') && !h.includes(',symbol"')
+  const noTradeId = !h.includes('tradeid')
+  if (hasAmount && hasDate && noSymbol && noTradeId) return 'cash_transactions'
   return 'unknown'
 }
 
@@ -312,18 +333,54 @@ function parseNavChangeCsv(csv: string): NavChangeRow[] {
   return rows
 }
 
+function parseCashTransactionsCsv(csv: string): CashTransactionRow[] {
+  const result = Papa.parse<Record<string, string>>(csv, {
+    header: true,
+    skipEmptyLines: true,
+    transformHeader: (h: string) => h.trim().toLowerCase(),
+  })
+  const rows: CashTransactionRow[] = []
+  for (const row of (result.data ?? []) as Record<string, string>[]) {
+    const accountId = (row['clientaccountid'] ?? row['accountid'] ?? '').trim()
+    const rawAmount = num(row['amount'])
+    if (rawAmount == null || rawAmount === 0) continue
+
+    // Date/Time may appear as "Date/Time" or "Settle Date" depending on query config
+    const rawDt =
+      row['date/time'] ?? row['datetime'] ?? row['settledate'] ?? row['date'] ?? ''
+    if (!rawDt?.trim()) continue
+
+    // Parse to UTC timestamp. IBKR formats: "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DD"
+    const iso = rawDt.trim().length === 10
+      ? `${rawDt.trim()}T20:00:00Z`  // date-only: use 4pm ET as conservative same-day stamp
+      : rawDt.trim().replace(' ', 'T') + 'Z'
+
+    const type = (row['type'] ?? row['transactiontype'] ?? '').trim() || null
+    rows.push({
+      account_id: accountId,
+      currency: row['currencyprimary']?.trim() || row['currency']?.trim() || null,
+      transaction_ts: iso,
+      type,
+      amount: rawAmount,
+      description: (row['description'] ?? row['trnstype'] ?? '').trim() || null,
+    })
+  }
+  return rows
+}
+
 function extractFlexCsv(csvStr: string): FlexExtract {
   const sections = splitFlexCsvSections(csvStr)
   // Fallback: when no recognizable section headers are present (e.g. older
   // single-section trades exports that don't start with ClientAccountID), treat
   // the whole CSV as a trades section so backwards-compat callers still work.
   if (sections.length === 0) {
-    return { trades: parseTradesCsv(csvStr), navDaily: [], navChange: [] }
+    return { trades: parseTradesCsv(csvStr), navDaily: [], navChange: [], cashTransactions: [] }
   }
 
   let trades: NormalizedTrade[] = []
   const navDaily: NavDailyRow[] = []
   const navChange: NavChangeRow[] = []
+  const cashTransactions: CashTransactionRow[] = []
 
   for (const sec of sections) {
     const kind = classifySection(sec.header)
@@ -334,10 +391,12 @@ function extractFlexCsv(csvStr: string): FlexExtract {
       navDaily.push(...parseNavDailyCsv(csv))
     } else if (kind === 'nav_change') {
       navChange.push(...parseNavChangeCsv(csv))
+    } else if (kind === 'cash_transactions') {
+      cashTransactions.push(...parseCashTransactionsCsv(csv))
     }
   }
 
-  return { trades, navDaily, navChange }
+  return { trades, navDaily, navChange, cashTransactions }
 }
 
 // ---------------------------------------------------------------------------

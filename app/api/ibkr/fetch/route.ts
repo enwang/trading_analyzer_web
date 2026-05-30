@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
       reason: 'ibkr-sync',
     })
 
-    const { trades, navDaily, navChange } = await fetchFlexAll(token, queryId)
+    const { trades, navDaily, navChange, cashTransactions } = await fetchFlexAll(token, queryId)
 
     if (navDaily.length > 0) {
       await supabase.from('account_nav_daily').upsert(
@@ -96,6 +96,12 @@ export async function POST(request: NextRequest) {
       await supabase.from('account_nav_change').upsert(
         navChange.map((r) => ({ ...r, user_id: user.id })),
         { onConflict: 'user_id,from_date,to_date' }
+      )
+    }
+    if (cashTransactions.length > 0) {
+      await supabase.from('account_cash_transactions').upsert(
+        cashTransactions.map((r) => ({ ...r, user_id: user.id })),
+        { onConflict: 'user_id,transaction_ts,amount' }
       )
     }
 
