@@ -17,12 +17,21 @@ export default async function TradesPage({
     data: { user },
   } = await supabase.auth.getUser()
 
-  const { data: rows } = await supabase
-    .from('trades')
-    .select('*')
-    .eq('user_id', user!.id)
-    .order('entry_time', { ascending: false })
-    .limit(1000)
+  const [{ data: rows }, { data: navRows }] = await Promise.all([
+    supabase
+      .from('trades')
+      .select('*')
+      .eq('user_id', user!.id)
+      .order('entry_time', { ascending: false })
+      .limit(1000),
+    supabase
+      .from('account_nav_daily')
+      .select('total')
+      .eq('user_id', user!.id)
+      .order('report_date', { ascending: false })
+      .limit(1),
+  ])
+  const accountEquity = navRows?.[0]?.total ?? null
 
   const trades = normalizeTradesForDisplay((rows ?? [])
     .map(rowToTrade))
@@ -40,5 +49,5 @@ export default async function TradesPage({
       return tradeDate === safeDate
     })
 
-  return <TradesTable trades={trades} />
+  return <TradesTable trades={trades} accountEquity={accountEquity} />
 }

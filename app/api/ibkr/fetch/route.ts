@@ -5,7 +5,7 @@ import { createTradeSnapshot } from '@/lib/trade-snapshots'
 import { filterOutHidden, loadHiddenTradeKeys } from '@/lib/hidden-trades'
 import { NextRequest, NextResponse } from 'next/server'
 
-type Leg = { action?: string; shares?: number; price?: number }
+type Leg = { action?: string; shares?: number; price?: number; time?: string }
 
 function parseLegs(legs: unknown): Leg[] | null {
   if (!Array.isArray(legs) || legs.length === 0) return null
@@ -115,7 +115,7 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    let rows: UpsertRow[] = trades.map(t => ({ ...t, user_id: user.id, needs_review: false }))
+    let rows: UpsertRow[] = trades.map(t => ({ ...t, user_id: user.id, needs_review: false, stop_loss_locked: false }))
     const touchedSymbols = [...new Set(rows.map(r => r.symbol))]
 
     const hiddenKeys = await loadHiddenTradeKeys(supabase, user.id, touchedSymbols)
@@ -127,11 +127,11 @@ export async function POST(request: NextRequest) {
       // Fetch ALL existing trades (open and closed) to preserve manual fields
       const { data: existingRows } = await supabase
         .from('trades')
-        .select('symbol, entry_time, exit_time, stop_loss, r_multiple, setup_tag, notes, needs_review, execution_legs')
+        .select('symbol, entry_time, exit_time, stop_loss, stop_loss_locked, initial_risk_amount, r_multiple, setup_tag, notes, needs_review, execution_legs')
         .eq('user_id', user.id)
         .in('symbol', touchedSymbols)
 
-      type ExistingRow = { symbol: string; entry_time: string | null; exit_time: string | null; stop_loss: number | null; r_multiple: number | null; setup_tag: string | null; notes: string | null; needs_review: boolean | null; execution_legs: unknown | null }
+      type ExistingRow = { symbol: string; entry_time: string | null; exit_time: string | null; stop_loss: number | null; stop_loss_locked: boolean | null; initial_risk_amount: number | null; r_multiple: number | null; setup_tag: string | null; notes: string | null; needs_review: boolean | null; execution_legs: unknown | null }
       const openRowsBySymbol = new Map<string, ExistingRow[]>()
       for (const existing of existingRows ?? []) {
         if (existing.exit_time != null) continue
@@ -163,14 +163,30 @@ export async function POST(request: NextRequest) {
         if (!row.notes && existing.notes) row.notes = existing.notes
         if (!row.needs_review && existing.needs_review) row.needs_review = existing.needs_review
         if (row.stop_loss == null && existing.stop_loss != null) row.stop_loss = existing.stop_loss
+        if (existing.stop_loss_locked) row.stop_loss_locked = true
+        if ((row as Record<string, unknown>).initial_risk_amount == null && existing.initial_risk_amount != null) {
+          (row as Record<string, unknown>).initial_risk_amount = existing.initial_risk_amount
+        }
         if (row.r_multiple == null && existing.r_multiple != null) row.r_multiple = existing.r_multiple
-        // Preserve manually-corrected execution_legs (and derived shares/pnl) only for trades explicitly flagged for review.
-        // Notes alone do not indicate manual leg correction — they are user observations.
+        // When needs_review is set, preserve existing execution_legs as a base —
+        // but merge in any NEW sell legs from the parser that aren't already present.
+        // This ensures partial closes that arrive after the review flag was set still land.
         if (existing.needs_review && existing.execution_legs != null) {
-          row.execution_legs = existing.execution_legs
-          row.shares = computeOpenSharesFromLegs(existing.execution_legs) ?? row.shares
+          const dbLegs = parseLegs(existing.execution_legs) ?? []
+          const newLegs = parseLegs(row.execution_legs) ?? []
+          const dbLegKeys = new Set(dbLegs.map(l => `${l.time}|${l.action}|${l.shares}`))
+          const addedLegs = newLegs.filter(
+            l => l.action === 'SELL' && !dbLegKeys.has(`${l.time}|${l.action}|${l.shares}`)
+          )
+          const mergedLegs = addedLegs.length > 0
+            ? [...dbLegs, ...addedLegs].sort((a, b) =>
+                ((a as { time?: string }).time ?? '') < ((b as { time?: string }).time ?? '') ? -1 : 1
+              )
+            : dbLegs
+          row.execution_legs = mergedLegs
+          row.shares = computeOpenSharesFromLegs(mergedLegs) ?? row.shares
           if (row.exit_time == null) {
-            const realized = computeRealizedPnlFromLegs(existing.execution_legs)
+            const realized = computeRealizedPnlFromLegs(mergedLegs)
             if (realized != null) row.pnl = realized
           }
         }

@@ -8,6 +8,7 @@ import { AccountEquityCurve } from '@/components/charts/account-equity-curve'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { OverviewSyncButton } from '@/components/overview/overview-sync-button'
 import { OpenPnlCard } from '@/components/overview/open-pnl-card'
+import { OpenRiskCard } from '@/components/overview/open-risk-card'
 
 function fmtMoney(n: number) {
   const abs = Math.abs(n)
@@ -124,6 +125,14 @@ export default async function OverviewPage() {
       entryPrice: t.entryPrice,
       realizedPnl: t.pnl,
     }))
+  const openTradesForRisk = trades
+    .filter((t) => t.exitTime == null || t.outcome === 'open')
+    .map((t) => ({
+      symbol: t.symbol,
+      side: t.side,
+      shares: t.shares,
+      stopLoss: t.stopLoss,
+    }))
   const largestWinTrade = closedTrades.length
     ? closedTrades.reduce((best, t) => ((best == null || (t.pnl ?? -Infinity) > (best.pnl ?? -Infinity)) ? t : best), null as typeof closedTrades[number] | null)
     : null
@@ -132,6 +141,7 @@ export default async function OverviewPage() {
     : null
   const navData = navRows ?? []
   const navChanges = navChangeRows ?? []
+  const latestNav = navData[navData.length - 1]?.total ?? null
 
   // Fetch SPY/QQQ benchmark returns for the same date range as the NAV data
   const navStart = navData.find(r => r.report_date >= '2026-01-01')?.report_date ?? navData[0]?.report_date ?? '2026-01-01'
@@ -170,6 +180,7 @@ export default async function OverviewPage() {
           sub={stats.dateRange}
         />
         <OpenPnlCard trades={openTrades} />
+        <OpenRiskCard trades={openTradesForRisk} accountEquity={latestNav} />
         <KpiCard
           label="Win Rate"
           value={fmtPct(stats.winRate)}

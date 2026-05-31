@@ -52,6 +52,9 @@ type SortKey =
   | 'currentRemainShares'
   | 'rMultiple'
   | 'outcome'
+  | 'stopLoss'
+  | 'currentRisk'
+  | 'currentRiskPct'
 type SortDir = 'asc' | 'desc'
 type ColumnId =
   | 'symbol'
@@ -73,6 +76,9 @@ type ColumnId =
   | 'outcome'
   | 'setupTag'
   | 'notes'
+  | 'stopLoss'
+  | 'currentRisk'
+  | 'currentRiskPct'
 
 const COLUMN_ORDER_STORAGE_KEY = 'trades-table-column-order-v1'
 const TRADES_LAST_URL_STORAGE_KEY = 'trades-table-last-url'
@@ -80,7 +86,6 @@ const TRADES_LAST_SCROLL_STORAGE_KEY = 'trades-table-last-scroll'
 const DASHBOARD_SCROLL_CONTAINER_ID = 'dashboard-scroll-container'
 const LEGACY_COLUMN_MAP: Record<string, ColumnId> = {
   initialStopPct: 'notes',
-  stopLoss: 'initialRisk',
 }
 const DEFAULT_COLUMN_ORDER: ColumnId[] = [
   'symbol',
@@ -89,6 +94,13 @@ const DEFAULT_COLUMN_ORDER: ColumnId[] = [
   'exitTime',
   'shares',
   'entryPrice',
+  // Open-trades "current state" group — hidden in all other views via openOnlyColumns
+  'currentPrice',
+  'currentRemainShares',
+  'stopLoss',
+  'currentRisk',
+  'currentRiskPct',
+  'currentAmount',
   'pnl',
   'pnlPct',
   'initialAmount',
@@ -97,12 +109,8 @@ const DEFAULT_COLUMN_ORDER: ColumnId[] = [
   'outcome',
   'setupTag',
   'notes',
-  // New columns are appended so existing/default order stays intact.
   'holdDays',
   'initialRiskPct',
-  'currentPrice',
-  'currentAmount',
-  'currentRemainShares',
 ]
 const SORT_KEYS: SortKey[] = [
   'symbol',
@@ -122,6 +130,9 @@ const SORT_KEYS: SortKey[] = [
   'currentRemainShares',
   'rMultiple',
   'outcome',
+  'stopLoss',
+  'currentRisk',
+  'currentRiskPct',
 ]
 const DEFAULT_INITIAL_RISK_INPUT = DEFAULT_INITIAL_RISK_AMOUNT.toFixed(2)
 const TRADE_INITIAL_RISK_STORAGE_KEY = 'trades-table-initial-risk-v1'
@@ -208,7 +219,7 @@ function getDashboardScrollContainer() {
   return document.getElementById(DASHBOARD_SCROLL_CONTAINER_ID)
 }
 
-export function TradesTable({ trades }: { trades: Trade[] }) {
+export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accountEquity?: number | null }) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -221,10 +232,12 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
     viewParam === 'win' || viewParam === 'loss' || viewParam === 'open' || viewParam === 'all' || viewParam === 'marked' || viewParam === 'lastweek'
       ? viewParam
       : 'all'
+  const defaultSortKey: SortKey = initialFilter === 'open' ? 'currentRiskPct' : 'exitTime'
+  const defaultSortDir: SortDir = initialFilter === 'open' ? 'desc' : 'desc'
   const initialSortKey: SortKey = sortParam && SORT_KEYS.includes(sortParam as SortKey)
     ? (sortParam as SortKey)
-    : 'exitTime'
-  const initialSortDir: SortDir = dirParam === 'asc' || dirParam === 'desc' ? dirParam : 'desc'
+    : defaultSortKey
+  const initialSortDir: SortDir = dirParam === 'asc' || dirParam === 'desc' ? dirParam : defaultSortDir
   const [filter, setFilter] = useState<OutcomeFilter>(initialFilter)
   const addonTradeIds = useMemo(() => {
     const openTrades = trades.filter((t) => t.exitTime == null || t.outcome === 'open')
@@ -287,12 +300,19 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
   const [draggingColumn, setDraggingColumn] = useState<ColumnId | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [liveQuotes, setLiveQuotes] = useState<Record<string, number | null>>({})
+  const [stopLossDrafts, setStopLossDrafts] = useState<Record<string, string>>(
+    () => Object.fromEntries(trades.map((t) => [t.id, t.stopLoss?.toFixed(2) ?? '']))
+  )
   const [populating, setPopulating] = useState(false)
   const [populateProgress, setPopulateProgress] = useState<{ done: number; total: number } | null>(null)
   const savedRef = useRef<Record<string, { setupTag: string; notes: string; initialRisk: string }>>(initialDrafts)
   const columnOrderDbLoadedRef = useRef(false)
   const columnOrderDbSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const timersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+  const savedStopLossRef = useRef<Record<string, string>>(
+    Object.fromEntries(trades.map((t) => [t.id, t.stopLoss?.toFixed(2) ?? '']))
+  )
+  const stopLossTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set())
   const [notesSelection, setNotesSelection] = useState<{ id: string; start: number; end: number } | null>(null)
   const [refining, setRefining] = useState(false)
@@ -319,9 +339,10 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
   }, [trades, filter, deletedIds])
 
   const visibleColumnOrder = useMemo(() => {
-    const openOnlyColumns: ColumnId[] = ['currentPrice', 'currentAmount', 'currentRemainShares']
+    const openOnlyColumns: ColumnId[] = ['currentPrice', 'currentAmount', 'currentRemainShares', 'stopLoss', 'currentRisk', 'currentRiskPct']
+    const openHideColumns: ColumnId[] = ['outcome', 'setupTag', 'notes', 'initialRisk']
     if (filter === 'open') {
-      const next: ColumnId[] = columnOrder.filter((col) => col !== 'exitTime')
+      const next: ColumnId[] = columnOrder.filter((col) => col !== 'exitTime' && !openHideColumns.includes(col))
       for (const col of openOnlyColumns) {
         if (!next.includes(col)) next.push(col)
       }
@@ -569,6 +590,20 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
     return Math.abs(remain * price)
   }
 
+  function computeCurrentRisk(t: Trade, stopLoss: number | null | undefined): number | null {
+    const price = currentPrice(t)
+    const remain = currentRemainShares(t)
+    if (price == null || remain == null || stopLoss == null || !t.side) return null
+    const riskPerShare = t.side === 'long' ? price - stopLoss : stopLoss - price
+    return Math.max(0, riskPerShare * Math.abs(remain))
+  }
+
+  function computeCurrentRiskPct(t: Trade, stopLoss: number | null | undefined): number | null {
+    const risk = computeCurrentRisk(t, stopLoss)
+    if (risk == null || accountEquity == null || accountEquity <= 0) return null
+    return (risk / accountEquity) * 100
+  }
+
   function currentWin(t: Trade) {
     const price = currentPrice(t)
     const remain = currentRemainShares(t)
@@ -668,6 +703,23 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
         return computedR(t, effectiveStopLoss) ?? t.rMultiple ?? null
       case 'outcome':
         return t.outcome ?? null
+      case 'stopLoss': {
+        const dv = stopLossDrafts[t.id] ?? ''
+        const pv = dv !== '' ? Number(dv) : null
+        return pv != null && Number.isFinite(pv) && pv > 0 ? pv : t.stopLoss
+      }
+      case 'currentRisk': {
+        const dv = stopLossDrafts[t.id] ?? ''
+        const pv = dv !== '' ? Number(dv) : null
+        const sl = pv != null && Number.isFinite(pv) && pv > 0 ? pv : t.stopLoss
+        return computeCurrentRisk(t, sl)
+      }
+      case 'currentRiskPct': {
+        const dv = stopLossDrafts[t.id] ?? ''
+        const pv = dv !== '' ? Number(dv) : null
+        const sl = pv != null && Number.isFinite(pv) && pv > 0 ? pv : t.stopLoss
+        return computeCurrentRiskPct(t, sl)
+      }
       default:
         return null
     }
@@ -741,7 +793,8 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
 
   const sortedFiltered = useMemo(() => {
     return [...filtered].sort(compareTrades)
-  }, [filtered, sortKey, sortDir, drafts])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtered, sortKey, sortDir, drafts, liveQuotes])
 
   async function deleteTrade(id: string) {
     if (!window.confirm('Delete this trade? This cannot be undone.')) return
@@ -875,6 +928,39 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
     }
   }
 
+  async function saveStopLoss(id: string, value: string) {
+    const stopLoss = value.trim() === '' ? null : Number(value)
+    if (stopLoss != null && (!Number.isFinite(stopLoss) || stopLoss <= 0)) return
+    const trade = tradeById.get(id)
+    if (!trade) return
+    const nextR = stopLoss != null ? computedR(trade, stopLoss) : null
+    try {
+      await fetch(`/api/trades/${id}/risk`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          stopLoss,
+          rMultiple: nextR,
+          stopLossLocked: stopLoss != null,
+          initialRiskAmount: null,
+        }),
+      })
+    } catch {
+      // silently ignore
+    }
+  }
+
+  useEffect(() => {
+    for (const [id, value] of Object.entries(stopLossDrafts)) {
+      if (savedStopLossRef.current[id] === value) continue
+      if (stopLossTimersRef.current[id]) clearTimeout(stopLossTimersRef.current[id])
+      stopLossTimersRef.current[id] = setTimeout(() => {
+        savedStopLossRef.current[id] = value
+        void saveStopLoss(id, value)
+      }, 700)
+    }
+  }, [stopLossDrafts])
+
   useEffect(() => {
     for (const [id, draft] of Object.entries(drafts)) {
       const saved = savedRef.current[id]
@@ -905,6 +991,10 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
         clearTimeout(timer)
       }
       timersRef.current = {}
+      for (const timer of Object.values(stopLossTimersRef.current)) {
+        clearTimeout(timer)
+      }
+      stopLossTimersRef.current = {}
     }
   }, [])
 
@@ -966,11 +1056,11 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Trades</SelectItem>
+              <SelectItem value="open">Open Trades</SelectItem>
               <SelectItem value="lastweek">Last Week</SelectItem>
               <SelectItem value="marked">Marked to Revisit</SelectItem>
               <SelectItem value="win">Winners</SelectItem>
               <SelectItem value="loss">Losers</SelectItem>
-              <SelectItem value="open">Open Trades</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -994,7 +1084,10 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                   col === 'currentPrice' ||
                   col === 'currentAmount' ||
                   col === 'currentRemainShares' ||
-                  col === 'rMultiple'
+                  col === 'rMultiple' ||
+                  col === 'stopLoss' ||
+                  col === 'currentRisk' ||
+                  col === 'currentRiskPct'
                 const headerContent: Record<ColumnId, React.ReactNode> = {
                   symbol: sortableHeader('Symbol', 'symbol'),
                   side: sortableHeader('Side', 'side'),
@@ -1015,6 +1108,9 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                   outcome: sortableHeader('Outcome', 'outcome'),
                   setupTag: 'Setup',
                   notes: 'Notes',
+                  stopLoss: sortableHeader('Stop Loss', 'stopLoss'),
+                  currentRisk: sortableHeader('Current Risk $', 'currentRisk'),
+                  currentRiskPct: sortableHeader('Acct Risk %', 'currentRiskPct'),
                 }
                 const safeHeaderContent = headerContent[col] ?? (
                   <span className="font-medium">{String(col)}</span>
@@ -1054,6 +1150,12 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
               const effectiveStopLoss =
                 parsedDraftInitialRisk != null && Number.isFinite(parsedDraftInitialRisk)
                   ? suggestedStopLossFromRisk(t.side, t.entryPrice, riskShares(t), parsedDraftInitialRisk)
+                  : t.stopLoss
+              const stopLossDraftValue = stopLossDrafts[t.id] ?? ''
+              const parsedStopLossDraft = stopLossDraftValue !== '' ? Number(stopLossDraftValue) : null
+              const stopLossForCurrentRisk =
+                parsedStopLossDraft != null && Number.isFinite(parsedStopLossDraft) && parsedStopLossDraft > 0
+                  ? parsedStopLossDraft
                   : t.stopLoss
               const isMarkedForReview = t.needsReview
 
@@ -1144,6 +1246,35 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
                   if (col === 'currentPrice') return <TableCell key={col} className="text-right">{currentPrice(t) != null ? fmtPrice(currentPrice(t) as number) : '—'}</TableCell>
                   if (col === 'currentAmount') return <TableCell key={col} className="text-right">{currentAmount(t) != null ? fmtMoney(currentAmount(t) as number) : '—'}</TableCell>
                   if (col === 'currentRemainShares') return <TableCell key={col} className="text-right">{currentRemainShares(t) != null ? currentRemainShares(t) : '—'}</TableCell>
+                  if (col === 'stopLoss') {
+                    return (
+                      <TableCell key={col} className="text-right">
+                        <input
+                          className="h-8 w-[92px] rounded-md border px-2 text-right text-xs"
+                          value={stopLossDraftValue}
+                          onChange={(e) => setStopLossDrafts((prev) => ({ ...prev, [t.id]: e.target.value }))}
+                          placeholder="0.00"
+                          inputMode="decimal"
+                        />
+                      </TableCell>
+                    )
+                  }
+                  if (col === 'currentRisk') {
+                    const risk = computeCurrentRisk(t, stopLossForCurrentRisk)
+                    return (
+                      <TableCell key={col} className={`text-right font-medium ${risk != null && risk > 0 ? 'text-red-600' : 'text-muted-foreground'}`}>
+                        {risk != null ? `$${risk.toFixed(2)}` : '—'}
+                      </TableCell>
+                    )
+                  }
+                  if (col === 'currentRiskPct') {
+                    const pct = computeCurrentRiskPct(t, stopLossForCurrentRisk)
+                    return (
+                      <TableCell key={col} className={`text-right font-medium ${pct != null && pct > 0 ? 'text-red-600' : 'text-muted-foreground'}`}>
+                        {pct != null ? `${pct.toFixed(2)}%` : '—'}
+                      </TableCell>
+                    )
+                  }
                   if (col === 'rMultiple') {
                     const r = computedR(t, effectiveStopLoss) ?? t.rMultiple
                     const rClass = signedValueClass(r)
