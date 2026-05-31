@@ -192,6 +192,21 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // Safety net: if any open DB row for a symbol had stop_loss_locked = true but
+      // the key-matching loop above didn't find a match, preserve the lock.
+      for (const row of rows) {
+        if (row.exit_time != null) continue
+        if ((row as Record<string, unknown>).stop_loss_locked) continue
+        const symbolOpenRows = openRowsBySymbol.get(row.symbol) ?? []
+        const lockedRow = symbolOpenRows.find(r => r.stop_loss_locked)
+        if (lockedRow) {
+          (row as Record<string, unknown>).stop_loss_locked = true
+          if ((row as Record<string, unknown>).stop_loss == null && lockedRow.stop_loss != null) {
+            (row as Record<string, unknown>).stop_loss = lockedRow.stop_loss
+          }
+        }
+      }
+
       const enrichedRows = await enrichOpenTradesWithStopLosses(rows)
       rows.splice(0, rows.length, ...enrichedRows)
 

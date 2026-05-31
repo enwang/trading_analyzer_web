@@ -207,6 +207,22 @@ export async function GET(request: Request) {
             }
           }
 
+          // Safety net: if any open DB row for a symbol had stop_loss_locked = true but
+          // the row above didn't match (key mismatch → existing = null), preserve the lock.
+          // This protects against entry_time precision differences or multi-lot key collisions.
+          for (const row of rows) {
+            if (row.exit_time != null) continue
+            if ((row as Record<string, unknown>).stop_loss_locked) continue
+            const symbolOpenRows = openRowsBySymbol.get(row.symbol) ?? []
+            const lockedRow = symbolOpenRows.find(r => r.stop_loss_locked)
+            if (lockedRow) {
+              (row as Record<string, unknown>).stop_loss_locked = true
+              if ((row as Record<string, unknown>).stop_loss == null && lockedRow.stop_loss != null) {
+                (row as Record<string, unknown>).stop_loss = lockedRow.stop_loss
+              }
+            }
+          }
+
           // Pass existing DB rows as context so add-on detection sees all open trades,
           // not just those returned in the current IBKR sync window.
           const rowEntryKeys = new Set(rows.filter(r => r.exit_time == null).map(r => `${r.symbol}|${normalizeTs(r.entry_time)}`))
