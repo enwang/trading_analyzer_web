@@ -306,6 +306,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
   const [populating, setPopulating] = useState(false)
   const [populateProgress, setPopulateProgress] = useState<{ done: number; total: number } | null>(null)
   const savedRef = useRef<Record<string, { setupTag: string; notes: string; initialRisk: string }>>(initialDrafts)
+  const draftsRef = useRef<Record<string, { setupTag: string; notes: string; initialRisk: string }>>({})
   const columnOrderDbLoadedRef = useRef(false)
   const columnOrderDbSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const timersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
@@ -314,9 +315,6 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
   )
   const stopLossTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set())
-  const [notesSelection, setNotesSelection] = useState<{ id: string; start: number; end: number } | null>(null)
-  const [refining, setRefining] = useState(false)
-  const [notesPreRefine, setNotesPreRefine] = useState<Record<string, string>>({})
   const tradeById = useMemo(() => new Map(trades.map((t) => [t.id, t])), [trades])
   const currentListUrl = useMemo(
     () => `${pathname}${searchParamsString ? `?${searchParamsString}` : ''}`,
@@ -962,6 +960,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
   }, [stopLossDrafts])
 
   useEffect(() => {
+    draftsRef.current = drafts
     for (const [id, draft] of Object.entries(drafts)) {
       const saved = savedRef.current[id]
       if (
@@ -984,17 +983,30 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
     // the user's in-flight save when any other draft (e.g. auto-stop) updates.
   }, [drafts])
 
-  // Separate unmount-only cleanup to avoid memory leaks
+  // Flush any pending draft saves before unmount (e.g. client-side navigation away)
+  const saveTradeFieldsRef = useRef(saveTradeFields)
+  useEffect(() => { saveTradeFieldsRef.current = saveTradeFields })
+
   useEffect(() => {
-    return () => {
-      for (const timer of Object.values(timersRef.current)) {
+    function flushPending() {
+      for (const [id, timer] of Object.entries(timersRef.current)) {
         clearTimeout(timer)
+        const draft = draftsRef.current[id]
+        const saved = savedRef.current[id]
+        if (!draft || !saved) continue
+        if (draft.setupTag === saved.setupTag && draft.notes === saved.notes && draft.initialRisk === saved.initialRisk) continue
+        void saveTradeFieldsRef.current(id, draft)
       }
       timersRef.current = {}
       for (const timer of Object.values(stopLossTimersRef.current)) {
         clearTimeout(timer)
       }
       stopLossTimersRef.current = {}
+    }
+    window.addEventListener('pagehide', flushPending)
+    return () => {
+      window.removeEventListener('pagehide', flushPending)
+      flushPending()
     }
   }, [])
 
@@ -1310,8 +1322,11 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
                           placeholder="Add notes"
                           title={drafts[t.id]?.notes ?? t.notes ?? ''}
                           rows={1}
+                          spellCheck={true}
+                          autoCorrect="on"
+                          autoCapitalize="sentences"
                           onKeyDown={(e) => {
-                            if (e.key === 'Enter' && e.altKey) {
+                            if (e.key === 'Enter' && (e.shiftKey || e.altKey)) {
                               e.preventDefault()
                               const el = e.currentTarget
                               const start = el.selectionStart ?? el.value.length
@@ -1325,65 +1340,9 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
                             } else if (e.key === 'Enter') {
                               e.preventDefault()
                               e.currentTarget.blur()
-                            } else if ((e.ctrlKey || e.metaKey) && e.key === 'z' && notesPreRefine[t.id] !== undefined) {
-                              e.preventDefault()
-                              updateDraft(t.id, 'notes', notesPreRefine[t.id])
-                              setNotesPreRefine((prev) => { const next = { ...prev }; delete next[t.id]; return next })
                             }
-                          }}
-                          onMouseUp={(e) => {
-                            const el = e.currentTarget
-                            if (el.selectionStart !== el.selectionEnd) {
-                              setNotesSelection({ id: t.id, start: el.selectionStart, end: el.selectionEnd })
-                            } else {
-                              setNotesSelection(null)
-                            }
-                          }}
-                          onKeyUp={(e) => {
-                            const el = e.currentTarget
-                            if (el.selectionStart !== el.selectionEnd) {
-                              setNotesSelection({ id: t.id, start: el.selectionStart, end: el.selectionEnd })
-                            } else {
-                              setNotesSelection(null)
-                            }
-                          }}
-                          onBlur={() => {
-                            // Delay clear so the Refine button click can fire first
-                            setTimeout(() => setNotesSelection(null), 150)
                           }}
                         />
-                        {notesSelection?.id === t.id && (
-                          <button
-                            className="absolute left-0 top-full z-40 mt-1 flex items-center gap-1 rounded-md border border-violet-300 bg-white px-2 py-0.5 text-xs font-medium text-violet-700 shadow-md hover:bg-violet-50 disabled:opacity-50"
-                            disabled={refining}
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={async () => {
-                              const current = drafts[t.id]?.notes ?? t.notes ?? ''
-                              const selected = current.slice(notesSelection.start, notesSelection.end)
-                              setRefining(true)
-                              try {
-                                const res = await fetch('/api/trades/refine-notes', {
-                                  method: 'POST',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify({ text: selected }),
-                                })
-                                const json = await res.json() as { refined?: string; error?: string }
-                                if (json.refined) {
-                                  setNotesPreRefine((prev) => ({ ...prev, [t.id]: current }))
-                                  const next = current.slice(0, notesSelection.start) + json.refined + current.slice(notesSelection.end)
-                                  updateDraft(t.id, 'notes', next)
-                                } else {
-                                  setError(json.error ?? 'Refine failed — all models unavailable')
-                                }
-                              } finally {
-                                setRefining(false)
-                                setNotesSelection(null)
-                              }
-                            }}
-                          >
-                            {refining ? '…' : '✦'} {refining ? 'Refining' : 'Refine'}
-                          </button>
-                        )}
                         {(drafts[t.id]?.notes ?? t.notes ?? '').trim() && (
                           <div className="pointer-events-none absolute right-0 top-full z-30 mt-1 hidden w-72 max-w-[calc(100vw-2rem)] whitespace-pre-wrap rounded-md border bg-background p-2 text-xs leading-relaxed shadow-md group-hover:block group-focus-within:block">
                             {drafts[t.id]?.notes ?? t.notes}
