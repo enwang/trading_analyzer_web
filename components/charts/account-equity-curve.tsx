@@ -39,6 +39,7 @@ interface Props {
   spy?: BenchmarkRow[]
   qqq?: BenchmarkRow[]
   height?: number
+  disableAnchors?: boolean
 }
 
 function formatDate(iso: string) {
@@ -69,6 +70,7 @@ function computeDailyTWR(
   navRows: NavDailyRow[],
   deposits: DepositRow[],
   changes: NavChangeRow[],
+  disableAnchors = false,
 ): ChartPoint[] {
   const validRows = navRows
     .filter((r): r is NavDailyRow & { total: number } => r.total != null)
@@ -157,10 +159,13 @@ function computeDailyTWR(
       factor *= curr.total / prev.total
     }
     // At month-end, override with the authoritative monthly TWR value
-    const monthKey = curr.report_date.slice(0, 7)
-    if (monthEndDate.get(monthKey) === curr.report_date) {
-      const anchor = monthlyAnchors.get(monthKey)
-      if (anchor != null) factor = anchor
+    // (disabled for sub-month views where anchors are relative to a different start)
+    if (!disableAnchors) {
+      const monthKey = curr.report_date.slice(0, 7)
+      if (monthEndDate.get(monthKey) === curr.report_date) {
+        const anchor = monthlyAnchors.get(monthKey)
+        if (anchor != null) factor = anchor
+      }
     }
     points.push({ date: curr.report_date, total: curr.total, pct: (factor - 1) * 100 })
   }
@@ -168,7 +173,7 @@ function computeDailyTWR(
   return points
 }
 
-export function AccountEquityCurve({ data, changes = [], deposits = [], spy = [], qqq = [], height = 240 }: Props) {
+export function AccountEquityCurve({ data, changes = [], deposits = [], spy = [], qqq = [], height = 240, disableAnchors = false }: Props) {
   const [showSpy, setShowSpy] = useState(false)
   const [showQqq, setShowQqq] = useState(false)
 
@@ -180,7 +185,7 @@ export function AccountEquityCurve({ data, changes = [], deposits = [], spy = []
     )
   }
 
-  const rawPoints = computeDailyTWR(data, deposits, changes)
+  const rawPoints = computeDailyTWR(data, deposits, changes, disableAnchors)
 
   if (!rawPoints.length) {
     return (

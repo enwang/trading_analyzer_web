@@ -6,6 +6,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { ArrowLeft, Trash2 } from 'lucide-react'
 
 import type { Trade } from '@/types/trade'
+import { type DateRangeKey, DATE_RANGES, getStartDate } from '@/lib/date-range'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { LocalTime } from '@/components/ui/local-time'
@@ -34,7 +35,7 @@ import {
 import { createClient } from '@/lib/supabase/client'
 import { SpellCheckTextarea } from '@/components/ui/spell-check-textarea'
 
-type OutcomeFilter = 'all' | 'win' | 'loss' | 'open' | 'marked' | 'lastweek'
+type OutcomeFilter = 'all' | 'win' | 'loss' | 'open' | 'marked'
 type SortKey =
   | 'symbol'
   | 'side'
@@ -230,7 +231,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
   const sortParam = searchParams.get('sort')
   const dirParam = searchParams.get('dir')
   const initialFilter: OutcomeFilter =
-    viewParam === 'win' || viewParam === 'loss' || viewParam === 'open' || viewParam === 'all' || viewParam === 'marked' || viewParam === 'lastweek'
+    viewParam === 'win' || viewParam === 'loss' || viewParam === 'open' || viewParam === 'all' || viewParam === 'marked'
       ? viewParam
       : 'all'
   const defaultSortKey: SortKey = initialFilter === 'open' ? 'currentRiskPct' : 'exitTime'
@@ -241,6 +242,14 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
   const initialSortDir: SortDir = dirParam === 'asc' || dirParam === 'desc' ? dirParam : defaultSortDir
   const [isPending, startTransition] = useTransition()
   const [filter, setFilter] = useState<OutcomeFilter>(initialFilter)
+  const [range, setRange] = useState<DateRangeKey>('All')
+
+  function selectRange(r: DateRangeKey) {
+    setRange(r)
+  }
+
+  const startDate = getStartDate(range)
+
   const addonTradeIds = useMemo(() => {
     const openTrades = trades.filter((t) => t.exitTime == null || t.outcome === 'open')
     const earliest = new Map<string, string>()
@@ -326,18 +335,16 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
 
   const filtered = useMemo(() => {
     const visible = trades.filter((t) => !deletedIds.has(t.id))
-    if (filter === 'all') return visible
-    if (filter === 'marked') return visible.filter((t) => t.needsReview)
-    if (filter === 'lastweek') {
-      const cutoffMs = Date.now() - 7 * 24 * 60 * 60 * 1000
-      return visible.filter((t) => {
-        const entryMs = t.entryTime ? Date.parse(t.entryTime) : NaN
-        const exitMs = t.exitTime ? Date.parse(t.exitTime) : NaN
-        return (Number.isFinite(entryMs) && entryMs >= cutoffMs) || (Number.isFinite(exitMs) && exitMs >= cutoffMs)
-      })
-    }
-    return visible.filter((t) => t.outcome === filter)
-  }, [trades, filter, deletedIds])
+    let byOutcome: typeof visible
+    if (filter === 'all') byOutcome = visible
+    else if (filter === 'marked') byOutcome = visible.filter((t) => t.needsReview)
+    else byOutcome = visible.filter((t) => t.outcome === filter)
+    if (!startDate) return byOutcome
+    return byOutcome.filter((t) => {
+      if (t.exitTime == null || t.outcome === 'open') return true
+      return t.exitTime.slice(0, 10) >= startDate
+    })
+  }, [trades, filter, deletedIds, startDate])
 
   const visibleColumnOrder = useMemo(() => {
     const openOnlyColumns: ColumnId[] = ['currentPrice', 'currentAmount', 'currentRemainShares', 'stopLoss', 'currentRisk', 'currentRiskPct']
@@ -557,9 +564,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
       ? 'Winning Trades'
       : filter === 'loss'
         ? 'Losing Trades'
-        : filter === 'lastweek'
-          ? 'Last Week'
-          : filter === 'marked'
+        : filter === 'marked'
             ? 'Marked to Revisit'
             : 'Open Trades'
 
@@ -1074,6 +1079,21 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
                 : 'Populate Initial Risk'}
             </Button>
           )}
+          <div className="flex gap-1">
+            {DATE_RANGES.map((r) => (
+              <button
+                key={r}
+                onClick={() => selectRange(r)}
+                className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
+                  range === r
+                    ? 'bg-foreground text-background'
+                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                }`}
+              >
+                {r}
+              </button>
+            ))}
+          </div>
           <span className="text-sm text-muted-foreground">View</span>
           <Select value={filter} onValueChange={(v) => setFilterAndUrl(v as OutcomeFilter)}>
             <SelectTrigger className="w-[180px]">
@@ -1082,7 +1102,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
             <SelectContent position="popper">
               <SelectItem value="all">All Trades</SelectItem>
               <SelectItem value="open">Open Trades</SelectItem>
-              <SelectItem value="lastweek">Last Week</SelectItem>
+
               <SelectItem value="marked">Marked to Revisit</SelectItem>
               <SelectItem value="win">Winners</SelectItem>
               <SelectItem value="loss">Losers</SelectItem>
