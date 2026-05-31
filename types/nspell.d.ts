@@ -3,6 +3,6 @@ declare module 'nspell' {
     correct(word: string): boolean
     suggest(word: string): string[]
   }
-  function nspell(dict: { aff: Uint8Array; dic: Uint8Array }): NSpell
+  function nspell(dict: { aff: string | Uint8Array; dic: string | Uint8Array }): NSpell
   export default nspell
 }
