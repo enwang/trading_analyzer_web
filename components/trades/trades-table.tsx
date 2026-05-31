@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { ArrowLeft, Trash2 } from 'lucide-react'
@@ -32,6 +32,7 @@ import {
   suggestedStopLossFromRisk,
 } from '@/lib/market/stop-loss'
 import { createClient } from '@/lib/supabase/client'
+import { SpellCheckTextarea } from '@/components/ui/spell-check-textarea'
 
 type OutcomeFilter = 'all' | 'win' | 'loss' | 'open' | 'marked' | 'lastweek'
 type SortKey =
@@ -238,6 +239,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
     ? (sortParam as SortKey)
     : defaultSortKey
   const initialSortDir: SortDir = dirParam === 'asc' || dirParam === 'desc' ? dirParam : defaultSortDir
+  const [isPending, startTransition] = useTransition()
   const [filter, setFilter] = useState<OutcomeFilter>(initialFilter)
   const addonTradeIds = useMemo(() => {
     const openTrades = trades.filter((t) => t.exitTime == null || t.outcome === 'open')
@@ -314,6 +316,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
     Object.fromEntries(trades.map((t) => [t.id, t.stopLoss?.toFixed(2) ?? '']))
   )
   const stopLossTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+  const stopLossDraftsRef = useRef<Record<string, string>>({})
   const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set())
   const tradeById = useMemo(() => new Map(trades.map((t) => [t.id, t])), [trades])
   const currentListUrl = useMemo(
@@ -822,7 +825,10 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
   }
 
   function setFilterAndUrl(next: OutcomeFilter) {
-    setFilter(next)
+    getDashboardScrollContainer()?.scrollTo({ top: 0 })
+    startTransition(() => {
+      setFilter(next)
+    })
     const params = new URLSearchParams(searchParams.toString())
     params.set('view', next)
     router.replace(`${pathname}?${params.toString()}`, { scroll: false })
@@ -949,6 +955,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
   }
 
   useEffect(() => {
+    stopLossDraftsRef.current = stopLossDrafts
     for (const [id, value] of Object.entries(stopLossDrafts)) {
       if (savedStopLossRef.current[id] === value) continue
       if (stopLossTimersRef.current[id]) clearTimeout(stopLossTimersRef.current[id])
@@ -986,6 +993,8 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
   // Flush any pending draft saves before unmount (e.g. client-side navigation away)
   const saveTradeFieldsRef = useRef(saveTradeFields)
   useEffect(() => { saveTradeFieldsRef.current = saveTradeFields })
+  const saveStopLossRef = useRef(saveStopLoss)
+  useEffect(() => { saveStopLossRef.current = saveStopLoss })
 
   useEffect(() => {
     function flushPending() {
@@ -998,8 +1007,12 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
         void saveTradeFieldsRef.current(id, draft)
       }
       timersRef.current = {}
-      for (const timer of Object.values(stopLossTimersRef.current)) {
+      for (const [id, timer] of Object.entries(stopLossTimersRef.current)) {
         clearTimeout(timer)
+        const value = stopLossDraftsRef.current[id]
+        if (value == null || savedStopLossRef.current[id] === value) continue
+        savedStopLossRef.current[id] = value
+        void saveStopLossRef.current(id, value)
       }
       stopLossTimersRef.current = {}
     }
@@ -1066,7 +1079,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
             <SelectTrigger className="w-[180px]">
               <SelectValue placeholder="Select view" />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent position="popper">
               <SelectItem value="all">All Trades</SelectItem>
               <SelectItem value="open">Open Trades</SelectItem>
               <SelectItem value="lastweek">Last Week</SelectItem>
@@ -1079,7 +1092,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
       </div>
       {error && <div className="text-sm text-red-700">{error}</div>}
 
-      <div className="rounded-lg border overflow-x-auto">
+      <div className={`rounded-lg border overflow-x-auto transition-opacity duration-150 ${isPending ? 'opacity-50' : 'opacity-100'}`}>
         <Table className="min-w-full w-max">
           <TableHeader>
             <TableRow>
@@ -1315,16 +1328,13 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
                   return (
                     <TableCell key={col}>
                       <div className="group relative">
-                        <textarea
+                        <SpellCheckTextarea
                           className="h-8 w-[160px] resize-none overflow-hidden rounded-md border px-2 py-1 text-xs leading-tight focus:h-20 focus:overflow-y-auto"
-                          value={drafts[t.id]?.notes ?? t.notes}
-                          onChange={(e) => updateDraft(t.id, 'notes', e.target.value)}
+                          value={drafts[t.id]?.notes ?? t.notes ?? ''}
+                          onChange={(v) => updateDraft(t.id, 'notes', v)}
                           placeholder="Add notes"
                           title={drafts[t.id]?.notes ?? t.notes ?? ''}
                           rows={1}
-                          spellCheck={true}
-                          autoCorrect="on"
-                          autoCapitalize="sentences"
                           onKeyDown={(e) => {
                             if (e.key === 'Enter' && (e.shiftKey || e.altKey)) {
                               e.preventDefault()
