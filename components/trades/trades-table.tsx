@@ -35,7 +35,7 @@ import {
 import { createClient } from '@/lib/supabase/client'
 import { SpellCheckTextarea } from '@/components/ui/spell-check-textarea'
 
-type OutcomeFilter = 'all' | 'win' | 'loss' | 'open' | 'marked'
+type OutcomeFilter = 'all' | 'win' | 'loss' | 'open' | 'marked' | 'lastweek'
 type SortKey =
   | 'symbol'
   | 'side'
@@ -231,7 +231,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
   const sortParam = searchParams.get('sort')
   const dirParam = searchParams.get('dir')
   const initialFilter: OutcomeFilter =
-    viewParam === 'win' || viewParam === 'loss' || viewParam === 'open' || viewParam === 'all' || viewParam === 'marked'
+    viewParam === 'win' || viewParam === 'loss' || viewParam === 'open' || viewParam === 'all' || viewParam === 'marked' || viewParam === 'lastweek'
       ? viewParam
       : 'all'
   const defaultSortKey: SortKey = initialFilter === 'open' ? 'currentRiskPct' : 'exitTime'
@@ -338,7 +338,14 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
     let byOutcome: typeof visible
     if (filter === 'all') byOutcome = visible
     else if (filter === 'marked') byOutcome = visible.filter((t) => t.needsReview)
-    else byOutcome = visible.filter((t) => t.outcome === filter)
+    else if (filter === 'lastweek') {
+      const cutoffMs = Date.now() - 7 * 24 * 60 * 60 * 1000
+      byOutcome = visible.filter((t) => {
+        const entryMs = t.entryTime ? Date.parse(t.entryTime) : NaN
+        const exitMs = t.exitTime ? Date.parse(t.exitTime) : NaN
+        return (Number.isFinite(entryMs) && entryMs >= cutoffMs) || (Number.isFinite(exitMs) && exitMs >= cutoffMs)
+      })
+    } else byOutcome = visible.filter((t) => t.outcome === filter)
     if (!startDate) return byOutcome
     return byOutcome.filter((t) => {
       if (t.exitTime == null || t.outcome === 'open') return true
@@ -564,7 +571,9 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
       ? 'Winning Trades'
       : filter === 'loss'
         ? 'Losing Trades'
-        : filter === 'marked'
+        : filter === 'lastweek'
+          ? 'Last Week'
+          : filter === 'marked'
             ? 'Marked to Revisit'
             : 'Open Trades'
 
@@ -1102,7 +1111,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
             <SelectContent position="popper">
               <SelectItem value="all">All Trades</SelectItem>
               <SelectItem value="open">Open Trades</SelectItem>
-
+              <SelectItem value="lastweek">Last Week</SelectItem>
               <SelectItem value="marked">Marked to Revisit</SelectItem>
               <SelectItem value="win">Winners</SelectItem>
               <SelectItem value="loss">Losers</SelectItem>
