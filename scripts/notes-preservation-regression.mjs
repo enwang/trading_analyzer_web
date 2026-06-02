@@ -23,7 +23,11 @@ function preserveManualFields(newRows, existingRows) {
   const normalizeTs = (t) => t ? t.slice(0, 19) : ''
 
   const openRowsBySymbol = new Map()
+  const allRowsBySymbol = new Map()
   for (const existing of existingRows) {
+    const allList = allRowsBySymbol.get(existing.symbol) ?? []
+    allList.push(existing)
+    allRowsBySymbol.set(existing.symbol, allList)
     if (existing.exit_time != null) continue
     const list = openRowsBySymbol.get(existing.symbol) ?? []
     list.push(existing)
@@ -51,7 +55,22 @@ function preserveManualFields(newRows, existingRows) {
     if (!row.notes && existing.notes) row.notes = existing.notes
     if (!row.needs_review && existing.needs_review) row.needs_review = existing.needs_review
     if (row.stop_loss == null && existing.stop_loss != null) row.stop_loss = existing.stop_loss
+    if (existing.stop_loss_locked) row.stop_loss_locked = true
     if (row.r_multiple == null && existing.r_multiple != null) row.r_multiple = existing.r_multiple
+  }
+
+  // Safety net: search ALL rows (open and closed) for stop_loss_locked.
+  // A partial exit can move a locked row from open → closed, and then the
+  // key-matching loop above won't find it. Without this, the lock is silently lost.
+  for (const row of newRows) {
+    if (row.exit_time != null) continue
+    if (row.stop_loss_locked) continue
+    const allSymbolRows = allRowsBySymbol.get(row.symbol) ?? []
+    const lockedRow = allSymbolRows.find(r => r.stop_loss_locked)
+    if (lockedRow) {
+      row.stop_loss_locked = true
+      if (row.stop_loss == null && lockedRow.stop_loss != null) row.stop_loss = lockedRow.stop_loss
+    }
   }
 
   return newRows
@@ -200,6 +219,45 @@ function fresh(overrides = {}) {
   preserveManualFields(rows, [])
   if (rows[0].notes !== null) fail('brand new trade should have null notes after preserve pass')
   if (rows[0].needs_review !== false) fail('brand new trade should have needs_review=false after preserve pass')
+}
+
+// ---------------------------------------------------------------------------
+// 9. stop_loss_locked safety net: locked row is CLOSED (partial exit moved it
+//    from open → closed). New open row from parser has a different key, so the
+//    main loop doesn't match. Safety net must carry the lock via allRowsBySymbol.
+//    Root incident: COHR / ARM / ORCL stop losses wiped by manual sync because
+//    the safety net only searched openRowsBySymbol, missing the closed locked row.
+// ---------------------------------------------------------------------------
+{
+  const existing = [
+    // The locked row is now CLOSED (e.g., a partial exit was recorded with an exit_time)
+    { symbol: 'ARM', entry_time: '2026-05-01T14:00:00.000Z', exit_time: '2026-05-15T18:00:00.000Z',
+      stop_loss: 125.50, stop_loss_locked: true, r_multiple: null, setup_tag: 'breakout',
+      notes: null, needs_review: false },
+  ]
+  // New incoming open row — key won't match the closed DB row
+  const rows = [{ ...fresh({ symbol: 'ARM', entry_time: '2026-05-20T14:00:00.000Z', exit_time: null }),
+    stop_loss: null, stop_loss_locked: false }]
+  preserveManualFields(rows, existing)
+  if (!rows[0].stop_loss_locked) fail('stop_loss_locked safety net: lock not carried from closed row to new open row')
+  if (rows[0].stop_loss !== 125.50) fail(`stop_loss_locked safety net: stop_loss not carried from closed row, got ${rows[0].stop_loss}`)
+}
+
+// ---------------------------------------------------------------------------
+// 10. stop_loss_locked safety net: when the lock IS carried via the main loop
+//     (exact key match on an open row), the safety net should not double-apply.
+// ---------------------------------------------------------------------------
+{
+  const existing = [
+    { symbol: 'ORCL', entry_time: '2026-05-10T14:00:00.000Z', exit_time: null,
+      stop_loss: 175.00, stop_loss_locked: true, r_multiple: null, setup_tag: 'momentum',
+      notes: null, needs_review: false },
+  ]
+  const rows = [{ ...fresh({ symbol: 'ORCL', entry_time: '2026-05-10T14:00:00.000Z', exit_time: null }),
+    stop_loss: null, stop_loss_locked: false }]
+  preserveManualFields(rows, existing)
+  if (!rows[0].stop_loss_locked) fail('stop_loss_locked: lock not preserved via exact key match on open row')
+  if (rows[0].stop_loss !== 175.00) fail(`stop_loss_locked: stop_loss not preserved via exact key match, got ${rows[0].stop_loss}`)
 }
 
 console.log('notes-preservation-regression: PASS')
