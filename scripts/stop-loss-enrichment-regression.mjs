@@ -32,10 +32,14 @@ let calls = 0
 const enriched = await enrichOpenTradesWithStopLosses(
   [
     { ...baseRow, symbol: 'FSLY' },
+    // Unlocked stop_loss gets recomputed by the $2000-risk formula
     { ...baseRow, symbol: 'PL', stop_loss: 32.25 },
+    // Locked stop_loss must be preserved as-is
+    { ...baseRow, symbol: 'GS', stop_loss: 412.50, stop_loss_locked: true },
     { ...baseRow, symbol: 'MRNA', exit_time: '2026-03-20T19:59:00.000Z', outcome: 'loss', stop_loss: null },
     { ...baseRow, symbol: 'NVDA', side: 'short', entry_time: '2026-03-10T15:00:00.000Z' },
   ],
+  [],
   async (symbol, entryTime) => {
     calls += 1
     if (symbol === 'FSLY' && entryTime === '2026-03-09T13:48:00.000Z') {
@@ -64,10 +68,18 @@ if (nvda.stop_loss !== 22.32) {
   fail(`expected NVDA $2000-risk short stop loss 22.32, got ${nvda.stop_loss}`)
 }
 
+// Unlocked: existing stop_loss is overwritten by $2000-risk formula
 const pl = enriched.find((row) => row.symbol === 'PL')
 if (!pl) fail('missing PL row')
-if (pl.stop_loss !== 32.25) {
-  fail(`expected existing PL stop loss to be preserved, got ${pl.stop_loss}`)
+if (pl.stop_loss !== 18.32) {
+  fail(`expected unlocked PL stop_loss to be recomputed to 18.32, got ${pl.stop_loss}`)
+}
+
+// Locked: stop_loss_locked=true prevents any recomputation
+const gs = enriched.find((row) => row.symbol === 'GS')
+if (!gs) fail('missing GS row')
+if (gs.stop_loss !== 412.50) {
+  fail(`expected locked GS stop_loss 412.50 to be preserved, got ${gs.stop_loss}`)
 }
 
 const mrna = enriched.find((row) => row.symbol === 'MRNA')

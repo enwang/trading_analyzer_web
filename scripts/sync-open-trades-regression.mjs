@@ -128,13 +128,14 @@ if (liteRow.setup_tag !== 'breakout') {
 let lookupCalls = 0
 const enriched = await enrichOpenTradesWithStopLosses(
   [
-    // GSAT: manual stop_loss already set — enrichment must skip it
+    // GSAT: no entry_price/shares → suggestedStopLossFromRisk returns null → row preserved
     { symbol: 'GSAT', entry_time: '2026-04-14T14:00:01.000Z', exit_time: null, side: 'long', stop_loss: 77.77 },
     // ADEA: no stop_loss — enrichment must calculate one
     { symbol: 'ADEA', entry_time: '2026-04-07T13:30:00.000Z', exit_time: null, side: 'long', entry_price: 24.50, shares: 1000, stop_loss: null },
     // LITE: closed trade — enrichment must skip it
     { symbol: 'LITE', entry_time: '2026-04-14T19:00:00.000Z', exit_time: '2026-04-15T13:30:00.000Z', side: 'long', stop_loss: null },
   ],
+  [],
   async (symbol) => {
     lookupCalls++
     if (symbol === 'ADEA') return { low: 24.50, high: 26.00 }
