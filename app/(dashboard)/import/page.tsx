@@ -5,12 +5,26 @@ import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Upload, RefreshCw, Save } from 'lucide-react'
+import { Upload, RefreshCw, Save, RotateCcw } from 'lucide-react'
 
 interface Settings {
   ibkr_token: string
   ibkr_query_id: string
   ibkr_last_sync: string | null
+}
+
+interface Snapshot {
+  id: string
+  label: string
+  reason: string
+  trade_count: number
+  created_at: string
+}
+
+function fmtTs(iso: string) {
+  return new Date(iso).toLocaleString('en-US', {
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
+  })
 }
 
 export default function ImportPage() {
@@ -29,6 +43,11 @@ export default function ImportPage() {
   const [syncMsg, setSyncMsg] = useState('')
   const [uploadMsg, setUploadMsg] = useState('')
 
+  const [snapshots, setSnapshots] = useState<Snapshot[]>([])
+  const [loadingSnaps, setLoadingSnaps] = useState(false)
+  const [restoringId, setRestoringId] = useState<string | null>(null)
+  const [restoreMsg, setRestoreMsg] = useState('')
+
   useEffect(() => {
     async function loadSettings() {
       const { data: { user } } = await supabase.auth.getUser()
@@ -46,7 +65,21 @@ export default function ImportPage() {
       }
     }
     loadSettings()
+    loadSnapshots()
   }, [])
+
+  async function loadSnapshots() {
+    setLoadingSnaps(true)
+    try {
+      const res = await fetch('/api/snapshots')
+      if (res.ok) {
+        const json = await res.json()
+        setSnapshots(json.snapshots ?? [])
+      }
+    } finally {
+      setLoadingSnaps(false)
+    }
+  }
 
   async function saveSettings() {
     setSavingSettings(true)
@@ -78,6 +111,7 @@ export default function ImportPage() {
       } else {
         setSyncMsg(`Synced ${json.upserted} trades (${json.skipped} skipped).`)
         setLastSync(new Date().toISOString().slice(0, 10))
+        await loadSnapshots()
       }
     } catch (e: unknown) {
       setSyncMsg(`Error: ${e instanceof Error ? e.message : String(e)}`)
@@ -101,11 +135,39 @@ export default function ImportPage() {
       } else {
         setUploadMsg(`Imported ${json.upserted} trades (${json.skipped} skipped).`)
         if (fileRef.current) fileRef.current.value = ''
+        await loadSnapshots()
       }
     } catch (e: unknown) {
       setUploadMsg(`Error: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setUploading(false)
+    }
+  }
+
+  async function restoreSnapshot(snap: Snapshot) {
+    const confirmed = window.confirm(
+      `Restore ${snap.trade_count} trades from "${fmtTs(snap.created_at)}"?\n\nA safety snapshot of your current trades will be saved first.`
+    )
+    if (!confirmed) return
+    setRestoringId(snap.id)
+    setRestoreMsg('')
+    try {
+      const res = await fetch('/api/snapshots/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ snapshotId: snap.id }),
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        setRestoreMsg(`Error: ${json.error ?? res.statusText}`)
+      } else {
+        setRestoreMsg(`Restored ${json.restored} trades from "${json.fromSnapshot}".`)
+        await loadSnapshots()
+      }
+    } catch (e: unknown) {
+      setRestoreMsg(`Error: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setRestoringId(null)
     }
   }
 
@@ -201,6 +263,52 @@ export default function ImportPage() {
             <Upload className="size-4" />
             {uploading ? 'Uploading…' : 'Upload CSV'}
           </Button>
+        </CardContent>
+      </Card>
+
+      {/* Snapshots */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Snapshots</CardTitle>
+          <CardDescription>
+            A snapshot is saved automatically before every sync or upload. Restore any point to recover your trades.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {restoreMsg && (
+            <p className={`text-sm mb-3 ${restoreMsg.startsWith('Error') ? 'text-red-500' : 'text-emerald-600'}`}>
+              {restoreMsg}
+            </p>
+          )}
+          {loadingSnaps ? (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          ) : snapshots.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No snapshots yet. One will be created on your next sync.</p>
+          ) : (
+            <div className="divide-y divide-border rounded-md border text-sm">
+              {snapshots.map(snap => (
+                <div key={snap.id} className="flex items-center justify-between gap-3 px-3 py-2">
+                  <div className="min-w-0">
+                    <span className="font-medium tabular-nums">{fmtTs(snap.created_at)}</span>
+                    <span className="ml-2 text-muted-foreground">{snap.trade_count} trades</span>
+                    {snap.reason === 'restore' && (
+                      <span className="ml-2 text-xs text-amber-600">pre-restore</span>
+                    )}
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="shrink-0 h-7 px-2 text-xs"
+                    disabled={restoringId === snap.id}
+                    onClick={() => restoreSnapshot(snap)}
+                  >
+                    <RotateCcw className="size-3" />
+                    {restoringId === snap.id ? 'Restoring…' : 'Restore'}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

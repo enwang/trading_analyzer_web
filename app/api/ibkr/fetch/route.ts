@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { fetchFlexAll } from '@/lib/ibkr/flex'
 import { enrichOpenTradesWithStopLosses } from '@/lib/market/stop-loss'
-import { createTradeSnapshot } from '@/lib/trade-snapshots'
+import { createTradeSnapshot, pruneOldSnapshots } from '@/lib/trade-snapshots'
 import { filterOutHidden, loadHiddenTradeKeys } from '@/lib/hidden-trades'
 import { NextRequest, NextResponse } from 'next/server'
 
@@ -83,6 +83,7 @@ export async function POST(request: NextRequest) {
       label: `Before IBKR sync ${new Date().toISOString()}`,
       reason: 'ibkr-sync',
     })
+    await pruneOldSnapshots(supabase, user.id)
 
     const { trades, navDaily, navChange, cashTransactions } = await fetchFlexAll(token, queryId)
 
