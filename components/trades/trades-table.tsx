@@ -339,11 +339,22 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
     if (filter === 'all') byOutcome = visible
     else if (filter === 'marked') byOutcome = visible.filter((t) => t.needsReview)
     else if (filter === 'lastweek') {
-      const cutoffMs = Date.now() - 7 * 24 * 60 * 60 * 1000
+      // Current week from Monday 00:00 to now — resets each Monday
+      const today = new Date()
+      const dow = today.getDay() // 0=Sun
+      const daysToMon = dow === 0 ? 6 : dow - 1
+      const weekStart = new Date(today); weekStart.setHours(0,0,0,0); weekStart.setDate(today.getDate() - daysToMon)
+      const weekStartMs = weekStart.getTime()
       byOutcome = visible.filter((t) => {
+        // Any execution leg (partial buy or sell) this week
+        if (t.executionLegs?.some(leg => {
+          const ms = Date.parse(leg.time)
+          return Number.isFinite(ms) && ms >= weekStartMs
+        })) return true
         const entryMs = t.entryTime ? Date.parse(t.entryTime) : NaN
         const exitMs = t.exitTime ? Date.parse(t.exitTime) : NaN
-        return (Number.isFinite(entryMs) && entryMs >= cutoffMs) || (Number.isFinite(exitMs) && exitMs >= cutoffMs)
+        return (Number.isFinite(entryMs) && entryMs >= weekStartMs)
+            || (Number.isFinite(exitMs) && exitMs >= weekStartMs)
       })
     } else byOutcome = visible.filter((t) => t.outcome === filter)
     if (!startDate) return byOutcome
