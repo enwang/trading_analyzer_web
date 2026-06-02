@@ -148,7 +148,11 @@ export async function GET(request: Request) {
 
           type ExistingRow = { symbol: string; entry_time: string | null; exit_time: string | null; side: string | null; stop_loss: number | null; stop_loss_locked: boolean | null; r_multiple: number | null; setup_tag: string | null; notes: string | null; needs_review: boolean | null; execution_legs: unknown | null; pnl: number | null; initial_risk_amount: number | null }
           const openRowsBySymbol = new Map<string, ExistingRow[]>()
+          const allRowsBySymbol = new Map<string, ExistingRow[]>()
           for (const existing of existingRows ?? []) {
+            const allList = allRowsBySymbol.get(existing.symbol) ?? []
+            allList.push(existing)
+            allRowsBySymbol.set(existing.symbol, allList)
             if (existing.exit_time != null) continue
             const list = openRowsBySymbol.get(existing.symbol) ?? []
             list.push(existing)
@@ -207,14 +211,15 @@ export async function GET(request: Request) {
             }
           }
 
-          // Safety net: if any open DB row for a symbol had stop_loss_locked = true but
+          // Safety net: if any DB row for a symbol had stop_loss_locked = true but
           // the row above didn't match (key mismatch → existing = null), preserve the lock.
-          // This protects against entry_time precision differences or multi-lot key collisions.
+          // Searches ALL rows (open and closed) so a partial-close that moved a row from
+          // open → closed doesn't silently lose the user's manually set stop_loss.
           for (const row of rows) {
             if (row.exit_time != null) continue
             if ((row as Record<string, unknown>).stop_loss_locked) continue
-            const symbolOpenRows = openRowsBySymbol.get(row.symbol) ?? []
-            const lockedRow = symbolOpenRows.find(r => r.stop_loss_locked)
+            const allSymbolRows = allRowsBySymbol.get(row.symbol) ?? []
+            const lockedRow = allSymbolRows.find(r => r.stop_loss_locked)
             if (lockedRow) {
               (row as Record<string, unknown>).stop_loss_locked = true
               if ((row as Record<string, unknown>).stop_loss == null && lockedRow.stop_loss != null) {
