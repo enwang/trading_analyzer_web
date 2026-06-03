@@ -87,22 +87,10 @@ export async function fetchFlexRaw(token: string, queryId: string): Promise<stri
 // ---------------------------------------------------------------------------
 // Step 1: Send request
 // ---------------------------------------------------------------------------
-// Transient IBKR errors that should be retried rather than surfaced immediately.
-// These occur when IBKR is still generating the statement (e.g. early morning).
-function isTransientSendError(errMsg: string): boolean {
-  const lower = errMsg.toLowerCase()
-  return (
-    lower.includes('incomplete') ||       // 1003: Statement is incomplete
-    lower.includes('not available') ||    // 1004: Statement not available yet
-    lower.includes('generation in progress') || // 1006: Still generating
-    lower.includes('try again')           // generic retry hint
-  )
-}
-
 async function sendRequest(
   token: string,
   queryId: string,
-  retries = 5
+  retries = 3
 ): Promise<{ refCode: string; dlUrl: string }> {
   const body = new URLSearchParams({ t: token, q: queryId, v: FLEX_VERSION })
 
@@ -120,10 +108,6 @@ async function sendRequest(
     }
     if (status?.toLowerCase() !== 'success' && status?.toLowerCase() !== 'processing') {
       const errMsg = extractXmlTag(text, 'ErrorMessage') ?? text.slice(0, 200)
-      if (isTransientSendError(errMsg) && attempt < retries - 1) {
-        await sleep(10_000)
-        continue
-      }
       throw new Error(`IBKR SendRequest failed: ${errMsg}`)
     }
     const refCode = extractXmlTag(text, 'ReferenceCode')
