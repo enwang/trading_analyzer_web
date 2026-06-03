@@ -818,9 +818,22 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
   }
 
   const sortedFiltered = useMemo(() => {
+    if (filter === 'lastweek') {
+      return [...filtered].sort((a, b) => {
+        const lastTs = (t: typeof filtered[number]) => {
+          const times = [
+            t.entryTime ? Date.parse(t.entryTime) : NaN,
+            t.exitTime ? Date.parse(t.exitTime) : NaN,
+            ...(t.executionLegs?.map(l => Date.parse(l.time)) ?? []),
+          ]
+          return Math.max(...times.filter(Number.isFinite))
+        }
+        return lastTs(b) - lastTs(a)
+      })
+    }
     return [...filtered].sort(compareTrades)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtered, sortKey, sortDir, drafts, liveQuotes])
+  }, [filtered, filter, sortKey, sortDir, drafts, liveQuotes])
 
   async function deleteTrade(id: string) {
     if (!window.confirm('Delete this trade? This cannot be undone.')) return
