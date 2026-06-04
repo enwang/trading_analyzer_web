@@ -314,8 +314,6 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
   const [stopLossDrafts, setStopLossDrafts] = useState<Record<string, string>>(
     () => Object.fromEntries(trades.map((t) => [t.id, t.stopLoss?.toFixed(2) ?? '']))
   )
-  const [populating, setPopulating] = useState(false)
-  const [populateProgress, setPopulateProgress] = useState<{ done: number; total: number } | null>(null)
   const savedRef = useRef<Record<string, { setupTag: string; notes: string; initialRisk: string }>>(initialDrafts)
   const draftsRef = useRef<Record<string, { setupTag: string; notes: string; initialRisk: string }>>({})
   const columnOrderDbLoadedRef = useRef(false)
@@ -872,49 +870,6 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
     router.replace(`${pathname}?${params.toString()}`, { scroll: false })
   }
 
-  async function populateAllStopLosses() {
-    const needsStop = trades.filter(
-      (t) => t.stopLoss == null && t.entryTime != null && t.side != null
-    )
-    if (needsStop.length === 0) return
-
-    setPopulating(true)
-    setPopulateProgress({ done: 0, total: needsStop.length })
-    setError(null)
-
-    for (let i = 0; i < needsStop.length; i++) {
-      const t = needsStop[i]
-      try {
-        const suggested = suggestedStopLossFromRisk(t.side, t.entryPrice, displayShares(t))
-        if (suggested == null) {
-          setPopulateProgress({ done: i + 1, total: needsStop.length })
-          continue
-        }
-
-        let rMultiple: number | null = null
-        if (t.entryPrice != null && t.exitPrice != null) {
-          const risk = t.side === 'long' ? t.entryPrice - suggested : suggested - t.entryPrice
-          if (risk > 0) {
-            const reward = t.side === 'long' ? t.exitPrice - t.entryPrice : t.entryPrice - t.exitPrice
-            rMultiple = reward / risk
-          }
-        }
-
-        await fetch(`/api/trades/${t.id}/risk`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ stopLoss: suggested, rMultiple }),
-        })
-      } catch {
-        // skip failures silently
-      }
-      setPopulateProgress({ done: i + 1, total: needsStop.length })
-    }
-
-    setPopulating(false)
-    setPopulateProgress(null)
-    router.refresh()
-  }
 
   async function saveTradeFields(id: string, draft: { setupTag: string; notes: string; initialRisk: string }) {
     setError(null)
@@ -1100,18 +1055,6 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
           </h1>
         </div>
         <div className="flex items-center gap-2">
-          {trades.some((t) => t.stopLoss == null && t.entryTime != null && t.side != null) && (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={populating}
-              onClick={() => void populateAllStopLosses()}
-            >
-              {populating && populateProgress
-                ? `Populating ${populateProgress.done}/${populateProgress.total}…`
-                : 'Populate Initial Risk'}
-            </Button>
-          )}
           <div className="flex gap-1">
             {DATE_RANGES.map((r) => (
               <button
