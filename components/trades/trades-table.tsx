@@ -83,6 +83,7 @@ type ColumnId =
   | 'currentRiskPct'
 
 const COLUMN_ORDER_STORAGE_KEY = 'trades-table-column-order-v1'
+const FILTER_STORAGE_KEY = 'trades-table-last-filter-v1'
 const TRADES_LAST_URL_STORAGE_KEY = 'trades-table-last-url'
 const TRADES_LAST_SCROLL_STORAGE_KEY = 'trades-table-last-scroll'
 const DASHBOARD_SCROLL_CONTAINER_ID = 'dashboard-scroll-container'
@@ -378,6 +379,20 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
   useEffect(() => {
     setFilter(initialFilter)
   }, [initialFilter])
+
+  // Restore last-used filter when navigating to /trades with no ?view= param
+  useEffect(() => {
+    if (viewParam) return
+    const saved = localStorage.getItem(FILTER_STORAGE_KEY) as OutcomeFilter | null
+    const valid: OutcomeFilter[] = ['all', 'win', 'loss', 'open', 'marked', 'lastweek']
+    if (saved && valid.includes(saved) && saved !== 'all') {
+      setFilter(saved)
+      const params = new URLSearchParams(searchParams.toString())
+      params.set('view', saved)
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false })
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     setSortKey(initialSortKey)
@@ -868,6 +883,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
     const params = new URLSearchParams(searchParams.toString())
     params.set('view', next)
     router.replace(`${pathname}?${params.toString()}`, { scroll: false })
+    localStorage.setItem(FILTER_STORAGE_KEY, next)
   }
 
 
