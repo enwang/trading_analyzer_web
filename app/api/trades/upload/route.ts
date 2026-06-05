@@ -1,6 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
 import { parseFlexCsv } from '@/lib/ibkr/flex'
-import { enrichOpenTradesWithStopLosses } from '@/lib/market/stop-loss'
 import { createTradeSnapshot } from '@/lib/trade-snapshots'
 import { filterOutHidden, loadHiddenTradeKeys } from '@/lib/hidden-trades'
 import { NextRequest, NextResponse } from 'next/server'
@@ -147,12 +146,21 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      const rowEntryKeys = new Set(rows.filter(r => r.exit_time == null).map(r => `${r.symbol}|${normalizeTs(r.entry_time)}`))
-      const contextRows = (existingRows ?? []).filter(r =>
-        r.exit_time == null && !rowEntryKeys.has(`${r.symbol}|${normalizeTs(r.entry_time)}`)
-      )
-      const enrichedRows = await enrichOpenTradesWithStopLosses(rows, contextRows)
-      rows.splice(0, rows.length, ...enrichedRows)
+      // Fallback: if key-matching above didn't copy stop_loss (key mismatch), look for
+      // any open DB row for the symbol that has a stop_loss and use it.
+      // stop_loss is treated like notes — it's always manually set, never computed.
+      for (const row of rows) {
+        if (row.exit_time != null) continue
+        if ((row as Record<string, unknown>).stop_loss != null) continue
+        const openSymbolRows = openRowsBySymbol.get(row.symbol) ?? []
+        const rowWithStopLoss = openSymbolRows.find(r => r.stop_loss != null)
+        if (rowWithStopLoss) {
+          (row as Record<string, unknown>).stop_loss = rowWithStopLoss.stop_loss
+          if (rowWithStopLoss.stop_loss_locked) {
+            (row as Record<string, unknown>).stop_loss_locked = true
+          }
+        }
+      }
 
       // Delete open rows for symbols with new open data OR symbols that just closed.
       const symbolsWithNewOpenSet = new Set(rows.filter(r => r.exit_time == null).map(r => r.symbol))

@@ -1,6 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
 import { fetchFlexAll } from '@/lib/ibkr/flex'
-import { enrichOpenTradesWithStopLosses } from '@/lib/market/stop-loss'
 import { createTradeSnapshot, pruneOldSnapshots } from '@/lib/trade-snapshots'
 import { filterOutHidden, loadHiddenTradeKeys } from '@/lib/hidden-trades'
 import { NextResponse } from 'next/server'
@@ -148,11 +147,7 @@ export async function GET(request: Request) {
 
           type ExistingRow = { symbol: string; entry_time: string | null; exit_time: string | null; side: string | null; stop_loss: number | null; stop_loss_locked: boolean | null; r_multiple: number | null; setup_tag: string | null; notes: string | null; needs_review: boolean | null; execution_legs: unknown | null; pnl: number | null; initial_risk_amount: number | null }
           const openRowsBySymbol = new Map<string, ExistingRow[]>()
-          const allRowsBySymbol = new Map<string, ExistingRow[]>()
           for (const existing of existingRows ?? []) {
-            const allList = allRowsBySymbol.get(existing.symbol) ?? []
-            allList.push(existing)
-            allRowsBySymbol.set(existing.symbol, allList)
             if (existing.exit_time != null) continue
             const list = openRowsBySymbol.get(existing.symbol) ?? []
             list.push(existing)
@@ -211,31 +206,21 @@ export async function GET(request: Request) {
             }
           }
 
-          // Safety net: if any DB row for a symbol had stop_loss_locked = true but
-          // the row above didn't match (key mismatch → existing = null), preserve the lock.
-          // Searches ALL rows (open and closed) so a partial-close that moved a row from
-          // open → closed doesn't silently lose the user's manually set stop_loss.
+          // Fallback: if key-matching above didn't copy stop_loss (key mismatch), look for
+          // any open DB row for the symbol that has a stop_loss and use it.
+          // stop_loss is treated like notes — it's always manually set, never computed.
           for (const row of rows) {
             if (row.exit_time != null) continue
-            if ((row as Record<string, unknown>).stop_loss_locked) continue
-            const allSymbolRows = allRowsBySymbol.get(row.symbol) ?? []
-            const lockedRow = allSymbolRows.find(r => r.stop_loss_locked)
-            if (lockedRow) {
-              (row as Record<string, unknown>).stop_loss_locked = true
-              if ((row as Record<string, unknown>).stop_loss == null && lockedRow.stop_loss != null) {
-                (row as Record<string, unknown>).stop_loss = lockedRow.stop_loss
+            if ((row as Record<string, unknown>).stop_loss != null) continue
+            const openSymbolRows = openRowsBySymbol.get(row.symbol) ?? []
+            const rowWithStopLoss = openSymbolRows.find(r => r.stop_loss != null)
+            if (rowWithStopLoss) {
+              (row as Record<string, unknown>).stop_loss = rowWithStopLoss.stop_loss
+              if (rowWithStopLoss.stop_loss_locked) {
+                (row as Record<string, unknown>).stop_loss_locked = true
               }
             }
           }
-
-          // Pass existing DB rows as context so add-on detection sees all open trades,
-          // not just those returned in the current IBKR sync window.
-          const rowEntryKeys = new Set(rows.filter(r => r.exit_time == null).map(r => `${r.symbol}|${normalizeTs(r.entry_time)}`))
-          const contextRows = (existingRows ?? []).filter(r =>
-            r.exit_time == null && !rowEntryKeys.has(`${r.symbol}|${normalizeTs(r.entry_time)}`)
-          )
-          const enrichedRows = await enrichOpenTradesWithStopLosses(rows, contextRows)
-          rows.splice(0, rows.length, ...enrichedRows)
 
           // Delete open rows for symbols with new open data OR symbols that just closed.
           const symbolsWithNewOpenSet = new Set(rows.filter(r => r.exit_time == null).map(r => r.symbol))
