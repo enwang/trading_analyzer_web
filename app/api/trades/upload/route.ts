@@ -126,8 +126,7 @@ export async function POST(request: NextRequest) {
           ? `${row.symbol}|${normalizeTs(row.entry_time)}|${normalizeTs(row.exit_time)}`
           : `${row.symbol}|${normalizeTs(row.entry_time)}`
         const exactExisting = byKey.get(key)
-        const symbolOpenRows = openRowsBySymbol.get(row.symbol) ?? []
-        const existing = exactExisting ?? (row.exit_time == null && symbolOpenRows.length === 1 ? symbolOpenRows[0] : null)
+        const existing = exactExisting ?? null
         if (!existing) continue
         if (row.setup_tag === 'untagged' && existing.setup_tag) row.setup_tag = existing.setup_tag
         if (!row.notes && existing.notes) row.notes = existing.notes
