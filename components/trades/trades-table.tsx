@@ -6,7 +6,13 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { ArrowLeft, Trash2 } from 'lucide-react'
 
 import type { Trade } from '@/types/trade'
-import { type DateRangeKey, DATE_RANGES, getStartDate } from '@/lib/date-range'
+import {
+  type DateRangeKey,
+  DATE_RANGES,
+  MARKET_TIME_ZONE,
+  dateKeyInTimeZone,
+  getStartDate,
+} from '@/lib/date-range'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { LocalTime } from '@/components/ui/local-time'
@@ -249,7 +255,8 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
     setRange(r)
   }
 
-  const startDate = getStartDate(range)
+  const startDate = getStartDate(range, { timeZone: MARKET_TIME_ZONE, marketWeekOpen: true })
+  const marketWeekStartDate = getStartDate('WTD', { timeZone: MARKET_TIME_ZONE, marketWeekOpen: true })!
 
   const addonTradeIds = useMemo(() => {
     const openTrades = trades.filter((t) => t.exitTime == null || t.outcome === 'open')
@@ -338,30 +345,25 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
     if (filter === 'all') byOutcome = visible
     else if (filter === 'marked') byOutcome = visible.filter((t) => t.needsReview)
     else if (filter === 'lastweek') {
-      // Current week from Monday 00:00 to now — resets each Monday
-      const today = new Date()
-      const dow = today.getDay() // 0=Sun
-      const daysToMon = dow === 0 ? 6 : dow - 1
-      const weekStart = new Date(today); weekStart.setHours(0,0,0,0); weekStart.setDate(today.getDate() - daysToMon)
-      const weekStartMs = weekStart.getTime()
       byOutcome = visible.filter((t) => {
-        // Any execution leg (partial buy or sell) this week
+        // Any execution leg (partial buy or sell) this market week.
         if (t.executionLegs?.some(leg => {
-          const ms = Date.parse(leg.time)
-          return Number.isFinite(ms) && ms >= weekStartMs
+          const legDate = dateKeyInTimeZone(leg.time, MARKET_TIME_ZONE)
+          return legDate != null && legDate >= marketWeekStartDate
         })) return true
-        const entryMs = t.entryTime ? Date.parse(t.entryTime) : NaN
-        const exitMs = t.exitTime ? Date.parse(t.exitTime) : NaN
-        return (Number.isFinite(entryMs) && entryMs >= weekStartMs)
-            || (Number.isFinite(exitMs) && exitMs >= weekStartMs)
+        const entryDate = t.entryTime ? dateKeyInTimeZone(t.entryTime, MARKET_TIME_ZONE) : null
+        const exitDate = t.exitTime ? dateKeyInTimeZone(t.exitTime, MARKET_TIME_ZONE) : null
+        return (entryDate != null && entryDate >= marketWeekStartDate)
+            || (exitDate != null && exitDate >= marketWeekStartDate)
       })
     } else byOutcome = visible.filter((t) => t.outcome === filter)
     if (!startDate) return byOutcome
     return byOutcome.filter((t) => {
       if (t.exitTime == null || t.outcome === 'open') return true
-      return t.exitTime.slice(0, 10) >= startDate
+      const exitDate = dateKeyInTimeZone(t.exitTime, MARKET_TIME_ZONE)
+      return exitDate != null && exitDate >= startDate
     })
-  }, [trades, filter, deletedIds, startDate])
+  }, [trades, filter, deletedIds, startDate, marketWeekStartDate])
 
   const visibleColumnOrder = useMemo(() => {
     const openOnlyColumns: ColumnId[] = ['currentPrice', 'currentAmount', 'currentRemainShares', 'stopLoss', 'currentRisk', 'currentRiskPct']
