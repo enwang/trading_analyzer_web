@@ -249,10 +249,24 @@ export function splitFlexCsvSections(csvStr: string): { header: string; body: st
   return sections
 }
 
-function classifySection(header: string): 'trades' | 'nav_daily' | 'nav_change' | 'cash_transactions' | 'unknown' {
+type FlexSectionKind = 'trades' | 'open_positions' | 'nav_daily' | 'nav_change' | 'cash_transactions' | 'unknown'
+
+type OpenPositionSnapshot = {
+  symbol: string
+  shares: number
+  avgPrice: number | null
+}
+
+const KNOWN_STOCK_SPLITS = [
+  { symbol: 'CRWD', exDate: '2026-07-02T04:00:00.000Z', factor: 4 },
+]
+
+function classifySection(header: string): FlexSectionKind {
   const h = header.toLowerCase()
+  const hasSymbol = h.includes('"symbol"') || h.includes(',symbol,') || h.includes(',symbol"')
   // Trades section is wide and includes Symbol + TradeID + OpenIndicator/OpenCloseIndicator
-  if (h.includes('"symbol"') && (h.includes('tradeid') || h.includes('"buysell"'))) return 'trades'
+  if (hasSymbol && (h.includes('tradeid') || h.includes('"buysell"') || h.includes(',buysell,') || h.includes('buy/sell'))) return 'trades'
+  if (hasSymbol && h.includes('position') && !h.includes('tradeid')) return 'open_positions'
   if (h.includes('"reportdate"') && h.includes('"total"')) return 'nav_daily'
   if (h.includes('"fromdate"') && h.includes('"todate"') && h.includes('startingvalue')) return 'nav_change'
   // Cash Transactions section: has Amount + Date/Time but NOT Symbol or TradeID
@@ -368,6 +382,35 @@ function parseCashTransactionsCsv(csv: string): CashTransactionRow[] {
   return rows
 }
 
+function parseOpenPositionsCsv(csv: string): OpenPositionSnapshot[] {
+  const result = Papa.parse<Record<string, string>>(csv, {
+    header: true,
+    skipEmptyLines: true,
+    transformHeader: (h: string) => h.trim().toLowerCase(),
+  })
+
+  const rows: OpenPositionSnapshot[] = []
+  for (const row of (result.data ?? []) as Record<string, string>[]) {
+    const symbol = (row['symbol'] ?? '').toUpperCase().trim()
+    if (!symbol) continue
+    const sharesRaw = num(row['position'] ?? row['quantity'])
+    if (sharesRaw == null || sharesRaw === 0) continue
+    const avgPrice = num(
+      row['costbasisprice'] ??
+      row['averagecost'] ??
+      row['avgprice'] ??
+      row['openprice'] ??
+      row['markprice']
+    )
+    rows.push({
+      symbol,
+      shares: Math.abs(sharesRaw),
+      avgPrice,
+    })
+  }
+  return rows
+}
+
 function extractFlexCsv(csvStr: string): FlexExtract {
   const sections = splitFlexCsvSections(csvStr)
   // Fallback: when no recognizable section headers are present (e.g. older
@@ -377,6 +420,8 @@ function extractFlexCsv(csvStr: string): FlexExtract {
     return { trades: parseTradesCsv(csvStr), navDaily: [], navChange: [], cashTransactions: [] }
   }
 
+  const tradeSections: string[] = []
+  const openPositions: OpenPositionSnapshot[] = []
   let trades: NormalizedTrade[] = []
   const navDaily: NavDailyRow[] = []
   const navChange: NavChangeRow[] = []
@@ -386,7 +431,9 @@ function extractFlexCsv(csvStr: string): FlexExtract {
     const kind = classifySection(sec.header)
     const csv = `${sec.header}\n${sec.body}`
     if (kind === 'trades') {
-      trades = parseTradesCsv(csv)
+      tradeSections.push(csv)
+    } else if (kind === 'open_positions') {
+      openPositions.push(...parseOpenPositionsCsv(csv))
     } else if (kind === 'nav_daily') {
       navDaily.push(...parseNavDailyCsv(csv))
     } else if (kind === 'nav_change') {
@@ -394,6 +441,10 @@ function extractFlexCsv(csvStr: string): FlexExtract {
     } else if (kind === 'cash_transactions') {
       cashTransactions.push(...parseCashTransactionsCsv(csv))
     }
+  }
+
+  if (tradeSections.length > 0) {
+    trades = parseTradesCsv(tradeSections.join('\n'), openPositions)
   }
 
   return { trades, navDaily, navChange, cashTransactions }
@@ -407,7 +458,7 @@ function parseCsv(csvStr: string): NormalizedTrade[] {
   return extractFlexCsv(csvStr).trades
 }
 
-function parseTradesCsv(csvStr: string): NormalizedTrade[] {
+function parseTradesCsv(csvStr: string, openPositionSnapshots: OpenPositionSnapshot[] = []): NormalizedTrade[] {
   const result = Papa.parse<Record<string, string>>(csvStr, {
     header: true,
     skipEmptyLines: true,
@@ -752,6 +803,14 @@ function parseTradesCsv(csvStr: string): NormalizedTrade[] {
     t.execution_legs = legs.length > 0 ? legs : null
   }
 
+  reconcileOpenLotsWithPositionSnapshots(openLotsBySymbol, openLegsByEntry, openPositionSnapshots)
+  reconcileOpenLotsWithKnownSplits(
+    openLotsBySymbol,
+    openLegsByEntry,
+    closeLegsByEntry,
+    merged,
+    openPositionSnapshots,
+  )
   appendOpenPositions(merged, openLotsBySymbol, openLegsByEntry, closeLegsByEntry)
 
   const normalized: NormalizedTrade[] = []
@@ -888,6 +947,101 @@ function dedupByConstraintKey(trades: NormalizedTrade[]): NormalizedTrade[] {
 
 function mergeOpenPositionsBySymbol(trades: NormalizedTrade[]): NormalizedTrade[] {
   return trades
+}
+
+function reconcileOpenLotsWithPositionSnapshots(
+  openLotsBySymbol: Map<string, { entryIso: string; avgPrice: number; remainingShares: number }[]>,
+  openLegsByEntry: Map<string, { time: string; action: 'BUY' | 'SELL'; shares: number; price: number }[]>,
+  snapshots: OpenPositionSnapshot[],
+): void {
+  const snapshotBySymbol = new Map<string, OpenPositionSnapshot>()
+  for (const snapshot of snapshots) {
+    const existing = snapshotBySymbol.get(snapshot.symbol)
+    if (existing) {
+      existing.shares += snapshot.shares
+      if (existing.avgPrice == null && snapshot.avgPrice != null) existing.avgPrice = snapshot.avgPrice
+    } else {
+      snapshotBySymbol.set(snapshot.symbol, { ...snapshot })
+    }
+  }
+
+  for (const [sym, lots] of openLotsBySymbol) {
+    const snapshot = snapshotBySymbol.get(sym)
+    if (!snapshot || snapshot.shares <= 0) continue
+
+    const openLots = lots.filter((lot) => lot.remainingShares > 0)
+    const currentShares = openLots.reduce((sum, lot) => sum + lot.remainingShares, 0)
+    if (currentShares <= 0) continue
+
+    const factor = snapshot.shares / currentShares
+    if (!Number.isFinite(factor) || factor <= 0 || Math.abs(factor - 1) < 1e-9) continue
+
+    for (const lot of openLots) {
+      const lotKey = `${sym}|${lot.entryIso}`
+      lot.remainingShares *= factor
+      lot.avgPrice = openLots.length === 1 && snapshot.avgPrice != null
+        ? snapshot.avgPrice
+        : lot.avgPrice / factor
+
+      const legs = openLegsByEntry.get(lotKey)
+      if (!legs?.length) continue
+      for (const leg of legs) {
+        leg.shares *= factor
+        leg.price /= factor
+      }
+    }
+  }
+}
+
+function scaleTradeForSplit(t: NormalizedTrade, factor: number): void {
+  if (t.shares != null) t.shares *= factor
+  if (t.entry_price != null) t.entry_price /= factor
+  if (t.exit_price != null) t.exit_price /= factor
+  const cost = t.entry_price != null && t.shares != null ? Math.abs(t.entry_price * t.shares) : null
+  if (cost && cost > 0 && t.pnl != null) t.pnl_pct = t.pnl / cost
+}
+
+function reconcileOpenLotsWithKnownSplits(
+  openLotsBySymbol: Map<string, { entryIso: string; avgPrice: number; remainingShares: number }[]>,
+  openLegsByEntry: Map<string, { time: string; action: 'BUY' | 'SELL'; shares: number; price: number }[]>,
+  closeLegsByEntry: Map<string, { time: string; action: 'BUY' | 'SELL'; shares: number; price: number }[]>,
+  trades: NormalizedTrade[],
+  snapshots: OpenPositionSnapshot[],
+): void {
+  const snapshotSymbols = new Set(snapshots.map((snapshot) => snapshot.symbol))
+
+  for (const split of KNOWN_STOCK_SPLITS) {
+    if (snapshotSymbols.has(split.symbol)) continue
+    const lots = openLotsBySymbol.get(split.symbol) ?? []
+    const splitTime = new Date(split.exDate).getTime()
+    const adjustedOpenKeys = new Set<string>()
+
+    for (const lot of lots) {
+      if (lot.remainingShares <= 0) continue
+      if (new Date(lot.entryIso).getTime() >= splitTime) continue
+
+      const lotKey = `${split.symbol}|${lot.entryIso}`
+      adjustedOpenKeys.add(lotKey)
+      lot.remainingShares *= split.factor
+      lot.avgPrice /= split.factor
+
+      for (const legs of [openLegsByEntry.get(lotKey), closeLegsByEntry.get(lotKey)]) {
+        if (!legs) continue
+        for (const leg of legs) {
+          if (new Date(leg.time).getTime() >= splitTime) continue
+          leg.shares *= split.factor
+          leg.price /= split.factor
+        }
+      }
+    }
+
+    if (adjustedOpenKeys.size === 0) continue
+    for (const trade of trades) {
+      if (!trade.entry_time || !adjustedOpenKeys.has(`${trade.symbol}|${trade.entry_time}`)) continue
+      if (trade.exit_time && new Date(trade.exit_time).getTime() >= splitTime) continue
+      scaleTradeForSplit(trade, split.factor)
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

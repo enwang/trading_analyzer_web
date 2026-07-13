@@ -192,4 +192,56 @@ if (fslySellLegs.length !== 3) {
   fail(`expected FSLY to keep 3 sell legs, got ${fslySellLegs.length}`)
 }
 
+const crwdSplitCsv = `ClientAccountID,Open/CloseIndicator,Symbol,Quantity,Date/Time,Open Date/Time,Buy/Sell,T. Price,Basis
+U123,O,CRWD,10,2026-06-10 09:30:00,,BUY,700,
+U123,O,XYZ,10,2026-06-10 10:00:00,,BUY,20,
+U123,C,XYZ,10,2026-06-11 10:00:00,2026-06-10 10:00:00,SELL,21,200
+ClientAccountID,CurrencyPrimary,AssetCategory,Symbol,Position,CostBasisPrice
+U123,USD,STK,CRWD,40,175
+`
+const crwdSplitTrades = parseFlexCsv(crwdSplitCsv)
+const crwd = crwdSplitTrades.find((t) => t.symbol === 'CRWD' && t.outcome === 'open')
+if (!crwd) {
+  fail('missing CRWD open trade after split-adjusted open-position snapshot')
+}
+if ((crwd.shares ?? 0) !== 40) {
+  fail(`expected split-adjusted CRWD shares = 40, got ${crwd.shares}`)
+}
+if ((crwd.entry_price ?? 0) !== 175) {
+  fail(`expected split-adjusted CRWD entry price = 175, got ${crwd.entry_price}`)
+}
+const crwdBuyLeg = crwd.execution_legs?.find((leg) => leg.action === 'BUY')
+if (!crwdBuyLeg || crwdBuyLeg.shares !== 40 || crwdBuyLeg.price !== 175) {
+  fail(`expected CRWD buy leg to be split-adjusted to 40 @ 175, got ${JSON.stringify(crwd.execution_legs)}`)
+}
+
+const crwdKnownSplitCsv = `Open/CloseIndicator,Symbol,Quantity,Date/Time,Open Date/Time,Buy/Sell,T. Price,Basis
+O,CRWD,100,2026-06-18 11:07:20,,BUY,680,
+C,CRWD,27,2026-07-01 09:58:26,2026-06-18 11:07:20,SELL,781,18360
+C,CRWD,6,2026-07-01 09:58:26,2026-06-18 11:07:20,SELL,781,4080
+O,XYZ,10,2026-06-10 10:00:00,,BUY,20,
+C,XYZ,10,2026-06-11 10:00:00,2026-06-10 10:00:00,SELL,21,200
+`
+const crwdKnownSplitTrades = parseFlexCsv(crwdKnownSplitCsv)
+const crwdKnownSplit = crwdKnownSplitTrades.find((t) => t.symbol === 'CRWD' && t.outcome === 'open')
+if (!crwdKnownSplit) {
+  fail('missing CRWD open trade after known split adjustment')
+}
+if ((crwdKnownSplit.shares ?? 0) !== 268) {
+  fail(`expected known-split CRWD shares = 268, got ${crwdKnownSplit.shares}`)
+}
+if ((crwdKnownSplit.entry_price ?? 0) !== 170) {
+  fail(`expected known-split CRWD entry price = 170, got ${crwdKnownSplit.entry_price}`)
+}
+if ((crwdKnownSplit.pnl ?? 0) !== 3333) {
+  fail(`expected known-split CRWD realized pnl to remain 3333, got ${crwdKnownSplit.pnl}`)
+}
+const crwdKnownSplitNetShares = (crwdKnownSplit.execution_legs ?? []).reduce(
+  (sum, leg) => sum + (leg.action === 'BUY' ? leg.shares : -leg.shares),
+  0
+)
+if (crwdKnownSplitNetShares !== 268) {
+  fail(`expected known-split CRWD execution legs to net to 268 shares, got ${crwdKnownSplitNetShares}`)
+}
+
 console.log('parser-regression: PASS')
