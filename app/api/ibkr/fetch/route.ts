@@ -167,10 +167,9 @@ export async function POST(request: NextRequest) {
           (row as Record<string, unknown>).initial_risk_amount = existing.initial_risk_amount
         }
         if (row.r_multiple == null && existing.r_multiple != null) row.r_multiple = existing.r_multiple
-        // When needs_review is set, preserve existing execution_legs as a base —
-        // but merge in any NEW sell legs from the parser that aren't already present.
-        // This ensures partial closes that arrive after the review flag was set still land.
-        if (existing.needs_review && existing.execution_legs != null) {
+        // Parser legs are authoritative because they are split-adjusted by default.
+        // Preserve old manual legs only when the incoming parser row has no legs.
+        if (existing.needs_review && existing.execution_legs != null && !row.execution_legs) {
           const dbLegs = parseLegs(existing.execution_legs) ?? []
           const newLegs = parseLegs(row.execution_legs) ?? []
           const dbLegKeys = new Set(dbLegs.map(l => `${l.time}|${l.action}|${l.shares}`))

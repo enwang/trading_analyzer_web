@@ -244,4 +244,76 @@ if (crwdKnownSplitNetShares !== 268) {
   fail(`expected known-split CRWD execution legs to net to 268 shares, got ${crwdKnownSplitNetShares}`)
 }
 
+const crwdPostSplitPartialLossCsv = `Open/CloseIndicator,Symbol,Quantity,Date/Time,Open Date/Time,Buy/Sell,T. Price,Basis
+O,CRWD,100,2026-06-18 11:07:20,,BUY,680,
+C,CRWD,132,2026-07-10 09:58:26,2026-06-18 11:07:20,SELL,160,22440
+O,XYZ,10,2026-06-10 10:00:00,,BUY,20,
+C,XYZ,10,2026-06-11 10:00:00,2026-06-10 10:00:00,SELL,21,200
+`
+const crwdPostSplitPartialLossTrades = parseFlexCsv(crwdPostSplitPartialLossCsv)
+const crwdPostSplitClosed = crwdPostSplitPartialLossTrades.find((t) => t.symbol === 'CRWD' && t.exit_time != null)
+if (crwdPostSplitClosed) {
+  fail(`expected post-split partial CRWD sale not to create a closed trade, got ${JSON.stringify(crwdPostSplitClosed)}`)
+}
+const crwdPostSplitOpen = crwdPostSplitPartialLossTrades.find((t) => t.symbol === 'CRWD' && t.outcome === 'open')
+if (!crwdPostSplitOpen) {
+  fail('missing CRWD open trade after post-split partial sale')
+}
+if ((crwdPostSplitOpen.shares ?? 0) !== 268) {
+  fail(`expected post-split CRWD remaining shares = 268, got ${crwdPostSplitOpen.shares}`)
+}
+if ((crwdPostSplitOpen.entry_price ?? 0) !== 170) {
+  fail(`expected post-split CRWD entry price = 170, got ${crwdPostSplitOpen.entry_price}`)
+}
+if ((crwdPostSplitOpen.pnl ?? 0) !== -1320) {
+  fail(`expected post-split CRWD realized pnl = -1320, got ${crwdPostSplitOpen.pnl}`)
+}
+const crwdPostSplitNetShares = (crwdPostSplitOpen.execution_legs ?? []).reduce(
+  (sum, leg) => sum + (leg.action === 'BUY' ? leg.shares : -leg.shares),
+  0
+)
+if (crwdPostSplitNetShares !== 268) {
+  fail(`expected post-split CRWD execution legs to net to 268 shares, got ${crwdPostSplitNetShares}`)
+}
+
+const crwdMixedSplitScaleCsv = `Open/CloseIndicator,Symbol,Quantity,Date/Time,Open Date/Time,Buy/Sell,T. Price,Basis
+O,CRWD,100,2026-06-18 11:07:20,,BUY,680,
+C,CRWD,27,2026-07-01 09:58:26,2026-06-18 11:07:20,SELL,781,18360
+C,CRWD,6,2026-07-01 09:58:26,2026-06-18 11:07:20,SELL,781,4080
+C,CRWD,134,2026-07-14 11:02:11,2026-06-18 11:07:20,SELL,207,22780
+O,XYZ,10,2026-06-10 10:00:00,,BUY,20,
+C,XYZ,10,2026-06-11 10:00:00,2026-06-10 10:00:00,SELL,21,200
+`
+const crwdMixedSplitScaleTrades = parseFlexCsv(crwdMixedSplitScaleCsv)
+const crwdMixedClosed = crwdMixedSplitScaleTrades.find((t) => t.symbol === 'CRWD' && t.exit_time != null)
+if (crwdMixedClosed) {
+  fail(`expected mixed-scale CRWD partial sells not to create a closed trade, got ${JSON.stringify(crwdMixedClosed)}`)
+}
+const crwdMixedOpen = crwdMixedSplitScaleTrades.find((t) => t.symbol === 'CRWD' && t.outcome === 'open')
+if (!crwdMixedOpen) {
+  fail('missing CRWD open trade after mixed pre/post split partial sells')
+}
+if ((crwdMixedOpen.shares ?? 0) !== 134) {
+  fail(`expected mixed-scale CRWD remaining shares = 134, got ${crwdMixedOpen.shares}`)
+}
+if ((crwdMixedOpen.entry_price ?? 0) !== 170) {
+  fail(`expected mixed-scale CRWD entry price = 170, got ${crwdMixedOpen.entry_price}`)
+}
+if (Math.abs((crwdMixedOpen.pnl ?? 0) - 8291) > 1e-9) {
+  fail(`expected mixed-scale CRWD realized pnl = 8291, got ${crwdMixedOpen.pnl}`)
+}
+const crwdMixedLegs = crwdMixedOpen.execution_legs ?? []
+if (!crwdMixedLegs.some((leg) => leg.action === 'BUY' && leg.shares === 400 && leg.price === 170)) {
+  fail(`expected mixed-scale CRWD buy leg adjusted to 400 @ 170, got ${JSON.stringify(crwdMixedLegs)}`)
+}
+if (!crwdMixedLegs.some((leg) => leg.action === 'SELL' && leg.shares === 108 && leg.price === 195.25)) {
+  fail(`expected mixed-scale CRWD first sell leg adjusted to 108 @ 195.25, got ${JSON.stringify(crwdMixedLegs)}`)
+}
+if (!crwdMixedLegs.some((leg) => leg.action === 'SELL' && leg.shares === 24 && leg.price === 195.25)) {
+  fail(`expected mixed-scale CRWD second sell leg adjusted to 24 @ 195.25, got ${JSON.stringify(crwdMixedLegs)}`)
+}
+if (!crwdMixedLegs.some((leg) => leg.action === 'SELL' && leg.shares === 134 && leg.price === 207)) {
+  fail(`expected mixed-scale CRWD post-split sell leg to stay 134 @ 207, got ${JSON.stringify(crwdMixedLegs)}`)
+}
+
 console.log('parser-regression: PASS')

@@ -258,6 +258,8 @@ type OpenPositionSnapshot = {
 }
 
 const KNOWN_STOCK_SPLITS = [
+  // Parser default: store split-affected trades in post-split share/price scale.
+  // Add future stock splits here as { symbol, exDate, factor }.
   { symbol: 'CRWD', exDate: '2026-07-02T04:00:00.000Z', factor: 4 },
 ]
 
@@ -491,6 +493,7 @@ function parseTradesCsv(csvStr: string, openPositionSnapshots: OpenPositionSnaps
   const openLegsByEntry = new Map<string, { time: string; action: 'BUY' | 'SELL'; shares: number; price: number }[]>()
   const closeLegsByEntry = new Map<string, { time: string; action: 'BUY' | 'SELL'; shares: number; price: number }[]>()
   const openLotsBySymbol = new Map<string, { entryIso: string; avgPrice: number; remainingShares: number }[]>()
+  const appliedKnownSplitKeys = new Set<string>()
   const openGroups = new Map<string, {
     symbol: string
     entryIso: string
@@ -741,6 +744,19 @@ function parseTradesCsv(csvStr: string, openPositionSnapshots: OpenPositionSnaps
       entryTime = null
     }
 
+    if (exitTime) {
+      reconcileOpenLotsWithKnownSplits(
+        openLotsBySymbol,
+        openLegsByEntry,
+        closeLegsByEntry,
+        openPriceMapByEntry,
+        trades,
+        openPositionSnapshots,
+        appliedKnownSplitKeys,
+        exitTime,
+      )
+    }
+
     if (!entryTime && exitTime) {
       const exitDateStr = exitTime.slice(0, 10)
       const entries = symOpenEntries.get(sym) ?? []
@@ -808,8 +824,10 @@ function parseTradesCsv(csvStr: string, openPositionSnapshots: OpenPositionSnaps
     openLotsBySymbol,
     openLegsByEntry,
     closeLegsByEntry,
+    openPriceMapByEntry,
     merged,
     openPositionSnapshots,
+    appliedKnownSplitKeys,
   )
   appendOpenPositions(merged, openLotsBySymbol, openLegsByEntry, closeLegsByEntry)
 
@@ -1005,15 +1023,22 @@ function reconcileOpenLotsWithKnownSplits(
   openLotsBySymbol: Map<string, { entryIso: string; avgPrice: number; remainingShares: number }[]>,
   openLegsByEntry: Map<string, { time: string; action: 'BUY' | 'SELL'; shares: number; price: number }[]>,
   closeLegsByEntry: Map<string, { time: string; action: 'BUY' | 'SELL'; shares: number; price: number }[]>,
+  openPriceMapByEntry: Map<string, { totalShares: number; totalCost: number }>,
   trades: NormalizedTrade[],
   snapshots: OpenPositionSnapshot[],
+  appliedSplitKeys: Set<string>,
+  upToTime: string | null = null,
 ): void {
   const snapshotSymbols = new Set(snapshots.map((snapshot) => snapshot.symbol))
+  const upToMs = upToTime ? new Date(upToTime).getTime() : Number.POSITIVE_INFINITY
 
   for (const split of KNOWN_STOCK_SPLITS) {
     if (snapshotSymbols.has(split.symbol)) continue
+    const splitKey = `${split.symbol}|${split.exDate}`
+    if (appliedSplitKeys.has(splitKey)) continue
     const lots = openLotsBySymbol.get(split.symbol) ?? []
     const splitTime = new Date(split.exDate).getTime()
+    if (splitTime > upToMs) continue
     const adjustedOpenKeys = new Set<string>()
 
     for (const lot of lots) {
@@ -1024,6 +1049,11 @@ function reconcileOpenLotsWithKnownSplits(
       adjustedOpenKeys.add(lotKey)
       lot.remainingShares *= split.factor
       lot.avgPrice /= split.factor
+
+      const openPrice = openPriceMapByEntry.get(lotKey)
+      if (openPrice) {
+        openPrice.totalShares *= split.factor
+      }
 
       for (const legs of [openLegsByEntry.get(lotKey), closeLegsByEntry.get(lotKey)]) {
         if (!legs) continue
@@ -1036,6 +1066,7 @@ function reconcileOpenLotsWithKnownSplits(
     }
 
     if (adjustedOpenKeys.size === 0) continue
+    appliedSplitKeys.add(splitKey)
     for (const trade of trades) {
       if (!trade.entry_time || !adjustedOpenKeys.has(`${trade.symbol}|${trade.entry_time}`)) continue
       if (trade.exit_time && new Date(trade.exit_time).getTime() >= splitTime) continue

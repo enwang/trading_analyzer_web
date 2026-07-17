@@ -134,8 +134,9 @@ export async function POST(request: NextRequest) {
         if (row.stop_loss == null && existing.stop_loss != null) row.stop_loss = existing.stop_loss
         if (existing.stop_loss_locked) row.stop_loss_locked = true
         if (row.r_multiple == null && existing.r_multiple != null) row.r_multiple = existing.r_multiple
-        // Preserve manually-corrected execution_legs (and derived shares/pnl) for trades flagged for review or with notes
-        if ((existing.needs_review || existing.notes) && existing.execution_legs != null) {
+        // Parser legs are authoritative because they are split-adjusted by default.
+        // Preserve old manual legs only when the incoming parser row has no legs.
+        if ((existing.needs_review || existing.notes) && existing.execution_legs != null && !row.execution_legs) {
           row.execution_legs = existing.execution_legs
           row.shares = computeOpenSharesFromLegs(existing.execution_legs) ?? row.shares
           if (row.exit_time == null) {
@@ -175,6 +176,20 @@ export async function POST(request: NextRequest) {
           .eq('user_id', user.id)
           .is('exit_time', null)
           .in('symbol', symbolsToDeleteOpen)
+      }
+
+      // Clean up stale partial-exit rows: for each incoming open position, delete any
+      // existing closed row that shares the same entry_time. These arise when parser
+      // bugs previously recorded partial exits as separate closed rows.
+      const incomingOpenRows = rows.filter(r => r.exit_time == null && r.entry_time)
+      for (const openRow of incomingOpenRows) {
+        await supabase
+          .from('trades')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('symbol', openRow.symbol as string)
+          .eq('entry_time', openRow.entry_time as string)
+          .not('exit_time', 'is', null)
       }
     }
 

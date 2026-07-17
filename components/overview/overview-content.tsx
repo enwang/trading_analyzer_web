@@ -20,7 +20,11 @@ function rebase(data: BenchmarkRow[], startDate: string): BenchmarkRow[] {
   // starts from the same reference point as the NAV baseline row.
   const prior = [...data].filter(r => r.date < startDate).pop()
   const base = prior?.pct ?? data.find(r => r.date >= startDate)?.pct ?? 0
-  return data.filter(r => r.date >= startDate).map(r => ({ ...r, pct: r.pct - base }))
+  const baseFactor = 1 + base / 100
+  const rebased = data
+    .filter(r => r.date >= startDate)
+    .map(r => ({ ...r, pct: baseFactor > 0 ? ((1 + r.pct / 100) / baseFactor - 1) * 100 : r.pct - base }))
+  return prior ? [{ date: prior.date, pct: 0 }, ...rebased] : rebased
 }
 
 function fmt(n: number) {
@@ -45,6 +49,7 @@ export function OverviewContent({
   cashDeposits,
   spyReturns,
   qqqReturns,
+  soxxReturns,
 }: {
   trades: Trade[]
   navData: NavRow[]
@@ -52,6 +57,7 @@ export function OverviewContent({
   cashDeposits: CashDeposit[]
   spyReturns: BenchmarkRow[]
   qqqReturns: BenchmarkRow[]
+  soxxReturns: BenchmarkRow[]
 }) {
   const [range, setRange] = useState<DateRangeKey>('YTD')
 
@@ -90,6 +96,7 @@ export function OverviewContent({
 
   const filteredSpy = useMemo(() => startDate ? rebase(spyReturns, startDate) : spyReturns, [spyReturns, startDate])
   const filteredQqq = useMemo(() => startDate ? rebase(qqqReturns, startDate) : qqqReturns, [qqqReturns, startDate])
+  const filteredSoxx = useMemo(() => startDate ? rebase(soxxReturns, startDate) : soxxReturns, [soxxReturns, startDate])
 
   const filteredDeposits = useMemo(() => {
     if (!startDate) return cashDeposits
@@ -186,6 +193,7 @@ export function OverviewContent({
               deposits={cashDeposits}
               spy={filteredSpy}
               qqq={filteredQqq}
+              soxx={filteredSoxx}
               height={240}
               disableAnchors={range === 'WTD' || range === 'MTD'}
             />

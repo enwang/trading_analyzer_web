@@ -40,6 +40,7 @@ import {
 } from '@/lib/market/stop-loss'
 import { createClient } from '@/lib/supabase/client'
 import { SpellCheckTextarea } from '@/components/ui/spell-check-textarea'
+import { OverviewSyncButton } from '@/components/overview/overview-sync-button'
 
 type OutcomeFilter = 'all' | 'win' | 'loss' | 'open' | 'marked' | 'lastweek'
 type SortKey =
@@ -1072,7 +1073,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
             {title} ({filtered.length})
           </h1>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <div className="flex gap-1">
             {DATE_RANGES.map((r) => (
               <button
@@ -1102,6 +1103,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
               <SelectItem value="loss">Losers</SelectItem>
             </SelectContent>
           </Select>
+          <OverviewSyncButton />
         </div>
       </div>
       {error && <div className="text-sm text-red-700">{error}</div>}
