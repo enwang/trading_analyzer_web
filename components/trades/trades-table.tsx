@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { ArrowLeft, Trash2 } from 'lucide-react'
+import { ArrowLeft, Search, Trash2, X } from 'lucide-react'
 
 import type { Trade } from '@/types/trade'
 import {
@@ -15,6 +15,7 @@ import {
 } from '@/lib/date-range'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { LocalTime } from '@/components/ui/local-time'
 import {
   Select,
@@ -251,6 +252,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
   const [isPending, startTransition] = useTransition()
   const [filter, setFilter] = useState<OutcomeFilter>(initialFilter)
   const [range, setRange] = useState<DateRangeKey>('All')
+  const [symbolSearch, setSymbolSearch] = useState(() => searchParams.get('symbol') ?? '')
 
   function selectRange(r: DateRangeKey) {
     setRange(r)
@@ -358,13 +360,15 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
             || (exitDate != null && exitDate >= marketWeekStartDate)
       })
     } else byOutcome = visible.filter((t) => t.outcome === filter)
-    if (!startDate) return byOutcome
-    return byOutcome.filter((t) => {
+    const byDate = !startDate ? byOutcome : byOutcome.filter((t) => {
       if (t.exitTime == null || t.outcome === 'open') return true
       const exitDate = dateKeyInTimeZone(t.exitTime, MARKET_TIME_ZONE)
       return exitDate != null && exitDate >= startDate
     })
-  }, [trades, filter, deletedIds, startDate, marketWeekStartDate])
+    const symbolQuery = symbolSearch.trim().toUpperCase()
+    if (!symbolQuery) return byDate
+    return byDate.filter((t) => t.symbol.toUpperCase().includes(symbolQuery))
+  }, [trades, filter, deletedIds, startDate, marketWeekStartDate, symbolSearch])
 
   const visibleColumnOrder = useMemo(() => {
     const openOnlyColumns: ColumnId[] = ['currentPrice', 'currentAmount', 'currentRemainShares', 'stopLoss', 'currentRisk', 'currentRiskPct']
@@ -1074,6 +1078,26 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
           </h1>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
+          <div className="relative w-full sm:w-44">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={symbolSearch}
+              onChange={(e) => setSymbolSearch(e.target.value.toUpperCase())}
+              placeholder="Symbol"
+              className="h-8 pl-8 pr-8 uppercase"
+              aria-label="Filter by symbol"
+            />
+            {symbolSearch && (
+              <button
+                type="button"
+                onClick={() => setSymbolSearch('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                aria-label="Clear symbol search"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
           <div className="flex gap-1">
             {DATE_RANGES.map((r) => (
               <button
