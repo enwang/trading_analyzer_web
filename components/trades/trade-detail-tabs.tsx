@@ -52,6 +52,18 @@ function fmtPct(n: number | null) {
   return `${(n * 100).toFixed(2)}%`
 }
 
+function formatMfeMaeTimestamp(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString([], {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 function computeRiskPerShare(side: Side, entry: number, stop: number) {
   if (side === 'long') return entry - stop
   if (side === 'short') return stop - entry
@@ -370,7 +382,7 @@ export function TradeDetailTabs(props: Props) {
                 </div>
                 {mfeMaeDebug && entryPrice != null && (
                   <div className="mt-0.5 text-right text-[10px] text-muted-foreground/60">
-                    peak {mfeMaeDebug.maxHigh.toFixed(2)} @ {new Date(mfeMaeDebug.maxHighTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {mfeMaeDebug.interval}
+                    peak {mfeMaeDebug.maxHigh.toFixed(2)} @ {formatMfeMaeTimestamp(mfeMaeDebug.maxHighTime)} · {mfeMaeDebug.interval}
                   </div>
                 )}
               </div>
@@ -387,7 +399,7 @@ export function TradeDetailTabs(props: Props) {
                 </div>
                 {mfeMaeDebug && entryPrice != null && (
                   <div className="mt-0.5 text-right text-[10px] text-muted-foreground/60">
-                    trough {mfeMaeDebug.minLow.toFixed(2)} @ {new Date(mfeMaeDebug.minLowTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {mfeMaeDebug.interval}
+                    trough {mfeMaeDebug.minLow.toFixed(2)} @ {formatMfeMaeTimestamp(mfeMaeDebug.minLowTime)} · {mfeMaeDebug.interval}
                   </div>
                 )}
               </div>

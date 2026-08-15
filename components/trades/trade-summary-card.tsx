@@ -50,6 +50,18 @@ function fmtPct(n: number | null) {
   return `${(n * 100).toFixed(2)}%`
 }
 
+function formatMfeMaeTimestamp(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString([], {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 function computeRiskPerShare(side: Side, entry: number, stop: number) {
   if (side === 'long') return entry - stop
   if (side === 'short') return stop - entry
@@ -338,7 +350,7 @@ export function TradeSummaryCard({
           </div>
           {mfeMaeDebug && entryPrice != null && (
             <div className="mt-0.5 text-right text-[11px] text-muted-foreground/70">
-              peak&nbsp;{mfeMaeDebug.maxHigh.toFixed(2)} @ {new Date(mfeMaeDebug.maxHighTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} − entry&nbsp;{entryPrice.toFixed(2)} = {(mfeMaeDebug.maxHigh - entryPrice).toFixed(2)}/sh · {mfeMaeDebug.interval}
+              peak&nbsp;{mfeMaeDebug.maxHigh.toFixed(2)} @ {formatMfeMaeTimestamp(mfeMaeDebug.maxHighTime)} − entry&nbsp;{entryPrice.toFixed(2)} = {(mfeMaeDebug.maxHigh - entryPrice).toFixed(2)}/sh · {mfeMaeDebug.interval}
             </div>
           )}
         </div>
@@ -354,7 +366,7 @@ export function TradeSummaryCard({
           </div>
           {mfeMaeDebug && entryPrice != null && (
             <div className="mt-0.5 text-right text-[11px] text-muted-foreground/70">
-              entry&nbsp;{entryPrice.toFixed(2)} − trough&nbsp;{mfeMaeDebug.minLow.toFixed(2)} @ {new Date(mfeMaeDebug.minLowTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} = {(entryPrice - mfeMaeDebug.minLow).toFixed(2)}/sh · {mfeMaeDebug.interval}
+              entry&nbsp;{entryPrice.toFixed(2)} − trough&nbsp;{mfeMaeDebug.minLow.toFixed(2)} @ {formatMfeMaeTimestamp(mfeMaeDebug.minLowTime)} = {(entryPrice - mfeMaeDebug.minLow).toFixed(2)}/sh · {mfeMaeDebug.interval}
             </div>
           )}
         </div>
