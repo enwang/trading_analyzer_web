@@ -1,4 +1,9 @@
-import { deduplicateDailyCandles } from '../lib/market/chart-utils.ts'
+import {
+  dateKeyInMarketTimeZone,
+  deduplicateDailyCandles,
+  nextUtcDayStartSec,
+  synthesizeDailyCandle,
+} from '../lib/market/chart-utils.ts'
 
 function fail(message) {
   console.error(`chart-regression: FAIL - ${message}`)
@@ -85,6 +90,49 @@ function makeCandle(isoDate, offsetSec = 0, close = 100) {
   for (let i = 1; i < result.length; i++) {
     assert(result[i].time > result[i - 1].time, `candles not sorted at index ${i}`)
   }
+}
+
+// ── Test: 1D chart period2 includes the exit calendar day ─────────────────
+
+{
+  const exitAtUtcMidnight = Date.parse('2026-03-13T00:00:00Z')
+  const expectedNextDayStart = Date.parse('2026-03-14T00:00:00Z') / 1000
+
+  const result = nextUtcDayStartSec(exitAtUtcMidnight)
+
+  assert(
+    result === expectedNextDayStart,
+    `expected next UTC day start ${expectedNextDayStart}, got ${result}`
+  )
+}
+
+// ── Test: intraday candles can synthesize a current daily candle ──────────
+
+{
+  const candles = [
+    { time: 1787059800, open: 248.79, high: 249, low: 243, close: 248.41, volume: 262334 },
+    { time: 1787060100, open: 248.40, high: 253.45, low: 247, close: 250.10, volume: 100000 },
+    { time: 1787083200, open: 246, high: 246, low: 246, close: 246, volume: 0 },
+  ]
+
+  const result = synthesizeDailyCandle(candles)
+
+  assert(result != null, 'expected synthesized candle')
+  assert(result.time === 1787059800, `expected first intraday timestamp, got ${result.time}`)
+  assert(result.open === 248.79, `expected open 248.79, got ${result.open}`)
+  assert(result.high === 253.45, `expected high 253.45, got ${result.high}`)
+  assert(result.low === 243, `expected low 243, got ${result.low}`)
+  assert(result.close === 246, `expected close 246, got ${result.close}`)
+  assert(result.volume === 362334, `expected volume 362334, got ${result.volume}`)
+}
+
+// ── Test: market date key uses US exchange timezone ───────────────────────
+
+{
+  const marketOpenMs = Date.parse('2026-08-18T13:30:00Z')
+  const result = dateKeyInMarketTimeZone(marketOpenMs)
+
+  assert(result === '2026-08-18', `expected market date 2026-08-18, got ${result}`)
 }
 
 console.log('chart-regression: PASS')

@@ -1,5 +1,11 @@
 import { NextResponse } from 'next/server'
-import { deduplicateDailyCandles, repairCorruptVolume } from '@/lib/market/chart-utils'
+import {
+  dateKeyInMarketTimeZone,
+  deduplicateDailyCandles,
+  nextUtcDayStartSec,
+  repairCorruptVolume,
+  synthesizeDailyCandle,
+} from '@/lib/market/chart-utils'
 
 interface YahooChartResponse {
   chart?: {
@@ -16,6 +22,15 @@ interface YahooChartResponse {
       }
     }>
   }
+}
+
+interface Candle {
+  time: number
+  open: number
+  high: number
+  low: number
+  close: number
+  volume: number | null
 }
 
 // Yahoo Finance intraday data age limits
@@ -72,6 +87,41 @@ function preEntryLookbackMs(timeframe: string): number {
     case '1h': return 90 * day
     case '1d': return 365 * day
     default: return 30 * day
+  }
+}
+
+async function fetchIntradayDailyCandle(symbol: string, dateKey: string): Promise<Candle | null> {
+  const period1 = Math.floor(Date.parse(`${dateKey}T00:00:00Z`) / 1000)
+  const period2 = period1 + 86400
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=5m&period1=${period1}&period2=${period2}&includePrePost=false`
+
+  try {
+    const response = await fetch(url, { cache: 'no-store' })
+    if (!response.ok) return null
+
+    const payload = (await response.json()) as YahooChartResponse
+    const result = payload.chart?.result?.[0]
+    const timestamps = result?.timestamp ?? []
+    const quote = result?.indicators?.quote?.[0]
+    const opens = quote?.open ?? []
+    const highs = quote?.high ?? []
+    const lows = quote?.low ?? []
+    const closes = quote?.close ?? []
+    const volumes = quote?.volume ?? []
+
+    const intradayCandles = timestamps
+      .map((tsSec, i) => {
+        const open = opens[i]; const high = highs[i]
+        const low = lows[i]; const close = closes[i]
+        if ([open, high, low, close].some((v) => v == null || !Number.isFinite(v))) return null
+        return { time: tsSec, open: open!, high: high!, low: low!, close: close!, volume: volumes[i] ?? null }
+      })
+      .filter((c): c is Candle => c != null)
+      .filter((c) => dateKeyInMarketTimeZone(c.time * 1000) === dateKey)
+
+    return synthesizeDailyCandle(intradayCandles)
+  } catch {
+    return null
   }
 }
 
@@ -135,8 +185,8 @@ export async function GET(request: Request) {
   // For 1D charts on closed trades: cap period2 at end of exit calendar day + 5 extra days
   // so the post-trade trend is visible (was 2 days previously).
   if (interval === '1d' && exitTime && !Number.isNaN(exitMs)) {
-    const exitDayEndSec = Math.ceil(exitMs / 86_400_000) * 86400
-    period2 = Math.min(period2, exitDayEndSec + 5 * 86400)
+    const exitNextDayStartSec = nextUtcDayStartSec(exitMs)
+    period2 = Math.min(period2, exitNextDayStartSec + 5 * 86400)
   }
 
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&period1=${period1}&period2=${period2}&includePrePost=false`
@@ -180,6 +230,24 @@ export async function GET(request: Request) {
   // (e.g. one at midnight UTC and one at market open). Deduplicate by date.
   if (interval === '1d') {
     candles = deduplicateDailyCandles(candles)
+  }
+
+  if (interval === '1d' && !exitTime) {
+    const latestDateKey = dateKeyInMarketTimeZone(Date.now())
+    const entryDateKey = dateKeyInMarketTimeZone(entryMs)
+    const lastDateKey = candles.length > 0
+      ? dateKeyInMarketTimeZone(candles[candles.length - 1].time * 1000)
+      : null
+    const candidateDateKeys = Array.from(new Set([entryDateKey, latestDateKey]))
+      .filter((dateKey) => !lastDateKey || dateKey > lastDateKey)
+      .sort()
+
+    for (const dateKey of candidateDateKeys) {
+      const currentDailyCandle = await fetchIntradayDailyCandle(symbol, dateKey)
+      if (currentDailyCandle) {
+        candles = deduplicateDailyCandles([...candles, currentDailyCandle])
+      }
+    }
   }
 
   // Repair corrupt volume values (Yahoo sometimes returns placeholder values like 745).

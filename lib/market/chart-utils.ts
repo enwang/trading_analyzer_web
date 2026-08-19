@@ -7,6 +7,62 @@ export interface Candle {
   volume: number | null
 }
 
+const MARKET_TIME_ZONE = 'America/New_York'
+
+export function nextUtcDayStartSec(ms: number): number {
+  const day = 86_400_000
+  return Math.floor(ms / day + 1) * 86400
+}
+
+export function dateKeyInMarketTimeZone(ms: number): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: MARKET_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date(ms))
+
+  const year = parts.find((p) => p.type === 'year')?.value
+  const month = parts.find((p) => p.type === 'month')?.value
+  const day = parts.find((p) => p.type === 'day')?.value
+
+  if (!year || !month || !day) {
+    return new Date(ms).toISOString().slice(0, 10)
+  }
+
+  return `${year}-${month}-${day}`
+}
+
+export function synthesizeDailyCandle(candles: Candle[]): Candle | null {
+  if (candles.length === 0) return null
+
+  let high = Number.NEGATIVE_INFINITY
+  let low = Number.POSITIVE_INFINITY
+  let volume = 0
+  let hasVolume = false
+
+  for (const candle of candles) {
+    high = Math.max(high, candle.high)
+    low = Math.min(low, candle.low)
+    if (candle.volume != null) {
+      volume += candle.volume
+      hasVolume = true
+    }
+  }
+
+  const first = candles[0]
+  const last = candles[candles.length - 1]
+
+  return {
+    time: first.time,
+    open: first.open,
+    high,
+    low,
+    close: last.close,
+    volume: hasVolume ? volume : null,
+  }
+}
+
 /**
  * Yahoo Finance sometimes returns two entries for the same calendar day on 1D charts
  * (e.g. one at midnight UTC and one at market open UTC). Keep the candle with higher
@@ -17,7 +73,13 @@ export function deduplicateDailyCandles(candles: Candle[]): Candle[] {
   for (const c of candles) {
     const date = new Date(c.time * 1000).toISOString().slice(0, 10)
     const existing = byDate.get(date)
-    if (!existing || (c.volume ?? 0) > (existing.volume ?? 0)) byDate.set(date, c)
+    if (
+      !existing ||
+      (c.volume ?? 0) > (existing.volume ?? 0) ||
+      ((c.volume ?? 0) === (existing.volume ?? 0) && c.time > existing.time)
+    ) {
+      byDate.set(date, c)
+    }
   }
   return Array.from(byDate.values()).sort((a, b) => a.time - b.time)
 }
