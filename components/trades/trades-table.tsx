@@ -239,6 +239,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
   const viewParam = searchParams.get('view')
   const sortParam = searchParams.get('sort')
   const dirParam = searchParams.get('dir')
+  const symbolQueryParam = searchParams.get('q') ?? searchParams.get('symbol') ?? ''
   const initialFilter: OutcomeFilter =
     viewParam === 'win' || viewParam === 'loss' || viewParam === 'open' || viewParam === 'all' || viewParam === 'marked' || viewParam === 'lastweek'
       ? viewParam
@@ -252,7 +253,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
   const [isPending, startTransition] = useTransition()
   const [filter, setFilter] = useState<OutcomeFilter>(initialFilter)
   const [range, setRange] = useState<DateRangeKey>('All')
-  const [symbolSearch, setSymbolSearch] = useState(() => searchParams.get('symbol') ?? '')
+  const [symbolSearch, setSymbolSearch] = useState(() => symbolQueryParam)
 
   function selectRange(r: DateRangeKey) {
     setRange(r)
@@ -405,6 +406,10 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
     setSortKey(initialSortKey)
     setSortDir(initialSortDir)
   }, [initialSortKey, initialSortDir])
+
+  useEffect(() => {
+    setSymbolSearch(symbolQueryParam)
+  }, [symbolQueryParam])
 
   useEffect(() => {
     const restoreUrl = window.sessionStorage.getItem(TRADES_LAST_URL_STORAGE_KEY)
@@ -893,6 +898,20 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
     localStorage.setItem(FILTER_STORAGE_KEY, next)
   }
 
+  function setSymbolSearchAndUrl(next: string) {
+    const normalized = next.toUpperCase()
+    setSymbolSearch(normalized)
+
+    const params = new URLSearchParams(searchParams.toString())
+    if (normalized.trim()) {
+      params.set('q', normalized.trim())
+    } else {
+      params.delete('q')
+      params.delete('symbol')
+    }
+    router.replace(`${pathname}${params.toString() ? `?${params.toString()}` : ''}`, { scroll: false })
+  }
+
 
   async function saveTradeFields(id: string, draft: { setupTag: string; notes: string; initialRisk: string }) {
     setError(null)
@@ -1082,7 +1101,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={symbolSearch}
-              onChange={(e) => setSymbolSearch(e.target.value.toUpperCase())}
+              onChange={(e) => setSymbolSearchAndUrl(e.target.value)}
               placeholder="Symbol"
               className="h-8 pl-8 pr-8 uppercase"
               aria-label="Filter by symbol"
@@ -1090,7 +1109,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
             {symbolSearch && (
               <button
                 type="button"
-                onClick={() => setSymbolSearch('')}
+                onClick={() => setSymbolSearchAndUrl('')}
                 className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
                 aria-label="Clear symbol search"
               >

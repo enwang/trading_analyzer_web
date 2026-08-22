@@ -6,7 +6,7 @@ import { TradesTable } from '@/components/trades/trades-table'
 export default async function TradesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ date?: string; tz?: string; symbol?: string }>
+  searchParams: Promise<{ date?: string; tz?: string; symbol?: string; q?: string }>
 }) {
   const { date, tz, symbol } = await searchParams
   const safeDate = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null
