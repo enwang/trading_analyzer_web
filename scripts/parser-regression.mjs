@@ -110,7 +110,7 @@ if ((asmlOpen.shares ?? 0) !== 30) {
 
 const multiLotOpenCsv = `Open/CloseIndicator,Symbol,Quantity,Date/Time,Open Date/Time,Buy/Sell,T. Price,Basis
 O,AAOI,100,2026-03-01 09:30:00,,BUY,10,
-O,AAOI,50,2026-03-02 09:30:00,,BUY,12,
+O,AAOI,50,2026-03-02 09:30:00,,BUY,9,
 O,XYZ,10,2026-03-01 10:00:00,,BUY,20,
 C,XYZ,10,2026-03-03 10:00:00,2026-03-01 10:00:00,SELL,21,200
 `
@@ -125,8 +125,43 @@ if (aaoi[0].outcome !== 'open') {
 if ((aaoi[0].shares ?? 0) !== 150) {
   fail(`expected aggregated AAOI shares = 150, got ${aaoi[0].shares}`)
 }
-if (Math.abs((aaoi[0].entry_price ?? 0) - (1600 / 150)) > 1e-9) {
-  fail(`expected aggregated AAOI entry price = ${1600 / 150}, got ${aaoi[0].entry_price}`)
+if (Math.abs((aaoi[0].entry_price ?? 0) - (1450 / 150)) > 1e-9) {
+  fail(`expected aggregated AAOI entry price = ${1450 / 150}, got ${aaoi[0].entry_price}`)
+}
+
+const higherPriceAddonOpenCsv = `Open/CloseIndicator,Symbol,Quantity,Date/Time,Open Date/Time,Buy/Sell,T. Price,Basis
+O,AAOI,100,2026-03-01 09:30:00,,BUY,10,
+O,AAOI,50,2026-03-02 09:30:00,,BUY,12,
+O,XYZ,10,2026-03-01 10:00:00,,BUY,20,
+C,XYZ,10,2026-03-03 10:00:00,2026-03-01 10:00:00,SELL,21,200
+`
+const higherPriceAddonOpenTrades = parseFlexCsv(higherPriceAddonOpenCsv)
+const higherPriceAaoiRows = higherPriceAddonOpenTrades.filter((t) => t.symbol === 'AAOI')
+if (higherPriceAaoiRows.length !== 2) {
+  fail(`expected higher-price AAOI add-on to stay separate, got ${JSON.stringify(higherPriceAaoiRows)}`)
+}
+if (!higherPriceAaoiRows.some((t) => t.entry_price === 10 && t.shares === 100 && t.outcome === 'open')) {
+  fail(`expected original AAOI open 100 @ 10, got ${JSON.stringify(higherPriceAaoiRows)}`)
+}
+if (!higherPriceAaoiRows.some((t) => t.entry_price === 12 && t.shares === 50 && t.outcome === 'open')) {
+  fail(`expected higher-price AAOI add-on open 50 @ 12, got ${JSON.stringify(higherPriceAaoiRows)}`)
+}
+
+const higherPriceSameEntryBurstCsv = `Open/CloseIndicator,Symbol,Quantity,Date/Time,Open Date/Time,Buy/Sell,T. Price,Basis
+O,RUN,450,2026-02-09 12:51:53,,BUY,20.13,
+O,RUN,206,2026-02-09 12:52:08,,BUY,20.1448,
+O,RUN,100,2026-02-09 12:52:26,,BUY,20.145,
+O,RUN,244,2026-02-09 12:52:44,,BUY,20.155,
+O,XYZ,10,2026-02-09 10:00:00,,BUY,20,
+C,XYZ,10,2026-02-10 10:00:00,2026-02-09 10:00:00,SELL,21,200
+`
+const higherPriceSameEntryBurstTrades = parseFlexCsv(higherPriceSameEntryBurstCsv)
+const runRows = higherPriceSameEntryBurstTrades.filter((t) => t.symbol === 'RUN')
+if (runRows.length !== 1) {
+  fail(`expected higher-price same-entry burst to aggregate, got ${JSON.stringify(runRows)}`)
+}
+if ((runRows[0].shares ?? 0) !== 1000) {
+  fail(`expected aggregated RUN shares = 1000, got ${runRows[0].shares}`)
 }
 
 const afterSellAddonCsv = `Open/CloseIndicator,Symbol,Quantity,Date/Time,Open Date/Time,Buy/Sell,T. Price,Basis
@@ -166,6 +201,31 @@ if (!armSameDayRows.some((t) => t.entry_price === 100 && t.shares === 50 && t.pn
 }
 if (!armSameDayRows.some((t) => t.entry_price === 120 && t.shares === 100 && t.pnl === null)) {
   fail(`expected same-day ARM add-on to be separate open 100 @ 120 trade with null pnl, got ${JSON.stringify(armSameDayRows)}`)
+}
+
+const fullyClosedAddonBeforeAnyCoreSellCsv = `Open/CloseIndicator,Symbol,Quantity,Date/Time,Open Date/Time,Buy/Sell,T. Price,Basis
+O,PLTR,600,2026-08-06 12:57:58,,BUY,155.20,
+O,PLTR,300,2026-08-21 14:19:31,,BUY,178.82,
+C,PLTR,100,2026-08-24 14:47:42,,SELL,179.30,17882
+C,PLTR,200,2026-08-25 15:35:18,,SELL,179.70,35764
+O,XYZ,10,2026-08-20 10:00:00,,BUY,20,
+C,XYZ,10,2026-08-21 10:00:00,2026-08-20 10:00:00,SELL,21,200
+`
+const fullyClosedAddonTrades = parseFlexCsv(fullyClosedAddonBeforeAnyCoreSellCsv)
+const pltrRows = fullyClosedAddonTrades.filter((t) => t.symbol === 'PLTR')
+if (pltrRows.length !== 2) {
+  fail(`expected PLTR core open + closed add-on rows, got ${JSON.stringify(pltrRows)}`)
+}
+const pltrOpenCore = pltrRows.find((t) => t.outcome === 'open')
+if (!pltrOpenCore || pltrOpenCore.entry_price !== 155.2 || pltrOpenCore.shares !== 600 || pltrOpenCore.pnl !== null) {
+  fail(`expected original PLTR core lot to remain open as 600 @ 155.2, got ${JSON.stringify(pltrOpenCore)}`)
+}
+const pltrClosedAddon = pltrRows.find((t) => t.exit_time != null)
+if (!pltrClosedAddon || pltrClosedAddon.entry_price !== 178.82 || pltrClosedAddon.shares !== 300) {
+  fail(`expected PLTR add-on to close as separate 300 @ 178.82 trade, got ${JSON.stringify(pltrClosedAddon)}`)
+}
+if (Math.abs((pltrClosedAddon.pnl ?? 0) - 224) > 1e-9) {
+  fail(`expected PLTR add-on pnl = 224, got ${pltrClosedAddon.pnl}`)
 }
 
 const multiSellOpenCsv = `Open/CloseIndicator,Symbol,Quantity,Date/Time,Open Date/Time,Buy/Sell,T. Price,Basis

@@ -503,7 +503,8 @@ function parseTradesCsv(csvStr: string, openPositionSnapshots: OpenPositionSnaps
   }>()
   const openGroupIdsByRow = new Map<Record<string, string>, string>()
 
-  type SegmentState = { id: number; hasClose: boolean }
+  const ADD_ON_SPLIT_MIN_GAP_MS = 5 * 60_000
+  type SegmentState = { id: number; hasClose: boolean; basePrice: number | null; baseIso: string | null }
   const segmentStateBySymbol = new Map<string, SegmentState>()
   const chronologicalRows = raw
     .map((row, index) => {
@@ -513,7 +514,8 @@ function parseTradesCsv(csvStr: string, openPositionSnapshots: OpenPositionSnaps
       const isC = oci.includes('C')
       const dtStr = col(row, 'date/time', 'datetime', 'tradedatetime', 'open date/time', 'opendatetime', 'dateandhour', 'date', 'tradedate')
       const iso = dtStr ? toUtcIso(parseIbkrDatetime(dtStr)) : null
-      return { row, index, sym, isO, isC, iso }
+      const price = parseNum(col(row, 't. price', 'tradeprice', 'price'))
+      return { row, index, sym, isO, isC, iso, price }
     })
     .filter((event) => event.sym && event.iso && (event.isO || event.isC))
     .sort((a, b) => {
@@ -524,13 +526,30 @@ function parseTradesCsv(csvStr: string, openPositionSnapshots: OpenPositionSnaps
   for (const event of chronologicalRows) {
     const state = segmentStateBySymbol.get(event.sym)
     if (event.isO) {
+      const highPriceAddOn =
+        state != null &&
+        state.basePrice != null &&
+        event.price != null &&
+        event.price > state.basePrice &&
+        event.iso != null &&
+        state.baseIso != null &&
+        new Date(event.iso).getTime() - new Date(state.baseIso).getTime() > ADD_ON_SPLIT_MIN_GAP_MS
       let nextState = state
-      if (!nextState || nextState.hasClose) {
+      if (
+        !nextState ||
+        nextState.hasClose ||
+        highPriceAddOn
+      ) {
         nextState = {
           id: (state?.id ?? 0) + 1,
           hasClose: false,
+          basePrice: event.price ?? null,
+          baseIso: event.iso ?? null,
         }
         segmentStateBySymbol.set(event.sym, nextState)
+      } else if (nextState.basePrice == null && event.price != null) {
+        nextState.basePrice = event.price
+        nextState.baseIso = event.iso ?? nextState.baseIso
       }
       openGroupIdsByRow.set(event.row, `${event.sym}|seg:${nextState.id}`)
     } else if (event.isC && state) {
