@@ -40,6 +40,30 @@ const AGE_15M = 60 * 86_400_000
 const AGE_30M = 60 * 86_400_000
 const AGE_1H  = 730 * 86_400_000
 
+function requestedIntervalAgeLimitMs(timeframe: string): number | null {
+  if (timeframe === '1m') return AGE_1M
+  if (timeframe === '5m') return AGE_5M
+  if (timeframe === '15m') return AGE_15M
+  if (timeframe === '30m') return AGE_30M
+  if (timeframe === '1h') return AGE_1H
+  return null
+}
+
+function clampPeriod1ForRequestedInterval(period1: number, requiredStartMs: number, timeframe: string): number {
+  const limitMs = requestedIntervalAgeLimitMs(timeframe)
+  if (limitMs == null) return period1
+
+  const earliestMs = Date.now() - limitMs
+  if (period1 * 1000 >= earliestMs) return period1
+
+  // If the trade/range itself is too old, keep period1 unchanged so pickInterval
+  // can choose the coarser Yahoo interval that still covers the trade. If only
+  // the extra pre-entry context is too old, trim that context and preserve the
+  // explicitly requested intraday timeframe.
+  if (requiredStartMs < earliestMs) return period1
+  return Math.floor(earliestMs / 1000)
+}
+
 function pickInterval(spanMs: number, fromMs: number, timeframe: string): string {
   const ageMs = Date.now() - fromMs
   const day = 86_400_000
@@ -145,6 +169,7 @@ export async function GET(request: Request) {
   let entryMs: number
   let exitMs: number
   let spanMs: number
+  let requiredStartMs: number
   let lookbackMs = preEntryLookbackMs(timeframe)
 
   if (p1Param && p2Param) {
@@ -154,6 +179,7 @@ export async function GET(request: Request) {
     entryMs = (Number(p1Param) + Number(p2Param)) / 2 * 1000 // midpoint (used only for interval picking)
     exitMs  = entryMs
     spanMs  = (Number(p2Param) - Number(p1Param)) * 1000
+    requiredStartMs = period1 * 1000
     lookbackMs = Math.max(lookbackMs, Math.floor(spanMs * 0.5))
   } else {
     if (!entryTime) {
@@ -169,6 +195,7 @@ export async function GET(request: Request) {
     const fromMs  = Math.min(entryMs, exitMs)
     const toMs    = Math.max(entryMs, exitMs)
     spanMs        = Math.max(toMs - fromMs, 30 * 60_000)
+    requiredStartMs = fromMs
     const padding = Math.max(spanMs * 0.5, 4 * 60 * 60_000)
     // Post-exit context: always fetch ~5 calendar days past the exit so the user can
     // see the following trend (not just up to a few hours after exit).
@@ -180,6 +207,7 @@ export async function GET(request: Request) {
     ) / 1000)
   }
 
+  period1 = clampPeriod1ForRequestedInterval(period1, requiredStartMs, timeframe)
   const interval = pickInterval(spanMs, period1 * 1000, timeframe)
 
   // For 1D charts on closed trades: cap period2 at end of exit calendar day + 5 extra days

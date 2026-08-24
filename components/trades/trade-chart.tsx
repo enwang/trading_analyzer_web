@@ -53,6 +53,7 @@ interface ChartMeta {
   entryTimeSec:  number | null
   exitTimeSec:   number | null
   visibleRange:  { from: number; to: number } | null
+  interval:      string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -75,6 +76,13 @@ const CHART_STYLE_STORAGE_KEY = 'trade-chart-style-v1'
 // ---------------------------------------------------------------------------
 function getDefaultTimeframe(_entryTime: string | null, _exitTime: string | null): Timeframe {
   return '1D'
+}
+
+function intervalLabel(interval: string | null | undefined) {
+  if (!interval) return null
+  if (interval === '60m') return '1h'
+  if (interval === '1wk') return 'W'
+  return interval
 }
 
 function calcEMA(candles: Candle[], period: number): { time: number; value: number }[] {
@@ -244,6 +252,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const data = await res.json() as {
           candles: Candle[]
+          interval?: string
           entryTimeSec: number | null
           exitTimeSec: number | null
           visibleRange: { from: number; to: number } | null
@@ -259,6 +268,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
           entryTimeSec: data.entryTimeSec ?? null,
           exitTimeSec:  data.exitTimeSec  ?? null,
           visibleRange: data.visibleRange  ?? null,
+          interval: data.interval ?? null,
         })
       } catch (e) {
         if (!cancelled) setError(`Failed to load chart data: ${e instanceof Error ? e.message : String(e)}`)
@@ -910,7 +920,15 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
               </button>
             ))}
           </div>
-          <div className="text-[#7a8190]">{userTimeZone}</div>
+          <div className="text-[#7a8190]">
+            {(() => {
+              const actual = intervalLabel(meta?.interval)
+              const requested = intervalLabel(TF_TO_BACKEND[timeframe])
+              return actual && requested && actual !== requested
+                ? `Showing ${actual} · ${userTimeZone}`
+                : userTimeZone
+            })()}
+          </div>
         </div>
       </div>
     </div>
