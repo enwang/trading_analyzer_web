@@ -9,12 +9,7 @@ import { Input } from '@/components/ui/input'
 import { LocalTime } from '@/components/ui/local-time'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { TradeAiAnalyzer } from '@/components/trades/trade-ai-analyzer'
-import {
-  DEFAULT_INITIAL_RISK_AMOUNT,
-  initialRiskFromStopLoss,
-  suggestedStopLossFromRisk,
-  usesStopLossFirstSizing,
-} from '@/lib/market/stop-loss'
+import { DEFAULT_INITIAL_RISK_AMOUNT, suggestedStopLossFromRisk } from '@/lib/market/stop-loss'
 import { riskSharesForTrade } from '@/lib/trades'
 import type { ExecutionLeg } from '@/types/trade'
 
@@ -183,12 +178,8 @@ export function TradeDetailTabs(props: Props) {
     () => riskSharesForTrade({ side, shares, exitTime, outcome: null, executionLegs }),
     [side, shares, exitTime, executionLegs]
   )
-  const stopLossFirst = usesStopLossFirstSizing(entryTime)
   const [initialRiskInput, setInitialRiskInput] = useState(
-    () => (initialRiskAmount ?? (stopLossFirst ? null : DEFAULT_INITIAL_RISK_AMOUNT))?.toFixed(2) ?? ''
-  )
-  const [stopLossInput, setStopLossInput] = useState(
-    () => initialStopLoss?.toFixed(2) ?? ''
+    () => (initialRiskAmount ?? DEFAULT_INITIAL_RISK_AMOUNT).toFixed(2)
   )
   const [savedR, setSavedR] = useState<number | null>(initialRMultiple)
   const [riskError, setRiskError] = useState<string | null>(null)
@@ -202,19 +193,8 @@ export function TradeDetailTabs(props: Props) {
   }, [initialRiskInput])
 
   const stopLoss = useMemo(
-    () => {
-      if (stopLossFirst) {
-        const n = Number(stopLossInput.trim())
-        return Number.isFinite(n) && n > 0 ? n : null
-      }
-      return parsedInitialRisk == null ? null : suggestedStopLossFromRisk(side, entryPrice, riskShares, parsedInitialRisk)
-    },
-    [side, entryPrice, riskShares, parsedInitialRisk, stopLossFirst, stopLossInput]
-  )
-
-  const calculatedInitialRisk = useMemo(
-    () => stopLoss == null ? null : initialRiskFromStopLoss(side, entryPrice, riskShares, stopLoss),
-    [side, entryPrice, riskShares, stopLoss]
+    () => (parsedInitialRisk == null ? null : suggestedStopLossFromRisk(side, entryPrice, riskShares, parsedInitialRisk)),
+    [side, entryPrice, riskShares, parsedInitialRisk]
   )
 
   const initialRiskPct = useMemo(() => {
@@ -254,9 +234,9 @@ export function TradeDetailTabs(props: Props) {
     if (stopLoss == null) return
     const currentKey = JSON.stringify({ stopLoss, rMultiple: liveR })
     if (currentKey === lastSavedKey) return
-    const timer = setTimeout(() => { void saveRisk(stopLoss, liveR, stopLossFirst ? calculatedInitialRisk : parsedInitialRisk) }, 700)
+    const timer = setTimeout(() => { void saveRisk(stopLoss, liveR, parsedInitialRisk) }, 700)
     return () => clearTimeout(timer)
-  }, [stopLoss, liveR, lastSavedKey, parsedInitialRisk, stopLossFirst, calculatedInitialRisk])
+  }, [stopLoss, liveR, lastSavedKey, parsedInitialRisk])
 
   // ── MFE / MAE state ───────────────────────────────────────────────────────
   const [mfe, setMfe] = useState<number | null>(initialMfe)
@@ -303,9 +283,7 @@ export function TradeDetailTabs(props: Props) {
 
   useEffect(() => {
     if (exitTime != null) return
-    const riskAmount = stopLossFirst ? calculatedInitialRisk : parsedInitialRisk
-    if (!side || entryPrice == null || riskAmount == null || riskAmount <= 0) return
-    const liveRiskAmount = riskAmount
+    if (!side || entryPrice == null || parsedInitialRisk == null || parsedInitialRisk <= 0) return
     const absShares = Math.abs(shares ?? 0)
     if (absShares === 0) return
     let canceled = false
@@ -316,12 +294,12 @@ export function TradeDetailTabs(props: Props) {
       const price = json.quotes?.[symbol.trim().toUpperCase()] ?? null
       if (price == null || canceled) return
       const unrealized = side === 'long' ? (price - entryPrice!) * absShares : (entryPrice! - price) * absShares
-      const r = ((pnl ?? 0) + unrealized) / liveRiskAmount
+      const r = ((pnl ?? 0) + unrealized) / parsedInitialRisk!
       if (Number.isFinite(r)) setOpenTradeR(r)
     }
     void fetchR()
     return () => { canceled = true }
-  }, [exitTime, symbol, side, entryPrice, shares, pnl, parsedInitialRisk, stopLossFirst, calculatedInitialRisk])
+  }, [exitTime, symbol, side, entryPrice, shares, pnl, parsedInitialRisk])
 
   // ── derived display values ────────────────────────────────────────────────
   const displayR = exitTime == null
@@ -371,44 +349,19 @@ export function TradeDetailTabs(props: Props) {
             <SectionTitle>Risk</SectionTitle>
             <div className="rounded-md border px-3 py-2">
               <div className="mb-2 flex items-center gap-2">
-                <span className="shrink-0 text-xs text-muted-foreground">
-                  {stopLossFirst ? 'Stop Loss' : 'Initial Risk'}
-                </span>
-                {stopLossFirst ? (
-                  <Input
-                    type="number"
-                    step="0.01"
-                    value={stopLossInput}
-                    onChange={(e) => setStopLossInput(e.target.value)}
-                    className="h-7 w-24 text-xs"
-                  />
-                ) : (
-                  <Input
-                    type="number"
-                    step="0.01"
-                    value={initialRiskInput}
-                    onChange={(e) => setInitialRiskInput(e.target.value)}
-                    className="h-7 w-24 text-xs"
-                  />
-                )}
+                <span className="shrink-0 text-xs text-muted-foreground">Initial Risk</span>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={initialRiskInput}
+                  onChange={(e) => setInitialRiskInput(e.target.value)}
+                  className="h-7 w-24 text-xs"
+                />
                 <span className="ml-auto text-xs text-muted-foreground">
                   {initialRiskPct != null ? `${initialRiskPct.toFixed(2)}%` : '—'}
                 </span>
               </div>
               {riskError && <div className="mb-1 text-xs text-red-700">{riskError}</div>}
-
-              {stopLossFirst && (
-                <div className="border-t py-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">Initial Risk</span>
-                    <span className="text-xs font-medium">{fmtMoney(calculatedInitialRisk)}</span>
-                  </div>
-                  <div className="mt-1 flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">Shares</span>
-                    <span className="text-xs font-medium">{riskShares != null ? Math.abs(riskShares).toLocaleString('en-US') : '—'}</span>
-                  </div>
-                </div>
-              )}
 
               <div className="border-t pt-2">
                 <div className="flex items-center justify-between">

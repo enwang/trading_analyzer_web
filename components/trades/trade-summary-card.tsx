@@ -8,9 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import {
   DEFAULT_INITIAL_RISK_AMOUNT,
-  initialRiskFromStopLoss,
   suggestedStopLossFromRisk,
-  usesStopLossFirstSizing,
 } from '@/lib/market/stop-loss'
 import { riskSharesForTrade } from '@/lib/trades'
 import type { ExecutionLeg } from '@/types/trade'
@@ -139,12 +137,8 @@ export function TradeSummaryCard({
       }),
     [side, shares, exitTime, executionLegs]
   )
-  const stopLossFirst = usesStopLossFirstSizing(entryTime)
   const [initialRiskInput, setInitialRiskInput] = useState(
-    () => (initialRiskAmount ?? (stopLossFirst ? null : DEFAULT_INITIAL_RISK_AMOUNT))?.toFixed(2) ?? ''
-  )
-  const [stopLossInput, setStopLossInput] = useState(
-    () => initialStopLoss?.toFixed(2) ?? ''
+    () => (initialRiskAmount ?? DEFAULT_INITIAL_RISK_AMOUNT).toFixed(2)
   )
   const [savedR, setSavedR] = useState<number | null>(initialRMultiple)
   const [error, setError] = useState<string | null>(null)
@@ -215,19 +209,9 @@ export function TradeSummaryCard({
   }, [initialRiskInput])
 
   const stopLoss = useMemo(() => {
-    if (stopLossFirst) {
-      if (stopLossInput.trim() === '') return null
-      const n = Number(stopLossInput)
-      return Number.isFinite(n) && n > 0 ? n : null
-    }
     if (parsedInitialRisk == null) return null
     return suggestedStopLossFromRisk(side, entryPrice, riskShares, parsedInitialRisk)
-  }, [side, entryPrice, riskShares, parsedInitialRisk, stopLossFirst, stopLossInput])
-
-  const calculatedInitialRisk = useMemo(
-    () => stopLoss == null ? null : initialRiskFromStopLoss(side, entryPrice, riskShares, stopLoss),
-    [side, entryPrice, riskShares, stopLoss]
-  )
+  }, [side, entryPrice, riskShares, parsedInitialRisk])
 
   const riskPerShare = useMemo(() => {
     if (!side || entryPrice == null || stopLoss == null) return null
@@ -276,9 +260,7 @@ export function TradeSummaryCard({
   // the same formula as the trades table (totalCurrentPnl / initialRisk).
   useEffect(() => {
     if (exitTime != null) return
-    const riskAmount = stopLossFirst ? calculatedInitialRisk : parsedInitialRisk
-    if (!side || entryPrice == null || riskAmount == null || riskAmount <= 0) return
-    const liveRiskAmount = riskAmount
+    if (!side || entryPrice == null || parsedInitialRisk == null || parsedInitialRisk <= 0) return
     const absShares = Math.abs(shares ?? 0)
     if (absShares === 0) return
 
@@ -292,12 +274,12 @@ export function TradeSummaryCard({
       const unrealized = side === 'long'
         ? (price - entryPrice!) * absShares
         : (entryPrice! - price) * absShares
-      const r = ((pnl ?? 0) + unrealized) / liveRiskAmount
+      const r = ((pnl ?? 0) + unrealized) / parsedInitialRisk!
       if (Number.isFinite(r)) setOpenTradeR(r)
     }
     void fetchR()
     return () => { canceled = true }
-  }, [exitTime, symbol, side, entryPrice, shares, pnl, parsedInitialRisk, stopLossFirst, calculatedInitialRisk])
+  }, [exitTime, symbol, side, entryPrice, shares, pnl, parsedInitialRisk])
 
   useEffect(() => {
     if (stopLoss == null) return
@@ -305,11 +287,11 @@ export function TradeSummaryCard({
     if (currentKey === lastSavedKey) return
 
     const timer = setTimeout(() => {
-      void saveRisk(stopLoss, liveR, stopLossFirst ? calculatedInitialRisk : parsedInitialRisk)
+      void saveRisk(stopLoss, liveR, parsedInitialRisk)
     }, 700)
 
     return () => clearTimeout(timer)
-  }, [stopLoss, liveR, lastSavedKey, parsedInitialRisk, stopLossFirst, calculatedInitialRisk])
+  }, [stopLoss, liveR, lastSavedKey, parsedInitialRisk])
 
   return (
     <Card>
@@ -334,35 +316,21 @@ export function TradeSummaryCard({
 
         <div className="border-b py-2">
           <div className="mb-2 flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">{stopLossFirst ? 'Stop Loss' : 'Initial Risk'}</span>
+            <span className="text-sm text-muted-foreground">Initial Risk</span>
           </div>
           <div className="flex items-center gap-2">
-            {stopLossFirst ? (
-              <Input
-                type="number"
-                step="0.01"
-                value={stopLossInput}
-                onChange={(e) => setStopLossInput(e.target.value)}
-                placeholder="0.00"
-                className="h-8"
-              />
-            ) : (
-              <Input
-                type="number"
-                step="0.01"
-                value={initialRiskInput}
-                onChange={(e) => setInitialRiskInput(e.target.value)}
-                placeholder="2000.00"
-                className="h-8"
-              />
-            )}
+            <Input
+              type="number"
+              step="0.01"
+              value={initialRiskInput}
+              onChange={(e) => setInitialRiskInput(e.target.value)}
+              placeholder="2000.00"
+              className="h-8"
+            />
           </div>
           {error && <div className="mt-2 text-xs text-red-700">{error}</div>}
         </div>
 
-        {stopLossFirst && (
-          <Row label="Initial Risk" value={fmtMoney(calculatedInitialRisk)} />
-        )}
         <Row label="Initial Risk %" value={initialRiskPct != null ? `${initialRiskPct.toFixed(2)}%` : '—'} />
         <Row label="R Multiple" value={
           exitTime == null

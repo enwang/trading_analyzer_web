@@ -43,18 +43,12 @@ export interface StopLossEnrichmentRow {
 
 export const DEFAULT_INITIAL_RISK_AMOUNT = 2000
 export const DEFAULT_ADDON_RISK_AMOUNT = 1000
-export const STOP_LOSS_FIRST_SIZING_START_DATE = '2026-08-31'
 
 // Returns the risk dollar amount for a given trade.
 // Add-on lots (later open entry for the same symbol) use a smaller risk.
 // Future: add date-based tiers here when needed.
 export function riskAmountForTrade(isAddon: boolean): number {
   return isAddon ? DEFAULT_ADDON_RISK_AMOUNT : DEFAULT_INITIAL_RISK_AMOUNT
-}
-
-export function usesStopLossFirstSizing(entryTime: string | null | undefined): boolean {
-  if (!entryTime) return false
-  return formatDateInTimeZone(entryTime, 'America/New_York') >= STOP_LOSS_FIRST_SIZING_START_DATE
 }
 
 function round2(n: number) {
@@ -224,7 +218,6 @@ export async function enrichOpenTradesWithStopLosses<T extends StopLossEnrichmen
       if (row.exit_time != null) return row
       if (!row.side) return row
       if (row.stop_loss_locked) return row  // preserve manually locked stop_loss
-      if (usesStopLossFirstSizing(row.entry_time)) return row
       const earliestOpen = earliestEntryBySymbol.get(row.symbol) ?? ''
       const lastClosed = row.symbol ? mostRecentClosedExitBySymbol.get(row.symbol) : undefined
       // Only block add-on if the loss closed AFTER the earliest open entry — an old loss from months
