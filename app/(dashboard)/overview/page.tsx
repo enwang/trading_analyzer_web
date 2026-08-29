@@ -10,7 +10,11 @@ async function fetchTickerReturns(symbol: string, startDate: string, endDate: st
     const p2 = Math.floor(new Date(endDate + 'T23:59:59Z').getTime() / 1000) + 86400
     const res = await fetch(
       `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?period1=${p1}&period2=${p2}&interval=1d`,
-      { next: { revalidate: 3600 }, headers: { 'User-Agent': 'Mozilla/5.0' } }
+      {
+        next: { revalidate: 3600 },
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+        signal: AbortSignal.timeout(2500),
+      }
     )
     if (!res.ok) return []
     const json = await res.json()
