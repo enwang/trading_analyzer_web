@@ -40,7 +40,6 @@ import {
   suggestedStopLossFromRisk,
 } from '@/lib/market/stop-loss'
 import { createClient } from '@/lib/supabase/client'
-import { SpellCheckTextarea } from '@/components/ui/spell-check-textarea'
 import { OverviewSyncButton } from '@/components/overview/overview-sync-button'
 
 type OutcomeFilter = 'all' | 'win' | 'loss' | 'open' | 'marked' | 'lastweek'
@@ -1387,13 +1386,14 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
                   return (
                     <TableCell key={col}>
                       <div className="group relative">
-                        <SpellCheckTextarea
+                        <textarea
                           className="h-8 w-[160px] resize-none overflow-hidden rounded-md border px-2 py-1 text-xs leading-tight focus:h-20 focus:overflow-y-auto"
                           value={drafts[t.id]?.notes ?? t.notes ?? ''}
-                          onChange={(v) => updateDraft(t.id, 'notes', v)}
+                          onChange={(e) => updateDraft(t.id, 'notes', e.target.value)}
                           placeholder="Add notes"
                           title={drafts[t.id]?.notes ?? t.notes ?? ''}
                           rows={1}
+                          spellCheck={false}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter' && (e.shiftKey || e.altKey)) {
                               e.preventDefault()
