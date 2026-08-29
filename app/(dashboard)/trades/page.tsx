@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { redirect } from 'next/navigation'
+import { getAuthenticatedUserId } from '@/lib/auth/user'
 import { rowToTrade } from '@/types/trade'
 import { normalizeTradesForDisplay } from '@/lib/trades'
 import { TradesTable } from '@/components/trades/trades-table'
@@ -15,11 +15,7 @@ export default async function TradesPage({
   const safeTz = tz && /^[A-Za-z_]+\/[A-Za-z_]+(?:\/[A-Za-z_]+)?$/.test(tz) ? tz : null
   const safeSymbol = symbol && /^[A-Za-z0-9.^-]{1,10}$/.test(symbol) ? symbol.toUpperCase() : null
   const supabase = await createClient()
-  const {
-    data: { session },
-  } = await supabase.auth.getSession()
-  const userId = session?.user.id
-  if (!userId) redirect('/login')
+  const userId = await getAuthenticatedUserId()
   console.log(`[trades/page] auth=${Date.now() - startedAt}ms`)
 
   const queryStartedAt = Date.now()

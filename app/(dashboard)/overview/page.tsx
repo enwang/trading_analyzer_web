@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { redirect } from 'next/navigation'
+import { getAuthenticatedUserId } from '@/lib/auth/user'
 import { rowToTrade } from '@/types/trade'
 import { normalizeTradesForDisplay } from '@/lib/trades'
 import { OverviewSyncButton } from '@/components/overview/overview-sync-button'
@@ -43,9 +43,7 @@ async function fetchTickerReturns(symbol: string, startDate: string, endDate: st
 
 export default async function OverviewPage() {
   const supabase = await createClient()
-  const { data: { session } } = await supabase.auth.getSession()
-  const userId = session?.user.id
-  if (!userId) redirect('/login')
+  const userId = await getAuthenticatedUserId()
 
   const [{ data: rows }, { data: navRows }, { data: navChangeRows }, { data: cashTxRows }] = await Promise.all([
     supabase.from('trades').select('*').eq('user_id', userId).order('entry_time', { ascending: true }),

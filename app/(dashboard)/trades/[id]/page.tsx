@@ -1,6 +1,7 @@
 import { notFound, redirect } from 'next/navigation'
 
 import { createClient } from '@/lib/supabase/server'
+import { getAuthenticatedUserId } from '@/lib/auth/user'
 import { rowToTrade } from '@/types/trade'
 import { Badge } from '@/components/ui/badge'
 import { BackToTradesButton } from '@/components/trades/back-to-trades-button'
@@ -132,11 +133,7 @@ export default async function TradeDetailsPage({
     ? '/overview'
     : (backParams.toString() ? `/trades?${backParams.toString()}` : '/trades')
   const supabase = await createClient()
-  const {
-    data: { session },
-  } = await supabase.auth.getSession()
-  const userId = session?.user.id
-  if (!userId) redirect('/login')
+  const userId = await getAuthenticatedUserId()
 
   const { data: row } = await supabase
     .from('trades')

@@ -3,7 +3,9 @@ import { NextResponse, type NextRequest } from 'next/server'
 
 export async function proxy(request: NextRequest) {
   const startedAt = Date.now()
-  let supabaseResponse = NextResponse.next({ request })
+  const requestHeaders = new Headers(request.headers)
+  requestHeaders.delete('x-trading-user-id')
+  let supabaseResponse = NextResponse.next({ request: { headers: requestHeaders } })
   const { pathname } = request.nextUrl
 
   const supabase = createServerClient(
@@ -16,7 +18,7 @@ export async function proxy(request: NextRequest) {
         },
         setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
-          supabaseResponse = NextResponse.next({ request })
+          supabaseResponse = NextResponse.next({ request: { headers: requestHeaders } })
           cookiesToSet.forEach(({ name, value, options }) =>
             supabaseResponse.cookies.set(name, value, options)
           )
@@ -27,6 +29,12 @@ export async function proxy(request: NextRequest) {
 
   // Refresh session (important for Server Components)
   const { data: { user } } = await supabase.auth.getUser()
+  if (user) {
+    requestHeaders.set('x-trading-user-id', user.id)
+    const responseWithUser = NextResponse.next({ request: { headers: requestHeaders } })
+    supabaseResponse.cookies.getAll().forEach((cookie) => responseWithUser.cookies.set(cookie))
+    supabaseResponse = responseWithUser
+  }
   if (pathname.startsWith('/trades') || pathname.startsWith('/overview')) {
     console.log(`[proxy] ${pathname} auth=${Date.now() - startedAt}ms user=${user ? 'yes' : 'no'}`)
   }

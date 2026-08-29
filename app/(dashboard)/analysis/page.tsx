@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { redirect } from 'next/navigation'
+import { getAuthenticatedUserId } from '@/lib/auth/user'
 import { rowToTrade } from '@/types/trade'
 import { computeSummary } from '@/lib/metrics'
 import { normalizeTradesForDisplay } from '@/lib/trades'
@@ -14,11 +14,7 @@ import {
 
 export default async function AnalysisPage() {
   const supabase = await createClient()
-  const {
-    data: { session },
-  } = await supabase.auth.getSession()
-  const userId = session?.user.id
-  if (!userId) redirect('/login')
+  const userId = await getAuthenticatedUserId()
 
   const { data: rows } = await supabase
     .from('trades')
