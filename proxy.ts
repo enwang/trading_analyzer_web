@@ -2,7 +2,6 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 export async function proxy(request: NextRequest) {
-  const startedAt = Date.now()
   const requestHeaders = new Headers(request.headers)
   requestHeaders.delete('x-trading-user-id')
   let supabaseResponse = NextResponse.next({ request: { headers: requestHeaders } })
@@ -35,10 +34,6 @@ export async function proxy(request: NextRequest) {
     supabaseResponse.cookies.getAll().forEach((cookie) => responseWithUser.cookies.set(cookie))
     supabaseResponse = responseWithUser
   }
-  if (pathname.startsWith('/trades') || pathname.startsWith('/overview')) {
-    console.log(`[proxy] ${pathname} auth=${Date.now() - startedAt}ms user=${user ? 'yes' : 'no'}`)
-  }
-
   const protectedRoutes = ['/overview', '/trades', '/winners', '/losers', '/analysis', '/import']
 
   // Redirect unauthenticated users away from dashboard routes
