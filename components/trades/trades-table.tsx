@@ -39,7 +39,6 @@ import {
   riskAmountForTrade,
   suggestedStopLossFromRisk,
 } from '@/lib/market/stop-loss'
-import { createClient } from '@/lib/supabase/client'
 import { OverviewSyncButton } from '@/components/overview/overview-sync-button'
 
 type OutcomeFilter = 'all' | 'win' | 'loss' | 'open' | 'marked' | 'lastweek'
@@ -234,7 +233,6 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const searchParamsString = searchParams.toString()
-  const supabase = useMemo(() => createClient(), [])
   const viewParam = searchParams.get('view')
   const sortParam = searchParams.get('sort')
   const dirParam = searchParams.get('dir')
@@ -318,7 +316,6 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
   const [sortDir, setSortDir] = useState<SortDir>(initialSortDir)
   const [columnOrder, setColumnOrder] = useState<ColumnId[]>(DEFAULT_COLUMN_ORDER)
   const [columnOrderHydrated, setColumnOrderHydrated] = useState(false)
-  const [columnOrderUserReady, setColumnOrderUserReady] = useState(false)
   const [draggingColumn, setDraggingColumn] = useState<ColumnId | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [liveQuotes, setLiveQuotes] = useState<Record<string, number | null>>({})
@@ -327,8 +324,6 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
   )
   const savedRef = useRef<Record<string, { setupTag: string; notes: string; initialRisk: string }>>(initialDrafts)
   const draftsRef = useRef<Record<string, { setupTag: string; notes: string; initialRisk: string }>>({})
-  const columnOrderDbLoadedRef = useRef(false)
-  const columnOrderDbSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const timersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const savedStopLossRef = useRef<Record<string, string>>(
     Object.fromEntries(trades.map((t) => [t.id, t.stopLoss?.toFixed(2) ?? '']))
@@ -460,104 +455,9 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
   }, [])
 
   useEffect(() => {
-    let cancelled = false
-
-    async function loadDbColumnOrder() {
-      if (!columnOrderHydrated || columnOrderDbLoadedRef.current) return
-      columnOrderDbLoadedRef.current = true
-      try {
-        const {
-          data: { user },
-        } = await supabase.auth.getUser()
-
-        if (cancelled) return
-
-        if (!user) {
-          setColumnOrderUserReady(true)
-          return
-        }
-
-        const { data, error: loadError } = await supabase
-          .from('user_settings')
-          .select('trades_column_order')
-          .eq('user_id', user.id)
-          .maybeSingle()
-
-        if (cancelled) return
-
-        if (loadError) {
-          const message = String(loadError.message ?? '')
-          if (!message.includes('trades_column_order')) {
-            console.error('Failed to load trades column order', loadError)
-          }
-          setColumnOrderUserReady(true)
-          return
-        }
-
-        if (data?.trades_column_order) {
-          setColumnOrder(normalizeColumnOrder(data.trades_column_order))
-        }
-        setColumnOrderUserReady(true)
-      } catch (loadError) {
-        if (!cancelled) {
-          console.error('Failed to hydrate trades column order', loadError)
-          setColumnOrderUserReady(true)
-        }
-      }
-    }
-
-    loadDbColumnOrder()
-
-    return () => {
-      cancelled = true
-    }
-  }, [columnOrderHydrated, supabase])
-
-  useEffect(() => {
     if (!columnOrderHydrated) return
     window.localStorage.setItem(COLUMN_ORDER_STORAGE_KEY, JSON.stringify(columnOrder))
   }, [columnOrder, columnOrderHydrated])
-
-  useEffect(() => {
-    if (!columnOrderHydrated || !columnOrderUserReady) return
-
-    if (columnOrderDbSaveTimerRef.current) {
-      clearTimeout(columnOrderDbSaveTimerRef.current)
-    }
-
-    columnOrderDbSaveTimerRef.current = setTimeout(async () => {
-      try {
-        const {
-          data: { user },
-        } = await supabase.auth.getUser()
-
-        if (!user) return
-
-        const { error: saveError } = await supabase.from('user_settings').upsert(
-          {
-            user_id: user.id,
-            trades_column_order: columnOrder,
-          },
-          { onConflict: 'user_id' }
-        )
-
-        if (saveError) {
-          const message = String(saveError.message ?? '')
-          if (!message.includes('trades_column_order')) {
-            console.error('Failed to save trades column order', saveError)
-          }
-        }
-      } catch (saveError) {
-        console.error('Failed to persist trades column order', saveError)
-      }
-    }, 300)
-
-    return () => {
-      if (columnOrderDbSaveTimerRef.current) {
-        clearTimeout(columnOrderDbSaveTimerRef.current)
-      }
-    }
-  }, [columnOrder, columnOrderHydrated, columnOrderUserReady, supabase])
 
   useEffect(() => {
     const openSymbols = Array.from(
