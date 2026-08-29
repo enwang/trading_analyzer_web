@@ -2,7 +2,7 @@
  * Regression tests for three sync bugs that wiped open trades and overrode
  * manually-set stop losses:
  *
- * 1. Manual stop_loss is preserved even when the new row's entry_time
+ * 1. Manual stop_loss/current_stop_loss is preserved even when the new row's entry_time
  *    differs from what's stored in the DB (symbol-keyed lookup for open trades)
  * 2. enrichOpenTradesWithStopLosses must NOT overwrite a manual stop_loss
  * 3. Delete scope: only open rows for symbols with incoming open positions
@@ -66,6 +66,7 @@ function preserveManualFields(newRows, existingRows) {
     if (!row.notes && existing.notes) row.notes = existing.notes
     if (!row.needs_review && existing.needs_review) row.needs_review = existing.needs_review
     if (row.stop_loss == null && existing.stop_loss != null) row.stop_loss = existing.stop_loss
+    if (row.current_stop_loss == null && existing.current_stop_loss != null) row.current_stop_loss = existing.current_stop_loss
     if (row.r_multiple == null && existing.r_multiple != null) row.r_multiple = existing.r_multiple
   }
   return newRows
@@ -74,13 +75,13 @@ function preserveManualFields(newRows, existingRows) {
 const existingDbRows = [
   // Open trade with manual override — entry_time is the CSV-stored value
   { symbol: 'GSAT', entry_time: '2026-04-14T14:00:00.000Z', exit_time: null,
-    stop_loss: 77.77, r_multiple: null, setup_tag: 'momentum', notes: 'my note', needs_review: true },
+    stop_loss: 77.77, current_stop_loss: 78.88, r_multiple: null, setup_tag: 'momentum', notes: 'my note', needs_review: true },
   // Another open trade with manual stop
   { symbol: 'ADEA', entry_time: '2026-04-07T13:30:00.000Z', exit_time: null,
-    stop_loss: 25.00, r_multiple: null, setup_tag: 'untagged', notes: null, needs_review: false },
+    stop_loss: 25.00, current_stop_loss: 26.00, r_multiple: null, setup_tag: 'untagged', notes: null, needs_review: false },
   // Closed trade keyed by symbol|entry|exit
   { symbol: 'LITE', entry_time: '2026-04-14T19:00:00.000Z', exit_time: '2026-04-15T13:30:00.000Z',
-    stop_loss: 822.99, r_multiple: -1.13, setup_tag: 'breakout', notes: null, needs_review: false },
+    stop_loss: 822.99, current_stop_loss: null, r_multiple: -1.13, setup_tag: 'breakout', notes: null, needs_review: false },
 ]
 
 // New rows from IBKR — GSAT entry_time differs by 1 second (XML openDateTime ≠ CSV stored time)
@@ -99,6 +100,9 @@ const gsatRow = newRows.find(r => r.symbol === 'GSAT')
 if (gsatRow.stop_loss !== 77.77) {
   fail(`manual GSAT stop_loss 77.77 not preserved after sync (entry_time mismatch) — got ${gsatRow.stop_loss}`)
 }
+if (gsatRow.current_stop_loss !== 78.88) {
+  fail(`manual GSAT current_stop_loss 78.88 not preserved after sync (entry_time mismatch) — got ${gsatRow.current_stop_loss}`)
+}
 if (gsatRow.setup_tag !== 'momentum') {
   fail(`manual GSAT setup_tag not preserved — got ${gsatRow.setup_tag}`)
 }
@@ -112,6 +116,9 @@ if (!gsatRow.needs_review) {
 const adeaRow = newRows.find(r => r.symbol === 'ADEA')
 if (adeaRow.stop_loss !== 25.00) {
   fail(`manual ADEA stop_loss not preserved — got ${adeaRow.stop_loss}`)
+}
+if (adeaRow.current_stop_loss !== 26.00) {
+  fail(`manual ADEA current_stop_loss not preserved — got ${adeaRow.current_stop_loss}`)
 }
 
 const liteRow = newRows.find(r => r.symbol === 'LITE')

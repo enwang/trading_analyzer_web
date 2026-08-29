@@ -1,0 +1,2 @@
+ALTER TABLE trades
+  ADD COLUMN IF NOT EXISTS current_stop_loss NUMERIC;
