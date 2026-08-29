@@ -1355,7 +1355,6 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
                         <div className="group/sym flex items-center gap-2">
                           <Link
                             href={detailsHref}
-                            prefetch={false}
                             scroll={false}
                             className="underline-offset-4 hover:underline"
                             onClick={() => {

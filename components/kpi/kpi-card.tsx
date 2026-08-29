@@ -51,7 +51,7 @@ export function KpiCard({ label, value, sub, trend, href, hoverTitle, hoverItems
 
   if (href) {
     return (
-      <Link href={href} prefetch={false} className="block h-full">
+      <Link href={href} className="block h-full">
         {card}
       </Link>
     )
