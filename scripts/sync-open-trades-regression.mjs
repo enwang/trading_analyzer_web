@@ -158,6 +158,18 @@ if (enrichedAdea.stop_loss !== 22.50) {
   fail(`expected ADEA $2000-risk stop_loss 22.50, got ${enrichedAdea.stop_loss}`)
 }
 
+const futureStopLossFirst = await enrichOpenTradesWithStopLosses(
+  [
+    { symbol: 'NEW', entry_time: '2026-08-31T13:30:00.000Z', exit_time: null, side: 'long', entry_price: 50, shares: 100, stop_loss: null },
+  ],
+  []
+)
+
+const futureRow = futureStopLossFirst.find(r => r.symbol === 'NEW')
+if (futureRow.stop_loss != null) {
+  fail(`new stop-loss-first trades should not receive an automatic $2000 stop_loss — got ${futureRow.stop_loss}`)
+}
+
 // ---------------------------------------------------------------------------
 // 4. Delete scope: delete open rows for new open positions AND for positions
 //    that just closed (had an existing open row, got a close, no new open row)
