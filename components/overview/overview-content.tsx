@@ -118,7 +118,7 @@ export function OverviewContent({
 
   const openTradesForRisk = useMemo(() =>
     trades.filter(t => t.exitTime == null || t.outcome === 'open').map(t => ({
-      symbol: t.symbol, side: t.side, shares: t.shares, stopLoss: t.stopLoss,
+      symbol: t.symbol, side: t.side, shares: t.shares, stopLoss: t.currentStopLoss ?? t.stopLoss,
     })), [trades])
 
   const latestNav = navData[navData.length - 1]?.total ?? null

@@ -54,6 +54,7 @@ type UpsertRow = {
   notes?: string | null
   needs_review?: boolean | null
   stop_loss?: number | null
+  current_stop_loss?: number | null
   r_multiple?: number | null
 } & Record<string, unknown>
 
@@ -141,11 +142,11 @@ export async function GET(request: Request) {
           // Fetch ALL existing trades (open and closed) to preserve manual fields
           const { data: existingRows } = await supabase
             .from('trades')
-            .select('symbol, entry_time, exit_time, side, stop_loss, stop_loss_locked, r_multiple, setup_tag, notes, needs_review, execution_legs, pnl, initial_risk_amount')
+            .select('symbol, entry_time, exit_time, side, stop_loss, current_stop_loss, stop_loss_locked, r_multiple, setup_tag, notes, needs_review, execution_legs, pnl, initial_risk_amount')
             .eq('user_id', s.user_id)
             .in('symbol', touchedSymbols)
 
-          type ExistingRow = { symbol: string; entry_time: string | null; exit_time: string | null; side: string | null; stop_loss: number | null; stop_loss_locked: boolean | null; r_multiple: number | null; setup_tag: string | null; notes: string | null; needs_review: boolean | null; execution_legs: unknown | null; pnl: number | null; initial_risk_amount: number | null }
+          type ExistingRow = { symbol: string; entry_time: string | null; exit_time: string | null; side: string | null; stop_loss: number | null; current_stop_loss: number | null; stop_loss_locked: boolean | null; r_multiple: number | null; setup_tag: string | null; notes: string | null; needs_review: boolean | null; execution_legs: unknown | null; pnl: number | null; initial_risk_amount: number | null }
           const openRowsBySymbol = new Map<string, ExistingRow[]>()
           for (const existing of existingRows ?? []) {
             if (existing.exit_time != null) continue
@@ -176,6 +177,7 @@ export async function GET(request: Request) {
             if (!row.notes && existing.notes) row.notes = existing.notes
             if (!row.needs_review && existing.needs_review) row.needs_review = existing.needs_review
             if (row.stop_loss == null && existing.stop_loss != null) row.stop_loss = existing.stop_loss
+            if (row.current_stop_loss == null && existing.current_stop_loss != null) row.current_stop_loss = existing.current_stop_loss
             if (existing.stop_loss_locked) row.stop_loss_locked = true
             if (row.r_multiple == null && existing.r_multiple != null) row.r_multiple = existing.r_multiple
             if ((row as Record<string, unknown>).initial_risk_amount == null && existing.initial_risk_amount != null) {
@@ -209,14 +211,21 @@ export async function GET(request: Request) {
           // stop_loss is treated like notes — it's always manually set, never computed.
           for (const row of rows) {
             if (row.exit_time != null) continue
-            if ((row as Record<string, unknown>).stop_loss != null) continue
             const openSymbolRows = openRowsBySymbol.get(row.symbol) ?? []
-            const rowWithStopLoss = openSymbolRows.find(r => r.stop_loss != null)
-            if (rowWithStopLoss) {
+            const rowWithStopLoss = (row as Record<string, unknown>).stop_loss == null
+              ? openSymbolRows.find(r => r.stop_loss != null)
+              : null
+            if (rowWithStopLoss != null) {
               (row as Record<string, unknown>).stop_loss = rowWithStopLoss.stop_loss
               if (rowWithStopLoss.stop_loss_locked) {
                 (row as Record<string, unknown>).stop_loss_locked = true
               }
+            }
+            const rowWithCurrentStopLoss = (row as Record<string, unknown>).current_stop_loss == null
+              ? openSymbolRows.find(r => r.current_stop_loss != null)
+              : null
+            if (rowWithCurrentStopLoss != null) {
+              (row as Record<string, unknown>).current_stop_loss = rowWithCurrentStopLoss.current_stop_loss
             }
           }
 
