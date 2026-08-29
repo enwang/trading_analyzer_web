@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useTheme } from 'next-themes'
 import { createClient } from '@/lib/supabase/client'
@@ -45,9 +46,10 @@ export function Sidebar() {
 
       <nav className="flex-1 space-y-0.5 px-2 py-3">
         {nav.map(({ href, label, icon: Icon }) => (
-          <a
+          <Link
             key={href}
             href={href}
+            prefetch={false}
             className={cn(
               'flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors',
               pathname === href
@@ -57,7 +59,7 @@ export function Sidebar() {
           >
             <Icon className="size-4 shrink-0" />
             {label}
-          </a>
+          </Link>
         ))}
       </nav>
 

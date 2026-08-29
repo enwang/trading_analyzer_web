@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
+import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { ArrowLeft, Search, Trash2, X } from 'lucide-react'
 
@@ -1352,8 +1353,10 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
                     return (
                       <TableCell key={col} className="font-medium">
                         <div className="group/sym flex items-center gap-2">
-                          <a
+                          <Link
                             href={detailsHref}
+                            prefetch={false}
+                            scroll={false}
                             className="underline-offset-4 hover:underline"
                             onClick={() => {
                               const container = getDashboardScrollContainer()
@@ -1362,7 +1365,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
                             }}
                           >
                             {t.symbol}
-                          </a>
+                          </Link>
                           {isMarkedForReview && (
                             <Badge className="border border-amber-200 bg-amber-100 text-amber-800">Revisit</Badge>
                           )}
