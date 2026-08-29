@@ -486,10 +486,10 @@ function SpotlightSlide({ slide }: { slide: Extract<ReportSlide, { type: 'spotli
             ))}
           </div>
           <div className="mt-3">
-            <Link href={`/trades/${trade.id}?from=report`} prefetch={false} className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-700 hover:text-amber-600 dark:text-amber-200 dark:hover:text-amber-100">
+            <a href={`/trades/${trade.id}?from=report`} className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-700 hover:text-amber-600 dark:text-amber-200 dark:hover:text-amber-100">
               Open trade details
               <ChevronRight className="size-3.5" />
-            </Link>
+            </a>
           </div>
         </div>
         <div className="space-y-3">

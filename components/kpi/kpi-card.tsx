@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 
@@ -51,9 +50,9 @@ export function KpiCard({ label, value, sub, trend, href, hoverTitle, hoverItems
 
   if (href) {
     return (
-      <Link href={href} prefetch={false} className="block h-full">
+      <a href={href} className="block h-full">
         {card}
-      </Link>
+      </a>
     )
   }
 
