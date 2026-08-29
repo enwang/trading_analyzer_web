@@ -4,7 +4,6 @@ import { createClient } from '@/lib/supabase/server'
 
 interface RiskPayload {
   stopLoss: number | null
-  currentStopLoss?: number | null
   rMultiple: number | null
   initialRiskAmount?: number | null
   stopLossLocked?: boolean
@@ -31,7 +30,6 @@ export async function PATCH(
     r_multiple: payload.rMultiple,
   }
   if ('stopLossLocked' in payload) updatePayload.stop_loss_locked = payload.stopLossLocked
-  if ('currentStopLoss' in payload) updatePayload.current_stop_loss = payload.currentStopLoss
   if ('initialRiskAmount' in payload) updatePayload.initial_risk_amount = payload.initialRiskAmount
 
   const { error } = await supabase
