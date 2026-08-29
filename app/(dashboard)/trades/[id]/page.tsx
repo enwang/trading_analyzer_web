@@ -133,18 +133,20 @@ export default async function TradeDetailsPage({
     : (backParams.toString() ? `/trades?${backParams.toString()}` : '/trades')
   const supabase = await createClient()
   const {
-    data: { user },
-  } = await supabase.auth.getUser()
+    data: { session },
+  } = await supabase.auth.getSession()
+  const userId = session?.user.id
+  if (!userId) redirect('/login')
 
   const { data: row } = await supabase
     .from('trades')
     .select('*')
     .eq('id', id)
-    .eq('user_id', user!.id)
+    .eq('user_id', userId)
     .maybeSingle()
 
   if (!row) {
-    const recoveredId = await findRecoverableTradeId(supabase, user!.id, id)
+    const recoveredId = await findRecoverableTradeId(supabase, userId, id)
     if (recoveredId) {
       const params = new URLSearchParams()
       if (safeView) params.set('view', safeView)

@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { redirect } from 'next/navigation'
 import { rowToTrade } from '@/types/trade'
 import { computeSummary } from '@/lib/metrics'
 import { normalizeTradesForDisplay } from '@/lib/trades'
@@ -14,25 +15,27 @@ import {
 export default async function AnalysisPage() {
   const supabase = await createClient()
   const {
-    data: { user },
-  } = await supabase.auth.getUser()
+    data: { session },
+  } = await supabase.auth.getSession()
+  const userId = session?.user.id
+  if (!userId) redirect('/login')
 
   const { data: rows } = await supabase
     .from('trades')
     .select('*')
-    .eq('user_id', user!.id)
+    .eq('user_id', userId)
     .order('entry_time', { ascending: true })
 
   const [{ data: navRows }, { data: navChangeRows }] = await Promise.all([
     supabase
       .from('account_nav_daily')
       .select('report_date,total')
-      .eq('user_id', user!.id)
+      .eq('user_id', userId)
       .order('report_date', { ascending: true }),
     supabase
       .from('account_nav_change')
       .select('from_date,to_date,deposits_withdrawals')
-      .eq('user_id', user!.id),
+      .eq('user_id', userId),
   ])
 
   const allTrades = (rows ?? []).map(rowToTrade)

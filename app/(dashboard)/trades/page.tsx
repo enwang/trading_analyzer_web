@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { redirect } from 'next/navigation'
 import { rowToTrade } from '@/types/trade'
 import { normalizeTradesForDisplay } from '@/lib/trades'
 import { TradesTable } from '@/components/trades/trades-table'
@@ -15,8 +16,10 @@ export default async function TradesPage({
   const safeSymbol = symbol && /^[A-Za-z0-9.^-]{1,10}$/.test(symbol) ? symbol.toUpperCase() : null
   const supabase = await createClient()
   const {
-    data: { user },
-  } = await supabase.auth.getUser()
+    data: { session },
+  } = await supabase.auth.getSession()
+  const userId = session?.user.id
+  if (!userId) redirect('/login')
   console.log(`[trades/page] auth=${Date.now() - startedAt}ms`)
 
   const queryStartedAt = Date.now()
@@ -24,13 +27,13 @@ export default async function TradesPage({
     supabase
       .from('trades')
       .select('*')
-      .eq('user_id', user!.id)
+      .eq('user_id', userId)
       .order('entry_time', { ascending: false })
       .limit(1000),
     supabase
       .from('account_nav_daily')
       .select('total')
-      .eq('user_id', user!.id)
+      .eq('user_id', userId)
       .order('report_date', { ascending: false })
       .limit(1),
   ])

@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { redirect } from 'next/navigation'
 import { rowToTrade } from '@/types/trade'
 import { LocalTime } from '@/components/ui/local-time'
 import {
@@ -13,13 +14,15 @@ import {
 export default async function LosersPage() {
   const supabase = await createClient()
   const {
-    data: { user },
-  } = await supabase.auth.getUser()
+    data: { session },
+  } = await supabase.auth.getSession()
+  const userId = session?.user.id
+  if (!userId) redirect('/login')
 
   const { data: rows } = await supabase
     .from('trades')
     .select('*')
-    .eq('user_id', user!.id)
+    .eq('user_id', userId)
     .eq('outcome', 'loss')
     .order('pnl', { ascending: true })
     .limit(200)
