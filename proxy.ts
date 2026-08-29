@@ -2,7 +2,9 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 export async function proxy(request: NextRequest) {
+  const startedAt = Date.now()
   let supabaseResponse = NextResponse.next({ request })
+  const { pathname } = request.nextUrl
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -25,8 +27,9 @@ export async function proxy(request: NextRequest) {
 
   // Refresh session (important for Server Components)
   const { data: { user } } = await supabase.auth.getUser()
-
-  const { pathname } = request.nextUrl
+  if (pathname.startsWith('/trades') || pathname.startsWith('/overview')) {
+    console.log(`[proxy] ${pathname} auth=${Date.now() - startedAt}ms user=${user ? 'yes' : 'no'}`)
+  }
 
   const protectedRoutes = ['/overview', '/trades', '/winners', '/losers', '/analysis', '/import']
 
