@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { Info } from 'lucide-react'
 
@@ -158,6 +158,7 @@ export function TradeSummaryCard({
   const [lastSavedKey, setLastSavedKey] = useState(
     JSON.stringify({ stopLoss: initialStopLoss, rMultiple: initialRMultiple })
   )
+  const riskInputTouchedRef = useRef(false)
 
   // Fetch fresh MFE/MAE from market data for open trades only.
   // Closed trades read initialMfe/initialMae from DB (no Yahoo fetch needed).
@@ -301,6 +302,7 @@ export function TradeSummaryCard({
 
   useEffect(() => {
     if (stopLoss == null) return
+    if (!stopLossFirst && initialRiskAmount == null && initialStopLoss == null && !riskInputTouchedRef.current) return
     const currentKey = JSON.stringify({ stopLoss, rMultiple: liveR })
     if (currentKey === lastSavedKey) return
 
@@ -342,7 +344,10 @@ export function TradeSummaryCard({
                 type="number"
                 step="0.01"
                 value={stopLossInput}
-                onChange={(e) => setStopLossInput(e.target.value)}
+                onChange={(e) => {
+                  riskInputTouchedRef.current = true
+                  setStopLossInput(e.target.value)
+                }}
                 placeholder="0.00"
                 className="h-8"
               />
@@ -351,7 +356,10 @@ export function TradeSummaryCard({
                 type="number"
                 step="0.01"
                 value={initialRiskInput}
-                onChange={(e) => setInitialRiskInput(e.target.value)}
+                onChange={(e) => {
+                  riskInputTouchedRef.current = true
+                  setInitialRiskInput(e.target.value)
+                }}
                 placeholder="2000.00"
                 className="h-8"
               />

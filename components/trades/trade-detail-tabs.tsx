@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Info } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -195,6 +195,7 @@ export function TradeDetailTabs(props: Props) {
   const [lastSavedKey, setLastSavedKey] = useState(
     JSON.stringify({ stopLoss: initialStopLoss, rMultiple: initialRMultiple })
   )
+  const riskInputTouchedRef = useRef(false)
 
   const parsedInitialRisk = useMemo(() => {
     const n = Number(initialRiskInput.trim())
@@ -252,6 +253,7 @@ export function TradeDetailTabs(props: Props) {
 
   useEffect(() => {
     if (stopLoss == null) return
+    if (!stopLossFirst && initialRiskAmount == null && initialStopLoss == null && !riskInputTouchedRef.current) return
     const currentKey = JSON.stringify({ stopLoss, rMultiple: liveR })
     if (currentKey === lastSavedKey) return
     const timer = setTimeout(() => { void saveRisk(stopLoss, liveR, stopLossFirst ? calculatedInitialRisk : parsedInitialRisk) }, 700)
@@ -379,7 +381,10 @@ export function TradeDetailTabs(props: Props) {
                     type="number"
                     step="0.01"
                     value={stopLossInput}
-                    onChange={(e) => setStopLossInput(e.target.value)}
+                    onChange={(e) => {
+                      riskInputTouchedRef.current = true
+                      setStopLossInput(e.target.value)
+                    }}
                     className="h-7 w-24 text-xs"
                   />
                 ) : (
@@ -387,7 +392,10 @@ export function TradeDetailTabs(props: Props) {
                     type="number"
                     step="0.01"
                     value={initialRiskInput}
-                    onChange={(e) => setInitialRiskInput(e.target.value)}
+                    onChange={(e) => {
+                      riskInputTouchedRef.current = true
+                      setInitialRiskInput(e.target.value)
+                    }}
                     className="h-7 w-24 text-xs"
                   />
                 )}
