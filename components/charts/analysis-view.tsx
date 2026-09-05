@@ -5,6 +5,9 @@ import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import {
+  BarChart,
+  Bar,
+  Cell,
   LineChart,
   Line,
   XAxis,
@@ -13,6 +16,7 @@ import {
   Tooltip,
   ResponsiveContainer,
   Legend,
+  ReferenceLine,
 } from 'recharts'
 import { Plus, Settings2 } from 'lucide-react'
 
@@ -116,6 +120,13 @@ const TREND_METRICS: TrendMetricDef[] = [
 function fmtMoney(n: number) {
   const sign = n < 0 ? '-' : ''
   return `${sign}$${Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 2 })}`
+}
+
+function fmtCompactMoney(n: number) {
+  const abs = Math.abs(n)
+  const sign = n < 0 ? '-' : ''
+  if (abs >= 1000) return `${sign}$${(abs / 1000).toFixed(abs >= 10000 ? 0 : 1)}k`
+  return `${sign}$${abs.toFixed(abs >= 100 ? 0 : 2)}`
 }
 
 function fmtRatio(n: number) {
@@ -317,6 +328,157 @@ function MetricChartCard({
               )}
             </LineChart>
           </ResponsiveContainer>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+type PnlDistributionBucket = {
+  x: number
+  min: number
+  max: number
+  label: string
+  count: number
+  totalPnl: number
+}
+
+function niceBucketSize(raw: number) {
+  if (!Number.isFinite(raw) || raw <= 0) return 1
+  const magnitude = 10 ** Math.floor(Math.log10(raw))
+  const normalized = raw / magnitude
+  const nice =
+    normalized <= 1 ? 1 :
+    normalized <= 2 ? 2 :
+    normalized <= 5 ? 5 :
+    10
+  return nice * magnitude
+}
+
+function median(values: number[]) {
+  if (!values.length) return 0
+  const sorted = [...values].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]
+}
+
+function buildPnlDistribution(trades: ClosedTrade[]) {
+  const pnls = trades.map((t) => t.pnl).filter((p) => Number.isFinite(p))
+  if (!pnls.length) {
+    return { buckets: [] as PnlDistributionBucket[], mean: 0, median: 0, total: 0, min: 0, max: 0 }
+  }
+
+  const mean = pnls.reduce((sum, pnl) => sum + pnl, 0) / pnls.length
+  const med = median(pnls)
+  const maxAbs = Math.max(...pnls.map((p) => Math.abs(p)))
+
+  if (maxAbs === 0) {
+    return {
+      buckets: [{ x: 0, min: 0, max: 0, label: '$0', count: pnls.length, totalPnl: 0 }],
+      mean,
+      median: med,
+      total: pnls.length,
+      min: -1,
+      max: 1,
+    }
+  }
+
+  const step = niceBucketSize((maxAbs * 2) / 12)
+  const extent = Math.ceil(maxAbs / step) * step
+  const min = -extent
+  const bucketCount = Math.max(1, Math.ceil((extent * 2) / step))
+  const buckets: PnlDistributionBucket[] = Array.from({ length: bucketCount }, (_, idx) => {
+    const bucketMin = min + idx * step
+    const bucketMax = bucketMin + step
+    return {
+      x: bucketMin + step / 2,
+      min: bucketMin,
+      max: bucketMax,
+      label: `${fmtCompactMoney(bucketMin)} to ${fmtCompactMoney(bucketMax)}`,
+      count: 0,
+      totalPnl: 0,
+    }
+  })
+
+  for (const pnl of pnls) {
+    const rawIdx = pnl === extent ? buckets.length - 1 : Math.floor((pnl - min) / step)
+    const idx = Math.min(Math.max(rawIdx, 0), buckets.length - 1)
+    buckets[idx].count += 1
+    buckets[idx].totalPnl += pnl
+  }
+
+  return { buckets, mean, median: med, total: pnls.length, min: -extent, max: extent }
+}
+
+function PnlDistributionCard({ trades }: { trades: ClosedTrade[] }) {
+  const distribution = useMemo(() => buildPnlDistribution(trades), [trades])
+  const maxCount = Math.max(1, ...distribution.buckets.map((bucket) => bucket.count))
+
+  return (
+    <Card className="overflow-hidden">
+      <CardContent className="p-0">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
+          <div>
+            <div className="text-sm font-medium">P&L Distribution</div>
+            <div className="text-muted-foreground text-xs">{distribution.total} closed trades</div>
+          </div>
+          <div className="flex flex-wrap gap-3 text-xs">
+            <span className="text-muted-foreground">Mean <span className={distribution.mean >= 0 ? 'text-emerald-600' : 'text-red-600'}>{fmtMoney(distribution.mean)}</span></span>
+            <span className="text-muted-foreground">Median <span className={distribution.median >= 0 ? 'text-emerald-600' : 'text-red-600'}>{fmtMoney(distribution.median)}</span></span>
+          </div>
+        </div>
+
+        <div className="h-[320px] px-3 py-2">
+          {distribution.buckets.length ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={distribution.buckets} margin={{ top: 10, right: 14, left: 6, bottom: 10 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis
+                  dataKey="x"
+                  type="number"
+                  domain={[distribution.min, distribution.max]}
+                  tick={{ fontSize: 12 }}
+                  tickFormatter={(v: number) => fmtCompactMoney(v)}
+                />
+                <YAxis
+                  allowDecimals={false}
+                  domain={[0, maxCount]}
+                  tick={{ fontSize: 12 }}
+                  width={44}
+                />
+                <Tooltip
+                  content={({ active, payload }) => {
+                    if (!active || !payload?.length) return null
+                    const bucket = payload[0]?.payload as PnlDistributionBucket | undefined
+                    if (!bucket) return null
+                    return (
+                      <div className="rounded-md border bg-background p-2 text-xs shadow-sm">
+                        <div className="font-medium">{bucket.label}</div>
+                        <div className="text-muted-foreground">Trades: {bucket.count}</div>
+                        <div className={bucket.totalPnl >= 0 ? 'text-emerald-600' : 'text-red-600'}>
+                          Total P&L: {fmtMoney(bucket.totalPnl)}
+                        </div>
+                      </div>
+                    )
+                  }}
+                />
+                <ReferenceLine x={0} stroke="#9ca3af" strokeDasharray="3 3" />
+                <ReferenceLine x={distribution.mean} stroke="#f97316" strokeDasharray="4 4" />
+                <Bar dataKey="count" name="Trades" radius={[3, 3, 0, 0]}>
+                  {distribution.buckets.map((bucket) => (
+                    <Cell
+                      key={bucket.label}
+                      fill={bucket.max <= 0 ? '#ef4444' : bucket.min >= 0 ? '#10b981' : '#94a3b8'}
+                    />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="flex h-full items-center justify-center text-muted-foreground text-sm">
+              No closed trades
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>
@@ -561,6 +723,8 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
 
       <TabsContent value="summary" className="space-y-4">
         <SummaryGrid summary={filteredSummaryData.summary} />
+
+        <PnlDistributionCard trades={summaryTrades} />
 
         <div className="grid gap-4 xl:grid-cols-2">
           <MetricChartCard
