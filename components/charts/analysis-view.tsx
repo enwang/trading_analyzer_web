@@ -136,8 +136,6 @@ function fmtRatio(n: number) {
 function fmtHold(min: number | null) {
   if (min == null) return '—'
   const totalMinutes = Math.max(0, Math.round(min))
-  if (totalMinutes < 60) return `${totalMinutes.toFixed(2)}M`
-  if (totalMinutes < 1440) return `${(totalMinutes / 60).toFixed(2)}H`
   return `${(totalMinutes / 1440).toFixed(2)}D`
 }
 
