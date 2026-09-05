@@ -121,18 +121,16 @@ function fmtMoney(n: number) {
   return `${sign}$${Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 2 })}`
 }
 
-function fmtCompactMoney(n: number) {
-  const abs = Math.abs(n)
-  const sign = n < 0 ? '-' : ''
-  if (abs >= 1000) return `${sign}$${(abs / 1000).toFixed(abs >= 10000 ? 0 : 1)}k`
-  return `${sign}$${abs.toFixed(abs >= 100 ? 0 : 2)}`
-}
-
 function fmtBucketMoney(n: number) {
   const sign = n < 0 ? '-' : ''
   return `${sign}$${Math.abs(n).toLocaleString('en-US', {
     maximumFractionDigits: 0,
   })}`
+}
+
+function fmtBucketLabel(min: number, max: number) {
+  if (min === 0 && max === 0) return '[$0]'
+  return `[${fmtBucketMoney(min)}, ${fmtBucketMoney(max)}]`
 }
 
 function fmtRatio(n: number) {
@@ -335,22 +333,6 @@ type PnlDistributionBucket = {
   totalPnl: number
 }
 
-function niceBucketSize(raw: number) {
-  if (!Number.isFinite(raw) || raw <= 0) return 1
-  const magnitude = 10 ** Math.floor(Math.log10(raw))
-  const normalized = raw / magnitude
-  const nice =
-    normalized <= 1 ? 1 :
-    normalized <= 1.5 ? 1.5 :
-    normalized <= 2 ? 2 :
-    normalized <= 2.5 ? 2.5 :
-    normalized <= 3 ? 3 :
-    normalized <= 5 ? 5 :
-    normalized <= 7.5 ? 7.5 :
-    10
-  return nice * magnitude
-}
-
 function median(values: number[]) {
   if (!values.length) return 0
   const sorted = [...values].sort((a, b) => a - b)
@@ -358,49 +340,40 @@ function median(values: number[]) {
   return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]
 }
 
-function buildSideBuckets(values: number[], side: 'loss' | 'win') {
+function buildSideBuckets(values: number[]) {
   if (!values.length) return [] as PnlDistributionBucket[]
 
-  const maxAbs = Math.max(...values.map((value) => Math.abs(value)))
-  if (maxAbs === 0) {
-    return [{ min: 0, max: 0, label: '$0', count: values.length, totalPnl: 0 }]
-  }
+  const sorted = [...values].sort((a, b) => a - b)
+  const targetBucketCount = Math.min(8, Math.max(3, Math.ceil(Math.sqrt(sorted.length))))
+  const bucketSize = Math.max(1, Math.ceil(sorted.length / targetBucketCount))
+  const minBucketWidth = 1000
+  const buckets: PnlDistributionBucket[] = []
 
-  const bucketCount = Math.min(14, Math.max(5, Math.ceil(Math.sqrt(values.length) * 1.8)))
-  const step = niceBucketSize(maxAbs / bucketCount)
-  const extent = Math.ceil(maxAbs / step) * step
-  const buckets: PnlDistributionBucket[] = Array.from({ length: Math.ceil(extent / step) }, (_, idx) => {
-    if (side === 'loss') {
-      const bucketMin = -extent + idx * step
-      const bucketMax = bucketMin + step
-      return {
-        min: bucketMin,
-        max: bucketMax,
-        label: `${fmtBucketMoney(bucketMin)} to ${fmtBucketMoney(bucketMax)}`,
-        count: 0,
-        totalPnl: 0,
-      }
+  for (let start = 0; start < sorted.length;) {
+    let end = Math.min(sorted.length, start + bucketSize)
+    while (end < sorted.length && sorted[end - 1] - sorted[start] < minBucketWidth) {
+      end += 1
     }
 
-    const bucketMin = idx * step
-    const bucketMax = bucketMin + step
-    return {
-      min: bucketMin,
-      max: bucketMax,
-      label: `${fmtBucketMoney(bucketMin)} to ${fmtBucketMoney(bucketMax)}`,
-      count: 0,
-      totalPnl: 0,
-    }
-  })
+    const slice = sorted.slice(start, end)
+    const min = slice[0]
+    const max = slice[slice.length - 1]
+    const totalPnl = slice.reduce((sum, value) => sum + value, 0)
+    const last = buckets[buckets.length - 1]
 
-  for (const value of values) {
-    const distanceFromZero = Math.abs(value)
-    const rawIdx = distanceFromZero === extent ? buckets.length - 1 : Math.floor(distanceFromZero / step)
-    const idx = side === 'loss'
-      ? buckets.length - 1 - Math.min(Math.max(rawIdx, 0), buckets.length - 1)
-      : Math.min(Math.max(rawIdx, 0), buckets.length - 1)
-    buckets[idx].count += 1
-    buckets[idx].totalPnl += value
+    if (last && last.min === min && last.max === max) {
+      last.count += slice.length
+      last.totalPnl += totalPnl
+    } else {
+      buckets.push({
+        min,
+        max,
+        label: fmtBucketLabel(min, max),
+        count: slice.length,
+        totalPnl,
+      })
+    }
+    start = end
   }
 
   return buckets
@@ -418,9 +391,9 @@ function buildPnlDistribution(trades: ClosedTrade[]) {
   const breakevens = pnls.filter((pnl) => pnl === 0)
   const wins = pnls.filter((pnl) => pnl > 0)
   const buckets = [
-    ...buildSideBuckets(losses, 'loss'),
-    ...(breakevens.length ? [{ min: 0, max: 0, label: '$0', count: breakevens.length, totalPnl: 0 }] : []),
-    ...buildSideBuckets(wins, 'win'),
+    ...buildSideBuckets(losses),
+    ...(breakevens.length ? [{ min: 0, max: 0, label: '[$0]', count: breakevens.length, totalPnl: 0 }] : []),
+    ...buildSideBuckets(wins),
   ]
 
   return { buckets, mean, median: med, total: pnls.length }
@@ -451,11 +424,9 @@ function PnlDistributionCard({ trades }: { trades: ClosedTrade[] }) {
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                 <XAxis
                   dataKey="label"
-                  interval={0}
-                  tick={{ fontSize: 12 }}
-                  angle={-18}
-                  textAnchor="end"
-                  height={58}
+                  interval="preserveStartEnd"
+                  tick={{ fontSize: 11 }}
+                  height={36}
                 />
                 <YAxis
                   allowDecimals={false}
@@ -520,7 +491,9 @@ function SummaryGrid({
     avgDailyNetDrawdown: number
     avgWin: number
     avgLoss: number
-    totalTrades: number
+    winCount: number
+    lossCount: number
+    breakevenCount: number
   }
 }) {
   const holdValue = (
@@ -548,7 +521,22 @@ function SummaryGrid({
     { label: 'Avg win/loss rate', value: fmtRatio(summary.avgTradeWinLoss) },
     { label: 'Avg. realized r-multiple', value: `${summary.avgRealizedRMultiple.toFixed(2)}R` },
     { label: 'Avg net trade P&L', value: fmtMoney(summary.tradeExpectancy) },
-    { label: 'Trades', value: String(summary.totalTrades) },
+    {
+      label: 'Trades',
+      value: (
+        <div className="flex flex-col gap-0.5 text-base sm:text-lg lg:text-xl">
+          <span className="whitespace-nowrap">
+            <span className="text-emerald-600">W</span> {summary.winCount}
+          </span>
+          <span className="whitespace-nowrap">
+            <span className="text-red-600">L</span> {summary.lossCount}
+          </span>
+          <span className="whitespace-nowrap">
+            <span className="text-slate-500">B</span> {summary.breakevenCount}
+          </span>
+        </div>
+      ),
+    },
   ]
 
   return (
@@ -682,7 +670,9 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
         dayLossCount: lossDays.length,
         dayCount: dayRows.length,
         avgDailyWinPct: dayRows.length ? (winDays.length / dayRows.length) * 100 : 0,
-        totalTrades: core.totalCount,
+        winCount: core.winCount,
+        lossCount: core.lossCount,
+        breakevenCount: core.breakevenCount,
       },
     }
   }, [summaryTrades, timeZone])
