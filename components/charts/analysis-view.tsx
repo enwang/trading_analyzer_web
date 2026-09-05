@@ -141,6 +141,16 @@ function fmtBucketLabel(min: number, max: number) {
   return `[${fmtBucketMoney(min)}, ${fmtBucketMoney(max)}]`
 }
 
+function snapBucketRange(min: number, max: number) {
+  const step = 1000
+  const snappedMin = Math.floor(min / step) * step
+  const snappedMax = Math.ceil(max / step) * step
+  return {
+    min: snappedMin,
+    max: Math.max(snappedMax, snappedMin + step),
+  }
+}
+
 function fmtRatio(n: number) {
   if (n === Infinity) return '∞'
   return Number.isFinite(n) ? n.toFixed(2) : '0.00'
@@ -357,12 +367,13 @@ function buildSideBuckets(values: number[]) {
     }
 
     const slice = sorted.slice(start, end)
-    const min = slice[0]
-    const max = slice[slice.length - 1]
+    const { min, max } = snapBucketRange(slice[0], slice[slice.length - 1])
     const totalPnl = slice.reduce((sum, value) => sum + value, 0)
     const last = buckets[buckets.length - 1]
 
-    if (last && last.min === min && last.max === max) {
+    if (last && min < last.max) {
+      last.max = Math.max(last.max, max)
+      last.label = fmtBucketLabel(last.min, last.max)
       last.count += slice.length
       last.totalPnl += totalPnl
     } else {
