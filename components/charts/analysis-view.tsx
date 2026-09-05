@@ -341,13 +341,6 @@ type PnlDistributionBucket = {
   totalPnl: number
 }
 
-function median(values: number[]) {
-  if (!values.length) return 0
-  const sorted = [...values].sort((a, b) => a - b)
-  const mid = Math.floor(sorted.length / 2)
-  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]
-}
-
 function buildSideBuckets(values: number[]) {
   if (!values.length) return [] as PnlDistributionBucket[]
 
@@ -390,11 +383,9 @@ function buildSideBuckets(values: number[]) {
 function buildPnlDistribution(trades: ClosedTrade[]) {
   const pnls = trades.map((t) => t.pnl).filter((p) => Number.isFinite(p))
   if (!pnls.length) {
-    return { buckets: [] as PnlDistributionBucket[], mean: 0, median: 0, total: 0 }
+    return { buckets: [] as PnlDistributionBucket[], total: 0 }
   }
 
-  const mean = pnls.reduce((sum, pnl) => sum + pnl, 0) / pnls.length
-  const med = median(pnls)
   const losses = pnls.filter((pnl) => pnl < 0)
   const breakevens = pnls.filter((pnl) => pnl === 0)
   const wins = pnls.filter((pnl) => pnl > 0)
@@ -404,7 +395,7 @@ function buildPnlDistribution(trades: ClosedTrade[]) {
     ...buildSideBuckets(wins),
   ]
 
-  return { buckets, mean, median: med, total: pnls.length }
+  return { buckets, total: pnls.length }
 }
 
 function PnlDistributionCard({ trades }: { trades: ClosedTrade[] }) {
@@ -418,10 +409,6 @@ function PnlDistributionCard({ trades }: { trades: ClosedTrade[] }) {
           <div>
             <div className="text-sm font-medium">P&L Distribution</div>
             <div className="text-muted-foreground text-xs">{distribution.total} closed trades</div>
-          </div>
-          <div className="flex flex-wrap gap-3 text-xs">
-            <span className="text-muted-foreground">Mean <span className={distribution.mean >= 0 ? 'text-emerald-600' : 'text-red-600'}>{fmtMoney(distribution.mean)}</span></span>
-            <span className="text-muted-foreground">Median <span className={distribution.median >= 0 ? 'text-emerald-600' : 'text-red-600'}>{fmtMoney(distribution.median)}</span></span>
           </div>
         </div>
 
@@ -532,7 +519,7 @@ function SummaryGrid({
     {
       label: 'Trades',
       value: (
-        <div className="flex flex-col gap-0.5 text-base sm:text-lg lg:text-xl">
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-base leading-tight sm:text-lg">
           <span className="whitespace-nowrap">
             <span className="text-emerald-600">W</span> {summary.winCount}
           </span>

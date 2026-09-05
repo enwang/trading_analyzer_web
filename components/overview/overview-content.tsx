@@ -151,7 +151,24 @@ export function OverviewContent({
     { id: 'avg-win-loss', type: 'kpi', label: 'Avg Win/Loss', value: fmtPf(stats.payoffRatio) },
     { id: 'profit-factor', type: 'kpi', label: 'Profit Factor', value: fmtPf(stats.profitFactor) },
     { id: 'expectancy', type: 'kpi', label: 'Avg net trade P&L', value: fmt(stats.expectancy), trend: stats.expectancy >= 0 ? 'up' : 'down' },
-    { id: 'trades', type: 'kpi', label: 'Trades', value: String(stats.totalTrades) },
+    {
+      id: 'trades',
+      type: 'kpi',
+      label: 'Trades',
+      value: (
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-base leading-tight sm:text-lg">
+          <span className="whitespace-nowrap">
+            <span className="text-emerald-600">W</span> {stats.nWins}
+          </span>
+          <span className="whitespace-nowrap">
+            <span className="text-red-600">L</span> {stats.nLosses}
+          </span>
+          <span className="whitespace-nowrap">
+            <span className="text-slate-500">B</span> {stats.nBreakevens}
+          </span>
+        </div>
+      ),
+    },
     { id: 'avg-win', type: 'kpi', label: 'Avg Win', value: fmt(stats.avgWin), trend: 'up' },
     { id: 'avg-loss', type: 'kpi', label: 'Avg Loss', value: fmt(stats.avgLoss), trend: 'down' },
     { id: 'largest-win', type: 'kpi', label: 'Largest Win', value: fmt(stats.largestWin), trend: 'up', href: largestWinTrade ? `/trades/${largestWinTrade.id}?from=overview` : undefined, hoverTitle: largestWinTrade ? `${largestWinTrade.symbol} trade` : undefined, hoverItems: largestWinTrade ? [fmtHoverDate(largestWinTrade.exitTime), fmtSigned(largestWinTrade.pnl ?? 0)] : undefined },

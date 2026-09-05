@@ -1,10 +1,11 @@
 import Link from 'next/link'
+import type React from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 
 interface KpiCardProps {
   label: string
-  value: string
+  value: React.ReactNode
   sub?: string
   trend?: 'up' | 'down' | 'neutral'
   href?: string
@@ -22,7 +23,7 @@ export function KpiCard({ label, value, sub, trend, href, hoverTitle, hoverItems
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <p
+        <div
           className={cn(
             'text-2xl font-bold tabular-nums',
             trend === 'up' && 'text-emerald-600',
@@ -30,7 +31,7 @@ export function KpiCard({ label, value, sub, trend, href, hoverTitle, hoverItems
           )}
         >
           {value}
-        </p>
+        </div>
         {sub && <p className="text-muted-foreground text-xs mt-0.5">{sub}</p>}
       </CardContent>
       </Card>

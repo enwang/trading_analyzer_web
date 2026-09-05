@@ -1,5 +1,6 @@
 'use client'
 
+import type React from 'react'
 import { useEffect, useState, useCallback } from 'react'
 import {
   DndContext,
@@ -28,7 +29,7 @@ export type CardConfig =
   | { id: string; type: 'account-summary'; accountEquity: number | null; startEquity: number | null; netDeposits: number; trades: OpenTradeForRisk[] }
   | { id: string; type: 'open-pnl'; trades: OpenTrade[] }
   | { id: string; type: 'open-risk'; trades: OpenTradeForRisk[]; accountEquity: number | null }
-  | { id: string; type: 'kpi'; label: string; value: string; sub?: string; trend?: 'up' | 'down'; href?: string; hoverTitle?: string; hoverItems?: string[] }
+  | { id: string; type: 'kpi'; label: string; value: React.ReactNode; sub?: string; trend?: 'up' | 'down'; href?: string; hoverTitle?: string; hoverItems?: string[] }
 
 const LS_KEY = 'overview-kpi-order'
 
