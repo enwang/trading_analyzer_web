@@ -15,9 +15,9 @@ function outcomeClass(outcome: string | null) {
 }
 
 function outcomeLabel(outcome: string | null) {
-  if (outcome === 'win') return '赢'
-  if (outcome === 'loss') return '输'
-  if (outcome === 'breakeven') return '打平'
+  if (outcome === 'win') return 'Win'
+  if (outcome === 'loss') return 'Loss'
+  if (outcome === 'breakeven') return 'Breakeven'
   if (outcome === 'open') return 'Open'
   return outcome ?? '—'
 }
