@@ -23,6 +23,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { type DateRangeKey, DATE_RANGES, getStartDate } from '@/lib/date-range'
+import { MonthlyRecap } from '@/components/charts/monthly-recap'
+import type { MonthlyReturnRow, MonthlyStatsRow, YearlyAveragesRow } from '@/lib/monthly-recap'
 import {
   Table,
   TableBody,
@@ -69,6 +71,12 @@ interface AnalysisData {
   }
   closedTrades: ClosedTrade[]
   summaryClosedTrades: ClosedTrade[]
+  monthlyRecap: {
+    year: string
+    returns: MonthlyReturnRow[]
+    stats: MonthlyStatsRow[]
+    yearly: YearlyAveragesRow
+  }
 }
 
 type TrendPoint = {
@@ -743,6 +751,13 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
             defaultMetric="avgTradeWinLossCum"
           />
         </div>
+
+        <MonthlyRecap
+          year={data.monthlyRecap.year}
+          returns={data.monthlyRecap.returns}
+          stats={data.monthlyRecap.stats}
+          yearly={data.monthlyRecap.yearly}
+        />
       </TabsContent>
 
       <TabsContent value="days">

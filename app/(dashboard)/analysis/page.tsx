@@ -5,7 +5,6 @@ import { computeSummary } from '@/lib/metrics'
 import { normalizeTradesForDisplay } from '@/lib/trades'
 import { DEFAULT_INITIAL_RISK_AMOUNT } from '@/lib/market/stop-loss'
 import { AnalysisView } from '@/components/charts/analysis-view'
-import { MonthlyRecap } from '@/components/charts/monthly-recap'
 import {
   computeMonthlyReturns,
   computeMonthlyStats,
@@ -101,18 +100,18 @@ export default async function AnalysisPage() {
       rMultiple: t.rMultiple,
       holdTimeMin: t.holdTimeMin,
     })),
+    monthlyRecap: {
+      year: recapYear,
+      returns: recapReturns,
+      stats: recapStats,
+      yearly: yearlyAverages,
+    },
   }
 
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-semibold">Analysis</h1>
       <AnalysisView data={data} />
-      <MonthlyRecap
-        year={recapYear}
-        returns={recapReturns}
-        stats={recapStats}
-        yearly={yearlyAverages}
-      />
     </div>
   )
 }
