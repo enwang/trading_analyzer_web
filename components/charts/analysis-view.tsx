@@ -141,16 +141,6 @@ function fmtBucketLabel(min: number, max: number) {
   return `[${fmtBucketMoney(min)}, ${fmtBucketMoney(max)}]`
 }
 
-function snapBucketRange(min: number, max: number) {
-  const step = 1000
-  const snappedMin = Math.floor(min / step) * step
-  const snappedMax = Math.ceil(max / step) * step
-  return {
-    min: snappedMin,
-    max: Math.max(snappedMax, snappedMin + step),
-  }
-}
-
 function fmtRatio(n: number) {
   if (n === Infinity) return '∞'
   return Number.isFinite(n) ? n.toFixed(2) : '0.00'
@@ -354,41 +344,36 @@ type PnlDistributionBucket = {
 function buildSideBuckets(values: number[]) {
   if (!values.length) return [] as PnlDistributionBucket[]
 
+  const step = 1000
   const sorted = [...values].sort((a, b) => a - b)
-  const targetBucketCount = Math.min(8, Math.max(3, Math.ceil(Math.sqrt(sorted.length))))
-  const bucketSize = Math.max(1, Math.ceil(sorted.length / targetBucketCount))
-  const minBucketWidth = 1000
-  const buckets: PnlDistributionBucket[] = []
+  const minValue = sorted[0]
+  const maxValue = sorted[sorted.length - 1]
+  const minRange = Math.floor(minValue / step) * step
+  const maxRange = Math.ceil(maxValue / step) * step || step
+  const bucketMap = new Map<number, PnlDistributionBucket>()
 
-  for (let start = 0; start < sorted.length;) {
-    let end = Math.min(sorted.length, start + bucketSize)
-    while (end < sorted.length && sorted[end - 1] - sorted[start] < minBucketWidth) {
-      end += 1
-    }
-
-    const slice = sorted.slice(start, end)
-    const { min, max } = snapBucketRange(slice[0], slice[slice.length - 1])
-    const totalPnl = slice.reduce((sum, value) => sum + value, 0)
-    const last = buckets[buckets.length - 1]
-
-    if (last && min < last.max) {
-      last.max = Math.max(last.max, max)
-      last.label = fmtBucketLabel(last.min, last.max)
-      last.count += slice.length
-      last.totalPnl += totalPnl
-    } else {
-      buckets.push({
-        min,
-        max,
-        label: fmtBucketLabel(min, max),
-        count: slice.length,
-        totalPnl,
-      })
-    }
-    start = end
+  for (let min = minRange; min < maxRange; min += step) {
+    const max = min + step
+    bucketMap.set(min, {
+      min,
+      max,
+      label: fmtBucketLabel(min, max),
+      count: 0,
+      totalPnl: 0,
+    })
   }
 
-  return buckets
+  for (const value of values) {
+    const min = value < 0 && value % step === 0
+      ? value
+      : Math.floor(value / step) * step
+    const bucket = bucketMap.get(min)
+    if (!bucket) continue
+    bucket.count += 1
+    bucket.totalPnl += value
+  }
+
+  return Array.from(bucketMap.values()).filter((bucket) => bucket.count > 0)
 }
 
 function buildPnlDistribution(trades: ClosedTrade[]) {
