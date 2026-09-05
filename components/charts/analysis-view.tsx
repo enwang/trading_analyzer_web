@@ -16,7 +16,6 @@ import {
   Tooltip,
   ResponsiveContainer,
   Legend,
-  ReferenceLine,
 } from 'recharts'
 import { Plus, Settings2 } from 'lucide-react'
 
@@ -324,7 +323,6 @@ function MetricChartCard({
 }
 
 type PnlDistributionBucket = {
-  x: number
   min: number
   max: number
   label: string
@@ -351,36 +349,33 @@ function median(values: number[]) {
   return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]
 }
 
-function buildPnlDistribution(trades: ClosedTrade[]) {
-  const pnls = trades.map((t) => t.pnl).filter((p) => Number.isFinite(p))
-  if (!pnls.length) {
-    return { buckets: [] as PnlDistributionBucket[], mean: 0, median: 0, total: 0, min: 0, max: 0 }
-  }
+function buildSideBuckets(values: number[], side: 'loss' | 'win') {
+  if (!values.length) return [] as PnlDistributionBucket[]
 
-  const mean = pnls.reduce((sum, pnl) => sum + pnl, 0) / pnls.length
-  const med = median(pnls)
-  const maxAbs = Math.max(...pnls.map((p) => Math.abs(p)))
-
+  const maxAbs = Math.max(...values.map((value) => Math.abs(value)))
   if (maxAbs === 0) {
-    return {
-      buckets: [{ x: 0, min: 0, max: 0, label: '$0', count: pnls.length, totalPnl: 0 }],
-      mean,
-      median: med,
-      total: pnls.length,
-      min: -1,
-      max: 1,
-    }
+    return [{ min: 0, max: 0, label: '$0', count: values.length, totalPnl: 0 }]
   }
 
-  const step = niceBucketSize((maxAbs * 2) / 12)
+  const bucketCount = Math.min(8, Math.max(3, Math.ceil(Math.sqrt(values.length))))
+  const step = niceBucketSize(maxAbs / bucketCount)
   const extent = Math.ceil(maxAbs / step) * step
-  const min = -extent
-  const bucketCount = Math.max(1, Math.ceil((extent * 2) / step))
-  const buckets: PnlDistributionBucket[] = Array.from({ length: bucketCount }, (_, idx) => {
-    const bucketMin = min + idx * step
+  const buckets: PnlDistributionBucket[] = Array.from({ length: Math.ceil(extent / step) }, (_, idx) => {
+    if (side === 'loss') {
+      const bucketMin = -extent + idx * step
+      const bucketMax = bucketMin + step
+      return {
+        min: bucketMin,
+        max: bucketMax,
+        label: `${fmtCompactMoney(bucketMin)} to ${fmtCompactMoney(bucketMax)}`,
+        count: 0,
+        totalPnl: 0,
+      }
+    }
+
+    const bucketMin = idx * step
     const bucketMax = bucketMin + step
     return {
-      x: bucketMin + step / 2,
       min: bucketMin,
       max: bucketMax,
       label: `${fmtCompactMoney(bucketMin)} to ${fmtCompactMoney(bucketMax)}`,
@@ -389,14 +384,37 @@ function buildPnlDistribution(trades: ClosedTrade[]) {
     }
   })
 
-  for (const pnl of pnls) {
-    const rawIdx = pnl === extent ? buckets.length - 1 : Math.floor((pnl - min) / step)
-    const idx = Math.min(Math.max(rawIdx, 0), buckets.length - 1)
+  for (const value of values) {
+    const distanceFromZero = Math.abs(value)
+    const rawIdx = distanceFromZero === extent ? buckets.length - 1 : Math.floor(distanceFromZero / step)
+    const idx = side === 'loss'
+      ? buckets.length - 1 - Math.min(Math.max(rawIdx, 0), buckets.length - 1)
+      : Math.min(Math.max(rawIdx, 0), buckets.length - 1)
     buckets[idx].count += 1
-    buckets[idx].totalPnl += pnl
+    buckets[idx].totalPnl += value
   }
 
-  return { buckets, mean, median: med, total: pnls.length, min: -extent, max: extent }
+  return buckets
+}
+
+function buildPnlDistribution(trades: ClosedTrade[]) {
+  const pnls = trades.map((t) => t.pnl).filter((p) => Number.isFinite(p))
+  if (!pnls.length) {
+    return { buckets: [] as PnlDistributionBucket[], mean: 0, median: 0, total: 0 }
+  }
+
+  const mean = pnls.reduce((sum, pnl) => sum + pnl, 0) / pnls.length
+  const med = median(pnls)
+  const losses = pnls.filter((pnl) => pnl < 0)
+  const breakevens = pnls.filter((pnl) => pnl === 0)
+  const wins = pnls.filter((pnl) => pnl > 0)
+  const buckets = [
+    ...buildSideBuckets(losses, 'loss'),
+    ...(breakevens.length ? [{ min: 0, max: 0, label: '$0', count: breakevens.length, totalPnl: 0 }] : []),
+    ...buildSideBuckets(wins, 'win'),
+  ]
+
+  return { buckets, mean, median: med, total: pnls.length }
 }
 
 function PnlDistributionCard({ trades }: { trades: ClosedTrade[] }) {
@@ -423,11 +441,12 @@ function PnlDistributionCard({ trades }: { trades: ClosedTrade[] }) {
               <BarChart data={distribution.buckets} margin={{ top: 10, right: 14, left: 6, bottom: 10 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                 <XAxis
-                  dataKey="x"
-                  type="number"
-                  domain={[distribution.min, distribution.max]}
+                  dataKey="label"
+                  interval={0}
                   tick={{ fontSize: 12 }}
-                  tickFormatter={(v: number) => fmtCompactMoney(v)}
+                  angle={-18}
+                  textAnchor="end"
+                  height={58}
                 />
                 <YAxis
                   allowDecimals={false}
@@ -451,13 +470,11 @@ function PnlDistributionCard({ trades }: { trades: ClosedTrade[] }) {
                     )
                   }}
                 />
-                <ReferenceLine x={0} stroke="#9ca3af" strokeDasharray="3 3" />
-                <ReferenceLine x={distribution.mean} stroke="#f97316" strokeDasharray="4 4" />
                 <Bar dataKey="count" name="Trades" radius={[3, 3, 0, 0]}>
                   {distribution.buckets.map((bucket) => (
                     <Cell
                       key={bucket.label}
-                      fill={bucket.max <= 0 ? '#ef4444' : bucket.min >= 0 ? '#10b981' : '#94a3b8'}
+                      fill={bucket.min === 0 && bucket.max === 0 ? '#94a3b8' : bucket.max <= 0 ? '#ef4444' : '#10b981'}
                     />
                   ))}
                 </Bar>
