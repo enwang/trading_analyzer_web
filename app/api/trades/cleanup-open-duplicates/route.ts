@@ -65,6 +65,8 @@ export async function POST() {
         setup_tag: metadata.setupTag,
         notes: metadata.notes,
         stop_loss: metadata.stopLoss,
+        current_stop_loss: metadata.currentStopLoss,
+        initial_risk_amount: metadata.initialRiskAmount,
         r_multiple: mergedTrade.rMultiple ?? metadata.rMultiple,
       }
 

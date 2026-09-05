@@ -136,6 +136,31 @@ const openDuplicate2 = makeTrade({
   executionLegs: [{ time: '2026-03-09T15:00:00.000Z', action: 'BUY', shares: 1500, price: 20.32 }],
 })
 
+const concurrentOpenDuplicate1 = makeTrade({
+  id: 'open-concurrent-1',
+  symbol: 'SMCI',
+  entryTime: '2026-09-04T13:34:27.000Z',
+  exitTime: null,
+  shares: 2000,
+  outcome: 'open',
+  entryPrice: 38.72,
+  stopLoss: 37.72,
+  currentStopLoss: null,
+  initialRiskAmount: null,
+  createdAt: '2026-09-05T04:45:46.416154+00:00',
+  executionLegs: [
+    { time: '2026-09-04T13:34:27.000Z', action: 'BUY', shares: 2000, price: 38.72 },
+  ],
+})
+
+const concurrentOpenDuplicate2 = makeTrade({
+  ...concurrentOpenDuplicate1,
+  id: 'open-concurrent-2',
+  currentStopLoss: 37.9,
+  initialRiskAmount: 2000,
+  createdAt: '2026-09-05T04:45:45.896881+00:00',
+})
+
 const trades = [
   aaoiFull,
   aaoiFragment1,
@@ -144,11 +169,13 @@ const trades = [
   umacFragment,
   openDuplicate1,
   openDuplicate2,
+  concurrentOpenDuplicate1,
+  concurrentOpenDuplicate2,
 ]
 
 const normalized = normalizeTradesForDisplay(trades)
-if (normalized.length !== 4) {
-  fail(`expected 4 normalized rows, got ${normalized.length}`)
+if (normalized.length !== 6) {
+  fail(`expected 6 normalized rows, got ${normalized.length}`)
 }
 
 const aaoiRows = normalized.filter((trade) => trade.symbol === 'AAOI')
@@ -182,13 +209,21 @@ if (fslyRows.reduce((sum, trade) => sum + (trade.shares ?? 0), 0) !== 2500) {
 }
 
 const cleanupGroups = dedupeTradeRowsForCleanup(trades)
-if (cleanupGroups.length !== 2) {
-  fail(`expected 2 cleanup groups, got ${cleanupGroups.length}`)
+if (cleanupGroups.length !== 3) {
+  fail(`expected 3 cleanup groups, got ${cleanupGroups.length}`)
 }
 
 const deletedRows = cleanupGroups.reduce((sum, group) => sum + group.removeIds.length, 0)
-if (deletedRows !== 3) {
-  fail(`expected cleanup to remove 3 duplicate rows, got ${deletedRows}`)
+if (deletedRows !== 4) {
+  fail(`expected cleanup to remove 4 duplicate rows, got ${deletedRows}`)
+}
+
+const smciCleanup = cleanupGroups.find((group) => group.keep.symbol === 'SMCI')
+if (!smciCleanup) {
+  fail('expected cleanup to detect concurrent duplicate SMCI open rows')
+}
+if (smciCleanup.keep.id !== 'open-concurrent-2') {
+  fail(`expected cleanup to keep metadata-rich SMCI row, got ${smciCleanup.keep.id}`)
 }
 
 console.log('trade-dedup-regression: PASS')

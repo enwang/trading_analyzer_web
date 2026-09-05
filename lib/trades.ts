@@ -202,9 +202,16 @@ export function normalizeTradesForDisplay(trades: Trade[]): Trade[] {
 
 export function dedupeTradeRowsForCleanup(trades: Trade[]) {
   const closedGroups = new Map<string, Trade[]>()
+  const openGroups = new Map<string, Trade[]>()
 
   for (const trade of trades) {
     if (trade.exitTime == null || trade.outcome === 'open') {
+      if (!trade.entryTime) continue
+      const fingerprint = executionFingerprint(trade.executionLegs)
+      const fallback = `${trade.shares ?? ''}|${trade.entryPrice ?? ''}|${trade.pnl ?? ''}`
+      const key = `${trade.symbol}|${trade.side ?? ''}|${trade.entryTime}|${fingerprint ?? fallback}`
+      if (!openGroups.has(key)) openGroups.set(key, [])
+      openGroups.get(key)!.push(trade)
       continue
     }
 
@@ -216,6 +223,29 @@ export function dedupeTradeRowsForCleanup(trades: Trade[]) {
   }
 
   const cleanupGroups: Array<{ keep: Trade; removeIds: string[]; merged: Trade }> = []
+
+  for (const [, group] of openGroups) {
+    if (group.length <= 1) continue
+    const keep = [...group].sort((a, b) => {
+      const score = (trade: Trade) =>
+        (trade.needsReview ? 16 : 0) +
+        (trade.setupTag && trade.setupTag !== 'untagged' ? 8 : 0) +
+        (trade.notes?.trim() ? 8 : 0) +
+        (trade.currentStopLoss != null ? 4 : 0) +
+        (trade.initialRiskAmount != null ? 4 : 0) +
+        (trade.stopLossLocked ? 2 : 0) +
+        (trade.stopLoss != null ? 1 : 0) +
+        (trade.rMultiple != null ? 1 : 0)
+      const scoreDiff = score(b) - score(a)
+      if (scoreDiff !== 0) return scoreDiff
+      return a.createdAt.localeCompare(b.createdAt)
+    })[0]
+    cleanupGroups.push({
+      keep,
+      removeIds: group.filter((trade) => trade.id !== keep.id).map((trade) => trade.id),
+      merged: keep,
+    })
+  }
 
   for (const [, group] of closedGroups) {
     if (group.length <= 1) continue
@@ -240,6 +270,8 @@ export function pickTradeMetadata(group: Trade[], fallback: Trade) {
     setupTag: firstNonEmpty(group.map((trade) => trade.setupTag), (value) => value === 'untagged') ?? fallback.setupTag,
     notes: firstNonEmpty(group.map((trade) => trade.notes), (value) => value.trim() === '') ?? fallback.notes,
     stopLoss: firstNonEmpty(group.map((trade) => trade.stopLoss)) ?? fallback.stopLoss,
+    currentStopLoss: firstNonEmpty(group.map((trade) => trade.currentStopLoss)) ?? fallback.currentStopLoss,
+    initialRiskAmount: firstNonEmpty(group.map((trade) => trade.initialRiskAmount)) ?? fallback.initialRiskAmount,
     rMultiple: firstNonEmpty(group.map((trade) => trade.rMultiple)) ?? fallback.rMultiple,
   }
 }
