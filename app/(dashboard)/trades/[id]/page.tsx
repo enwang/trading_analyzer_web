@@ -14,6 +14,14 @@ function outcomeClass(outcome: string | null) {
   return ''
 }
 
+function outcomeLabel(outcome: string | null) {
+  if (outcome === 'win') return '赢'
+  if (outcome === 'loss') return '输'
+  if (outcome === 'breakeven') return '打平'
+  if (outcome === 'open') return 'Open'
+  return outcome ?? '—'
+}
+
 type ExecutionLeg = {
   action?: string | null
   time?: string | null
@@ -172,7 +180,7 @@ export default async function TradeDetailsPage({
             {trade.symbol} Trade Details
           </h1>
         </div>
-        <Badge className={outcomeClass(trade.outcome)}>{trade.outcome ?? '—'}</Badge>
+        <Badge className={outcomeClass(trade.outcome)}>{outcomeLabel(trade.outcome)}</Badge>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[380px_1fr]">

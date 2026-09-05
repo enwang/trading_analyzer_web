@@ -221,12 +221,12 @@ function fmtHoldDuration(holdTimeMin: number | null, holdDays: number | null) {
 
 function OutcomeBadge({ outcome }: { outcome: string | null }) {
   if (outcome === 'win') {
-    return <Badge className="border border-emerald-200 bg-emerald-100 text-emerald-700">Win</Badge>
+    return <Badge className="border border-emerald-200 bg-emerald-100 text-emerald-700">赢</Badge>
   }
   if (outcome === 'loss') {
-    return <Badge className="border border-red-200 bg-red-100 text-red-700">Loss</Badge>
+    return <Badge className="border border-red-200 bg-red-100 text-red-700">输</Badge>
   }
-  if (outcome === 'breakeven') return <Badge variant="outline">Breakeven</Badge>
+  if (outcome === 'breakeven') return <Badge variant="outline">打平</Badge>
   if (outcome === 'open') return <Badge variant="secondary">Open</Badge>
   return <Badge variant="outline">{outcome ?? '—'}</Badge>
 }
