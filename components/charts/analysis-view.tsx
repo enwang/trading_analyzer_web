@@ -128,6 +128,13 @@ function fmtCompactMoney(n: number) {
   return `${sign}$${abs.toFixed(abs >= 100 ? 0 : 2)}`
 }
 
+function fmtBucketMoney(n: number) {
+  const sign = n < 0 ? '-' : ''
+  return `${sign}$${Math.abs(n).toLocaleString('en-US', {
+    maximumFractionDigits: 0,
+  })}`
+}
+
 function fmtRatio(n: number) {
   if (n === Infinity) return '∞'
   return Number.isFinite(n) ? n.toFixed(2) : '0.00'
@@ -334,8 +341,12 @@ function niceBucketSize(raw: number) {
   const normalized = raw / magnitude
   const nice =
     normalized <= 1 ? 1 :
+    normalized <= 1.5 ? 1.5 :
     normalized <= 2 ? 2 :
+    normalized <= 2.5 ? 2.5 :
+    normalized <= 3 ? 3 :
     normalized <= 5 ? 5 :
+    normalized <= 7.5 ? 7.5 :
     10
   return nice * magnitude
 }
@@ -355,7 +366,7 @@ function buildSideBuckets(values: number[], side: 'loss' | 'win') {
     return [{ min: 0, max: 0, label: '$0', count: values.length, totalPnl: 0 }]
   }
 
-  const bucketCount = Math.min(8, Math.max(3, Math.ceil(Math.sqrt(values.length))))
+  const bucketCount = Math.min(14, Math.max(5, Math.ceil(Math.sqrt(values.length) * 1.8)))
   const step = niceBucketSize(maxAbs / bucketCount)
   const extent = Math.ceil(maxAbs / step) * step
   const buckets: PnlDistributionBucket[] = Array.from({ length: Math.ceil(extent / step) }, (_, idx) => {
@@ -365,7 +376,7 @@ function buildSideBuckets(values: number[], side: 'loss' | 'win') {
       return {
         min: bucketMin,
         max: bucketMax,
-        label: `${fmtCompactMoney(bucketMin)} to ${fmtCompactMoney(bucketMax)}`,
+        label: `${fmtBucketMoney(bucketMin)} to ${fmtBucketMoney(bucketMax)}`,
         count: 0,
         totalPnl: 0,
       }
@@ -376,7 +387,7 @@ function buildSideBuckets(values: number[], side: 'loss' | 'win') {
     return {
       min: bucketMin,
       max: bucketMax,
-      label: `${fmtCompactMoney(bucketMin)} to ${fmtCompactMoney(bucketMax)}`,
+      label: `${fmtBucketMoney(bucketMin)} to ${fmtBucketMoney(bucketMax)}`,
       count: 0,
       totalPnl: 0,
     }
