@@ -137,20 +137,9 @@ function fmtRatio(n: number) {
 function fmtHold(min: number | null) {
   if (min == null) return '—'
   const totalMinutes = Math.max(0, Math.round(min))
-  if (totalMinutes < 60) return `${totalMinutes}m`
-
-  const days = Math.floor(totalMinutes / 1440)
-  const hours = Math.floor((totalMinutes % 1440) / 60)
-  const minutes = totalMinutes % 60
-
-  if (days > 0) {
-    const parts = [`${days}D`]
-    if (hours > 0) parts.push(`${hours}h`)
-    if (minutes > 0) parts.push(`${minutes}m`)
-    return parts.join(' ')
-  }
-
-  return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`
+  if (totalMinutes < 60) return `${totalMinutes.toFixed(2)}M`
+  if (totalMinutes < 1440) return `${(totalMinutes / 60).toFixed(2)}H`
+  return `${(totalMinutes / 1440).toFixed(2)}D`
 }
 
 function dateKeyInTimeZone(iso: string, timeZone: string) {
