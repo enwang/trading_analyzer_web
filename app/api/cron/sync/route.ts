@@ -207,11 +207,13 @@ export async function GET(request: Request) {
           }
 
           // Fallback: if key-matching above didn't copy stop_loss (key mismatch), look for
-          // any open DB row for the symbol that has a stop_loss and use it.
+          // an open DB row for the symbol that has a stop_loss and use it.
           // stop_loss is treated like notes — it's always manually set, never computed.
+          // For closed incoming rows, only use this fallback when there is one
+          // existing open row for the symbol; closing a position replaces that row.
           for (const row of rows) {
-            if (row.exit_time != null) continue
             const openSymbolRows = openRowsBySymbol.get(row.symbol) ?? []
+            if (row.exit_time != null && openSymbolRows.length !== 1) continue
             const rowWithStopLoss = (row as Record<string, unknown>).stop_loss == null
               ? openSymbolRows.find(r => r.stop_loss != null)
               : null
@@ -219,6 +221,9 @@ export async function GET(request: Request) {
               (row as Record<string, unknown>).stop_loss = rowWithStopLoss.stop_loss
               if (rowWithStopLoss.stop_loss_locked) {
                 (row as Record<string, unknown>).stop_loss_locked = true
+              }
+              if ((row as Record<string, unknown>).initial_risk_amount == null && rowWithStopLoss.initial_risk_amount != null) {
+                (row as Record<string, unknown>).initial_risk_amount = rowWithStopLoss.initial_risk_amount
               }
             }
             const rowWithCurrentStopLoss = (row as Record<string, unknown>).current_stop_loss == null

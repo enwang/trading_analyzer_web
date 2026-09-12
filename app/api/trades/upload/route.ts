@@ -98,11 +98,11 @@ export async function POST(request: NextRequest) {
       // Fetch ALL existing trades for touched symbols (open and closed) to preserve manual fields
       const { data: existingRows } = await supabase
         .from('trades')
-        .select('symbol, entry_time, exit_time, side, stop_loss, current_stop_loss, stop_loss_locked, r_multiple, setup_tag, notes, needs_review, execution_legs, pnl')
+        .select('symbol, entry_time, exit_time, side, stop_loss, current_stop_loss, stop_loss_locked, initial_risk_amount, r_multiple, setup_tag, notes, needs_review, execution_legs, pnl')
         .eq('user_id', user.id)
         .in('symbol', touchedSymbols)
 
-      type ExistingRow = { symbol: string; entry_time: string | null; exit_time: string | null; side: string | null; stop_loss: number | null; current_stop_loss: number | null; stop_loss_locked: boolean | null; r_multiple: number | null; setup_tag: string | null; notes: string | null; needs_review: boolean | null; execution_legs: unknown | null; pnl: number | null }
+      type ExistingRow = { symbol: string; entry_time: string | null; exit_time: string | null; side: string | null; stop_loss: number | null; current_stop_loss: number | null; stop_loss_locked: boolean | null; initial_risk_amount: number | null; r_multiple: number | null; setup_tag: string | null; notes: string | null; needs_review: boolean | null; execution_legs: unknown | null; pnl: number | null }
       const openRowsBySymbol = new Map<string, ExistingRow[]>()
       for (const existing of existingRows ?? []) {
         if (existing.exit_time != null) continue
@@ -135,6 +135,9 @@ export async function POST(request: NextRequest) {
         if (row.stop_loss == null && existing.stop_loss != null) row.stop_loss = existing.stop_loss
         if (row.current_stop_loss == null && existing.current_stop_loss != null) row.current_stop_loss = existing.current_stop_loss
         if (existing.stop_loss_locked) row.stop_loss_locked = true
+        if ((row as Record<string, unknown>).initial_risk_amount == null && existing.initial_risk_amount != null) {
+          (row as Record<string, unknown>).initial_risk_amount = existing.initial_risk_amount
+        }
         if (row.r_multiple == null && existing.r_multiple != null) row.r_multiple = existing.r_multiple
         // Parser legs are authoritative because they are split-adjusted by default.
         // Preserve old manual legs only when the incoming parser row has no legs.
@@ -149,11 +152,13 @@ export async function POST(request: NextRequest) {
       }
 
       // Fallback: if key-matching above didn't copy stop_loss (key mismatch), look for
-      // any open DB row for the symbol that has a stop_loss and use it.
+      // an open DB row for the symbol that has a stop_loss and use it.
       // stop_loss is treated like notes — it's always manually set, never computed.
+      // For closed incoming rows, only use this fallback when there is one
+      // existing open row for the symbol; closing a position replaces that row.
       for (const row of rows) {
-        if (row.exit_time != null) continue
         const openSymbolRows = openRowsBySymbol.get(row.symbol) ?? []
+        if (row.exit_time != null && openSymbolRows.length !== 1) continue
         const rowWithStopLoss = (row as Record<string, unknown>).stop_loss == null
           ? openSymbolRows.find(r => r.stop_loss != null)
           : null
@@ -161,6 +166,9 @@ export async function POST(request: NextRequest) {
           (row as Record<string, unknown>).stop_loss = rowWithStopLoss.stop_loss
           if (rowWithStopLoss.stop_loss_locked) {
             (row as Record<string, unknown>).stop_loss_locked = true
+          }
+          if ((row as Record<string, unknown>).initial_risk_amount == null && rowWithStopLoss.initial_risk_amount != null) {
+            (row as Record<string, unknown>).initial_risk_amount = rowWithStopLoss.initial_risk_amount
           }
         }
         const rowWithCurrentStopLoss = (row as Record<string, unknown>).current_stop_loss == null

@@ -73,6 +73,24 @@ function preserveManualFields(newRows, existingRows) {
     }
   }
 
+  // Closing a position replaces the previous open row with a closed row. If the
+  // parser's closed-row key does not match the open DB key exactly, preserve
+  // manual risk fields from the one open row that is being replaced.
+  for (const row of newRows) {
+    const openSymbolRows = openRowsBySymbol.get(row.symbol) ?? []
+    if (row.exit_time != null && openSymbolRows.length !== 1) continue
+    const rowWithStopLoss = row.stop_loss == null
+      ? openSymbolRows.find(r => r.stop_loss != null)
+      : null
+    if (rowWithStopLoss) {
+      row.stop_loss = rowWithStopLoss.stop_loss
+      if (rowWithStopLoss.stop_loss_locked) row.stop_loss_locked = true
+      if (row.initial_risk_amount == null && rowWithStopLoss.initial_risk_amount != null) {
+        row.initial_risk_amount = rowWithStopLoss.initial_risk_amount
+      }
+    }
+  }
+
   return newRows
 }
 
@@ -258,6 +276,24 @@ function fresh(overrides = {}) {
   preserveManualFields(rows, existing)
   if (!rows[0].stop_loss_locked) fail('stop_loss_locked: lock not preserved via exact key match on open row')
   if (rows[0].stop_loss !== 175.00) fail(`stop_loss_locked: stop_loss not preserved via exact key match, got ${rows[0].stop_loss}`)
+}
+
+// ---------------------------------------------------------------------------
+// 11. Position close: previous open row's stop_loss is carried to incoming
+//     closed row when the closed-row key differs from the open DB key.
+// ---------------------------------------------------------------------------
+{
+  const existing = [
+    { symbol: 'CRCL', entry_time: '2026-09-09T19:56:03.000Z', exit_time: null,
+      stop_loss: 89.48, stop_loss_locked: true, initial_risk_amount: 1825,
+      r_multiple: null, setup_tag: 'untagged', notes: null, needs_review: false },
+  ]
+  const rows = [{ ...fresh({ symbol: 'CRCL', entry_time: '2026-09-09T19:56:03.000Z', exit_time: '2026-09-11T15:51:38.000Z' }),
+    stop_loss: null, stop_loss_locked: false, initial_risk_amount: null }]
+  preserveManualFields(rows, existing)
+  if (rows[0].stop_loss !== 89.48) fail(`closed replacement row: stop_loss not preserved, got ${rows[0].stop_loss}`)
+  if (!rows[0].stop_loss_locked) fail('closed replacement row: stop_loss_locked not preserved')
+  if (rows[0].initial_risk_amount !== 1825) fail(`closed replacement row: initial_risk_amount not preserved, got ${rows[0].initial_risk_amount}`)
 }
 
 console.log('notes-preservation-regression: PASS')
