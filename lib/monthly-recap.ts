@@ -11,6 +11,12 @@ export interface NavChangeRow {
   deposits_withdrawals: number | null
 }
 
+export interface CashTransactionRow {
+  transaction_ts: string
+  amount: number | null
+  type?: string | null
+}
+
 export interface MonthlyReturnRow {
   monthKey: string       // YYYY-MM
   monthLabel: string     // "Jan 26"
@@ -18,7 +24,7 @@ export interface MonthlyReturnRow {
   endingNav: number | null
   depositsWithdrawals: number | null // net cash deposits/withdrawals attributed to the month
   monthReturnPct: number | null      // ((end - start - deposits) / start) * 100
-  cumulativeReturnPct: number | null
+  cumulativeReturnPct: number | null // ((end - initial start - cumulative deposits) / initial start) * 100
 }
 
 export interface MonthlyReturnsResult {
@@ -81,8 +87,16 @@ function mean(values: number[]): number | null {
 function depositsForMonth(
   monthKey: string,
   isFirstMonth: boolean,
-  changes: NavChangeRow[]
+  changes: NavChangeRow[],
+  cashTransactions: CashTransactionRow[] = []
 ): number | null {
+  if (cashTransactions.length > 0) {
+    const total = cashTransactions
+      .filter((r) => r.transaction_ts.slice(0, 7) === monthKey)
+      .reduce((sum, r) => sum + (r.amount ?? 0), 0)
+    return total !== 0 ? total : null
+  }
+
   // First preference: a ChangeInNAV row fully contained within this month
   // (user has Period=Monthly in their Flex Query). Returns the exact deposits.
   let total = 0
@@ -109,7 +123,8 @@ function depositsForMonth(
 
 export function computeMonthlyReturns(
   nav: NavDailyRow[],
-  changes: NavChangeRow[] = []
+  changes: NavChangeRow[] = [],
+  cashTransactions: CashTransactionRow[] = []
 ): MonthlyReturnsResult {
   if (nav.length === 0) {
     return { rows: [], totalDepositsInPeriod: null, hasPerMonthDeposits: false }
@@ -128,8 +143,9 @@ export function computeMonthlyReturns(
 
   const monthKeys = [...byMonth.keys()].sort()
   const rows: MonthlyReturnRow[] = []
-  let cumulativeFactor = 1
   let hasPerMonthDeposits = false
+  let cumulativeDeposits = 0
+  let initialStartingNav: number | null = null
 
   for (let i = 0; i < monthKeys.length; i++) {
     const key = monthKeys[i]
@@ -138,13 +154,18 @@ export function computeMonthlyReturns(
     const priorLast = priorKey ? byMonth.get(priorKey)!.last.total : null
     const startingNav = priorLast ?? bucket.first.total
     const endingNav = bucket.last.total
-    const deposits = depositsForMonth(key, i === 0, changes)
+    const deposits = depositsForMonth(key, i === 0, changes, cashTransactions)
     if (deposits != null) hasPerMonthDeposits = true
+    if (initialStartingNav == null) initialStartingNav = startingNav
     let monthReturnPct: number | null = null
+    let cumulativeReturnPct: number | null = null
     if (startingNav != null && endingNav != null && startingNav !== 0) {
       const tradingPnl = endingNav - startingNav - (deposits ?? 0)
       monthReturnPct = (tradingPnl / startingNav) * 100
-      cumulativeFactor *= 1 + tradingPnl / startingNav
+    }
+    cumulativeDeposits += deposits ?? 0
+    if (initialStartingNav != null && endingNav != null && initialStartingNav !== 0) {
+      cumulativeReturnPct = ((endingNav - initialStartingNav - cumulativeDeposits) / initialStartingNav) * 100
     }
     rows.push({
       monthKey: key,
@@ -153,14 +174,19 @@ export function computeMonthlyReturns(
       endingNav,
       depositsWithdrawals: deposits,
       monthReturnPct,
-      cumulativeReturnPct: monthReturnPct == null ? null : (cumulativeFactor - 1) * 100,
+      cumulativeReturnPct,
     })
   }
 
   // Total deposits in the queried period — useful when per-month attribution is
   // missing so the user can at least see an aggregate adjustment.
   let totalDepositsInPeriod: number | null = null
-  if (changes.length > 0) {
+  if (cashTransactions.length > 0) {
+    totalDepositsInPeriod = cashTransactions.reduce(
+      (s, r) => s + (r.amount ?? 0),
+      0
+    )
+  } else if (changes.length > 0) {
     totalDepositsInPeriod = changes.reduce(
       (s, r) => s + (r.deposits_withdrawals ?? 0),
       0

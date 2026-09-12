@@ -21,7 +21,7 @@ export default async function AnalysisPage() {
     .eq('user_id', userId)
     .order('entry_time', { ascending: true })
 
-  const [{ data: navRows }, { data: navChangeRows }] = await Promise.all([
+  const [{ data: navRows }, { data: navChangeRows }, { data: cashTxRows }] = await Promise.all([
     supabase
       .from('account_nav_daily')
       .select('report_date,total')
@@ -30,6 +30,10 @@ export default async function AnalysisPage() {
     supabase
       .from('account_nav_change')
       .select('from_date,to_date,deposits_withdrawals')
+      .eq('user_id', userId),
+    supabase
+      .from('account_cash_transactions')
+      .select('transaction_ts,amount,type')
       .eq('user_id', userId),
   ])
 
@@ -48,7 +52,14 @@ export default async function AnalysisPage() {
   for (const r of navRows ?? []) yearsWithData.add(r.report_date.slice(0, 4))
   const recapYear = [...yearsWithData].sort().pop() ?? String(new Date().getFullYear())
   const navForYear = (navRows ?? []).filter((r) => r.report_date.startsWith(recapYear))
-  const monthlyReturns = computeMonthlyReturns(navForYear, navChangeRows ?? [])
+  const cashDeposits = (cashTxRows ?? [])
+    .filter((r) => {
+      const t = (r.type as string | null)?.toLowerCase() ?? ''
+      if (t) return t.includes('deposit') || t.includes('withdrawal') || t.includes('transfer')
+      return Math.abs(r.amount as number) >= 500
+    })
+    .map((r) => ({ transaction_ts: r.transaction_ts as string, amount: r.amount as number, type: r.type as string | null }))
+  const monthlyReturns = computeMonthlyReturns(navForYear, navChangeRows ?? [], cashDeposits)
   const yearlyAverages = computeYearlyAverages(trades, recapYear)
   const recapReturns = monthlyReturns.rows
   const recapStats = monthlyStats.filter((r) => r.monthKey.startsWith(recapYear))

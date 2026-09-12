@@ -11,13 +11,8 @@ import {
   ResponsiveContainer,
   ReferenceLine,
 } from 'recharts'
-import type { NavDailyRow, NavChangeRow } from '@/lib/monthly-recap'
+import type { NavDailyRow, NavChangeRow, CashTransactionRow } from '@/lib/monthly-recap'
 import { computeMonthlyReturns } from '@/lib/monthly-recap'
-
-interface DepositRow {
-  transaction_ts: string  // ISO 8601 UTC
-  amount: number
-}
 
 interface BenchmarkRow {
   date: string
@@ -36,7 +31,7 @@ interface ChartPoint {
 interface Props {
   data: NavDailyRow[]
   changes?: NavChangeRow[]
-  deposits?: DepositRow[]
+  deposits?: CashTransactionRow[]
   spy?: BenchmarkRow[]
   qqq?: BenchmarkRow[]
   soxx?: BenchmarkRow[]
@@ -70,7 +65,7 @@ function fmtPct(n: number) {
  */
 function computeDailyTWR(
   navRows: NavDailyRow[],
-  deposits: DepositRow[],
+  deposits: CashTransactionRow[],
   changes: NavChangeRow[],
   disableAnchors = false,
 ): ChartPoint[] {
@@ -84,7 +79,7 @@ function computeDailyTWR(
   const skipDates = new Set<string>()
   if (deposits.length > 0) {
     for (const d of deposits) {
-      if (Math.abs(d.amount) < 500) continue
+      if (d.amount == null || Math.abs(d.amount) < 500) continue
       const txDate = d.transaction_ts.slice(0, 10)
       // IBKR timestamps deposits at initiation but NAV reflects them on the settlement day
       // (often the next trading day). Find the day within a ±1..+3 day window where the
@@ -127,7 +122,7 @@ function computeDailyTWR(
     }
   }
 
-  // Build month-end anchors from computeMonthlyReturns (authoritative deposit-adjusted TWR).
+  // Build month-end anchors from computeMonthlyReturns (authoritative account-return view).
   // At the last trading day of each month, snap the running factor to this value so the
   // chart's month-end cumulative % matches the Analysis tab exactly.
   const monthlyAnchors = new Map<string, number>()
@@ -137,7 +132,7 @@ function computeDailyTWR(
   const navYears = [...new Set(navRows.map(r => r.report_date.slice(0, 4)))].sort()
   const recapYear = navYears[navYears.length - 1] ?? ''
   const navForAnchors = recapYear ? navRows.filter(r => r.report_date.startsWith(recapYear)) : navRows
-  const monthlyResult = computeMonthlyReturns(navForAnchors, changes)
+  const monthlyResult = computeMonthlyReturns(navForAnchors, changes, deposits)
   for (const row of monthlyResult.rows) {
     if (row.cumulativeReturnPct != null) {
       monthlyAnchors.set(row.monthKey, 1 + row.cumulativeReturnPct / 100)
