@@ -11,6 +11,7 @@ import {
   DATE_RANGES,
   MARKET_TIME_ZONE,
   dateKeyInTimeZone,
+  getLastMonthRange,
   getStartDate,
 } from '@/lib/date-range'
 import { Badge } from '@/components/ui/badge'
@@ -42,7 +43,7 @@ import {
 } from '@/lib/market/stop-loss'
 import { OverviewSyncButton } from '@/components/overview/overview-sync-button'
 
-type OutcomeFilter = 'all' | 'win' | 'loss' | 'open' | 'marked' | 'lastweek'
+type OutcomeFilter = 'all' | 'win' | 'loss' | 'open' | 'marked' | 'lastweek' | 'lastmonth'
 type SortKey =
   | 'symbol'
   | 'side'
@@ -256,7 +257,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
   const dirParam = searchParams.get('dir')
   const symbolQueryParam = searchParams.get('q') ?? searchParams.get('symbol') ?? ''
   const initialFilter: OutcomeFilter =
-    viewParam === 'win' || viewParam === 'loss' || viewParam === 'open' || viewParam === 'all' || viewParam === 'marked' || viewParam === 'lastweek'
+    viewParam === 'win' || viewParam === 'loss' || viewParam === 'open' || viewParam === 'all' || viewParam === 'marked' || viewParam === 'lastweek' || viewParam === 'lastmonth'
       ? viewParam
       : 'all'
   const defaultSortKey: SortKey = initialFilter === 'open' ? 'currentRiskPct' : 'exitTime'
@@ -276,6 +277,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
 
   const startDate = getStartDate(range, { timeZone: MARKET_TIME_ZONE, marketWeekOpen: true })
   const marketWeekStartDate = getStartDate('WTD', { timeZone: MARKET_TIME_ZONE, marketWeekOpen: true })!
+  const lastMonthRange = getLastMonthRange({ timeZone: MARKET_TIME_ZONE })
 
   const addonTradeIds = useMemo(() => {
     const openTrades = trades.filter((t) => t.exitTime == null || t.outcome === 'open')
@@ -384,6 +386,15 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
         return (entryDate != null && entryDate >= marketWeekStartDate)
             || (exitDate != null && exitDate >= marketWeekStartDate)
       })
+    } else if (filter === 'lastmonth') {
+      byOutcome = visible.filter((t) => {
+        const inLastMonth = (dateKey: string | null) =>
+          dateKey != null && dateKey >= lastMonthRange.start && dateKey < lastMonthRange.endExclusive
+        if (t.executionLegs?.some(leg => inLastMonth(dateKeyInTimeZone(leg.time, MARKET_TIME_ZONE)))) return true
+        const entryDate = t.entryTime ? dateKeyInTimeZone(t.entryTime, MARKET_TIME_ZONE) : null
+        const exitDate = t.exitTime ? dateKeyInTimeZone(t.exitTime, MARKET_TIME_ZONE) : null
+        return inLastMonth(entryDate) || inLastMonth(exitDate)
+      })
     } else byOutcome = visible.filter((t) => t.outcome === filter)
     const byDate = !startDate ? byOutcome : byOutcome.filter((t) => {
       if (t.exitTime == null || t.outcome === 'open') return true
@@ -393,7 +404,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
     const symbolQuery = symbolSearch.trim().toUpperCase()
     if (!symbolQuery) return byDate
     return byDate.filter((t) => t.symbol.toUpperCase().includes(symbolQuery))
-  }, [trades, filter, deletedIds, startDate, marketWeekStartDate, symbolSearch])
+  }, [trades, filter, deletedIds, startDate, marketWeekStartDate, lastMonthRange.start, lastMonthRange.endExclusive, symbolSearch])
 
   const visibleColumnOrder = useMemo(() => {
     const openOnlyColumns: ColumnId[] = ['currentPrice', 'currentAmount', 'currentRemainShares', 'currentStopLoss', 'currentRisk', 'currentRiskPct']
@@ -416,7 +427,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
   useEffect(() => {
     if (viewParam) return
     const saved = localStorage.getItem(FILTER_STORAGE_KEY) as OutcomeFilter | null
-    const valid: OutcomeFilter[] = ['all', 'win', 'loss', 'open', 'marked', 'lastweek']
+    const valid: OutcomeFilter[] = ['all', 'win', 'loss', 'open', 'marked', 'lastweek', 'lastmonth']
     if (saved && valid.includes(saved) && saved !== 'all') {
       setFilter(saved)
       const params = new URLSearchParams(searchParams.toString())
@@ -581,9 +592,11 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
         ? 'Losing Trades'
         : filter === 'lastweek'
           ? 'Last Week'
-          : filter === 'marked'
-            ? 'Marked to Revisit'
-            : 'Open Trades'
+          : filter === 'lastmonth'
+            ? 'Last Month'
+            : filter === 'marked'
+              ? 'Marked to Revisit'
+              : 'Open Trades'
 
   function initialAmount(t: Trade) {
     const shares = displayShares(t)
@@ -836,7 +849,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
   }
 
   const sortedFiltered = useMemo(() => {
-    if (filter === 'lastweek') {
+    if (filter === 'lastweek' || filter === 'lastmonth') {
       return [...filtered].sort((a, b) => {
         const lastTs = (t: typeof filtered[number]) => {
           const times = [
@@ -1184,6 +1197,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
               <SelectItem value="all">All Trades</SelectItem>
               <SelectItem value="open">Open Trades</SelectItem>
               <SelectItem value="lastweek">Last Week</SelectItem>
+              <SelectItem value="lastmonth">Last Month</SelectItem>
               <SelectItem value="marked">Marked to Revisit</SelectItem>
               <SelectItem value="win">Winners</SelectItem>
               <SelectItem value="loss">Losers</SelectItem>

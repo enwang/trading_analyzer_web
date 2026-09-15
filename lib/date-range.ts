@@ -52,6 +52,12 @@ function addDaysToDateKey(dateKey: string, days: number) {
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`
 }
 
+function addMonthsToMonthStart(dateKey: string, months: number) {
+  const [year, month] = dateKey.split('-').map(Number)
+  const d = new Date(Date.UTC(year, month - 1 + months, 1))
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-01`
+}
+
 export function getTodayDateKey(options: DateRangeOptions = {}) {
   return dateKeyInTimeZone(options.now ?? new Date(), options.timeZone)!
 }
@@ -82,5 +88,14 @@ export function getStartDate(range: DateRangeKey, options: DateRangeOptions = {}
     case 'MTD': return `${y}-${month}-01`
     case 'YTD': return `${y}-01-01`
     case 'All': return null
+  }
+}
+
+export function getLastMonthRange(options: DateRangeOptions = {}): { start: string; endExclusive: string } {
+  const todayKey = getTodayDateKey(options)
+  const currentMonthStart = addMonthsToMonthStart(todayKey, 0)
+  return {
+    start: addMonthsToMonthStart(currentMonthStart, -1),
+    endExclusive: currentMonthStart,
   }
 }
