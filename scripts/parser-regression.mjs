@@ -164,6 +164,48 @@ if ((runRows[0].shares ?? 0) !== 1000) {
   fail(`expected aggregated RUN shares = 1000, got ${runRows[0].shares}`)
 }
 
+const stopLossFirstAddonCsv = `Open/CloseIndicator,Symbol,Quantity,Date/Time,Open Date/Time,Buy/Sell,T. Price,Basis
+O,SNDK,100,2026-09-15 09:30:00,,BUY,138.10,
+O,SNDK,100,2026-09-15 10:05:00,,BUY,137.50,
+O,XYZ,10,2026-09-15 09:30:00,,BUY,20,
+C,XYZ,10,2026-09-15 10:30:00,2026-09-15 09:30:00,SELL,21,200
+`
+const stopLossFirstAddonTrades = parseFlexCsv(stopLossFirstAddonCsv)
+const sndkAddonRows = stopLossFirstAddonTrades.filter((t) => t.symbol === 'SNDK')
+if (sndkAddonRows.length !== 2) {
+  fail(`expected stop-loss-first SNDK add-on to stay separate even at lower price, got ${JSON.stringify(sndkAddonRows)}`)
+}
+if (!sndkAddonRows.some((t) => t.entry_price === 138.1 && t.shares === 100 && t.outcome === 'open')) {
+  fail(`expected original SNDK open 100 @ 138.1, got ${JSON.stringify(sndkAddonRows)}`)
+}
+if (!sndkAddonRows.some((t) => t.entry_price === 137.5 && t.shares === 100 && t.outcome === 'open')) {
+  fail(`expected lower-price SNDK add-on open 100 @ 137.5, got ${JSON.stringify(sndkAddonRows)}`)
+}
+
+const stopLossFirstClosedAddonCsv = `Open/CloseIndicator,Symbol,Quantity,Date/Time,Open Date/Time,Buy/Sell,T. Price,Basis
+O,SNDK,50,2026-09-11 10:16:41,,BUY,1638,
+O,SNDK,50,2026-09-15 09:52:46,,BUY,1559.75,
+C,SNDK,50,2026-09-15 10:51:05,2026-09-15 09:52:46,SELL,1545.5,77987.5
+O,XYZ,10,2026-09-15 09:30:00,,BUY,20,
+C,XYZ,10,2026-09-15 10:30:00,2026-09-15 09:30:00,SELL,21,200
+`
+const stopLossFirstClosedAddonTrades = parseFlexCsv(stopLossFirstClosedAddonCsv)
+const sndkClosedAddonRows = stopLossFirstClosedAddonTrades.filter((t) => t.symbol === 'SNDK')
+if (sndkClosedAddonRows.length !== 2) {
+  fail(`expected SNDK old open + separate closed add-on, got ${JSON.stringify(sndkClosedAddonRows)}`)
+}
+const sndkOldOpen = sndkClosedAddonRows.find((t) => t.outcome === 'open')
+if (!sndkOldOpen || sndkOldOpen.entry_price !== 1638 || sndkOldOpen.shares !== 50 || sndkOldOpen.pnl !== null) {
+  fail(`expected old SNDK lot to remain open 50 @ 1638 with no realized pnl, got ${JSON.stringify(sndkOldOpen)}`)
+}
+const sndkClosedAddon = sndkClosedAddonRows.find((t) => t.exit_time != null)
+if (!sndkClosedAddon || sndkClosedAddon.entry_price !== 1559.75 || sndkClosedAddon.shares !== 50) {
+  fail(`expected SNDK add-on to close as separate 50 @ 1559.75 lot, got ${JSON.stringify(sndkClosedAddon)}`)
+}
+if (Math.abs((sndkClosedAddon.pnl ?? 0) - ((1545.5 - 1559.75) * 50)) > 1e-9) {
+  fail(`expected SNDK add-on pnl = ${(1545.5 - 1559.75) * 50}, got ${sndkClosedAddon.pnl}`)
+}
+
 const afterSellAddonCsv = `Open/CloseIndicator,Symbol,Quantity,Date/Time,Open Date/Time,Buy/Sell,T. Price,Basis
 O,ARM,100,2026-03-01 09:30:00,,BUY,100,
 C,ARM,50,2026-03-02 10:00:00,,SELL,110,5000

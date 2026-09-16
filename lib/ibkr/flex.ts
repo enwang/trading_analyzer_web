@@ -22,6 +22,7 @@ const POLL_INTERVAL_MS = 3_000
 
 // Only include trades opened on or after this date
 const QUERY_START = new Date('2026-01-01T00:00:00Z')
+const STOP_LOSS_FIRST_SIZING_START_DATE = '2026-08-31'
 
 // ---------------------------------------------------------------------------
 // Normalized trade row (ready to upsert into Supabase)
@@ -534,11 +535,18 @@ function parseTradesCsv(csvStr: string, openPositionSnapshots: OpenPositionSnaps
         event.iso != null &&
         state.baseIso != null &&
         new Date(event.iso).getTime() - new Date(state.baseIso).getTime() > ADD_ON_SPLIT_MIN_GAP_MS
+      const newRuleAddOn =
+        state != null &&
+        event.iso != null &&
+        event.iso.slice(0, 10) >= STOP_LOSS_FIRST_SIZING_START_DATE &&
+        state.baseIso != null &&
+        new Date(event.iso).getTime() - new Date(state.baseIso).getTime() > ADD_ON_SPLIT_MIN_GAP_MS
       let nextState = state
       if (
         !nextState ||
         nextState.hasClose ||
-        highPriceAddOn
+        highPriceAddOn ||
+        newRuleAddOn
       ) {
         nextState = {
           id: (state?.id ?? 0) + 1,
@@ -677,9 +685,13 @@ function parseTradesCsv(csvStr: string, openPositionSnapshots: OpenPositionSnaps
     const candidates = lots.filter(l => l.entryIso <= exitTime && l.remainingShares > 0)
     if (!candidates.length) return null
 
+    const useNewestLotFirst = exitTime.slice(0, 10) >= STOP_LOSS_FIRST_SIZING_START_DATE
     const chosen = candidates
       .slice()
       .sort((a, b) => {
+        if (useNewestLotFirst) {
+          return a.entryIso > b.entryIso ? -1 : a.entryIso < b.entryIso ? 1 : 0
+        }
         const priceDiff = b.avgPrice - a.avgPrice
         if (priceDiff !== 0) return priceDiff
         return a.entryIso < b.entryIso ? -1 : a.entryIso > b.entryIso ? 1 : 0
