@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import { fetchFlexAll } from '@/lib/ibkr/flex'
 import { createTradeSnapshot, pruneOldSnapshots } from '@/lib/trade-snapshots'
 import { filterOutHidden, loadHiddenTradeKeys } from '@/lib/hidden-trades'
+import { usesStopLossFirstSizing } from '@/lib/market/stop-loss'
 import { NextResponse } from 'next/server'
 
 type Leg = { action?: string; shares?: number; price?: number; time?: string }
@@ -211,11 +212,16 @@ export async function GET(request: Request) {
           // stop_loss is treated like notes — it's always manually set, never computed.
           // For closed incoming rows, only use this fallback when there is one
           // existing open row for the symbol; closing a position replaces that row.
+          // New stop-loss-first trades must also match the open row's entry_time;
+          // otherwise an older open position for the same symbol can leak a stale risk.
           for (const row of rows) {
             const openSymbolRows = openRowsBySymbol.get(row.symbol) ?? []
-            if (row.exit_time != null && openSymbolRows.length !== 1) continue
+            const candidateOpenRows = row.exit_time != null && usesStopLossFirstSizing(row.entry_time)
+              ? openSymbolRows.filter(r => normalizeTs(r.entry_time) === normalizeTs(row.entry_time))
+              : openSymbolRows
+            if (row.exit_time != null && candidateOpenRows.length !== 1) continue
             const rowWithStopLoss = (row as Record<string, unknown>).stop_loss == null
-              ? openSymbolRows.find(r => r.stop_loss != null)
+              ? candidateOpenRows.find(r => r.stop_loss != null)
               : null
             if (rowWithStopLoss != null) {
               (row as Record<string, unknown>).stop_loss = rowWithStopLoss.stop_loss
@@ -227,7 +233,7 @@ export async function GET(request: Request) {
               }
             }
             const rowWithCurrentStopLoss = (row as Record<string, unknown>).current_stop_loss == null
-              ? openSymbolRows.find(r => r.current_stop_loss != null)
+              ? candidateOpenRows.find(r => r.current_stop_loss != null)
               : null
             if (rowWithCurrentStopLoss != null) {
               (row as Record<string, unknown>).current_stop_loss = rowWithCurrentStopLoss.current_stop_loss

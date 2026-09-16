@@ -15,6 +15,16 @@ function fail(message) {
   process.exit(1)
 }
 
+function usesStopLossFirstSizing(entryTime) {
+  if (!entryTime) return false
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(entryTime)) >= '2026-08-31'
+}
+
 // ---------------------------------------------------------------------------
 // Exact replica of the preserveManualFields logic used in all three routes.
 // Update this if the route logic changes.
@@ -78,9 +88,12 @@ function preserveManualFields(newRows, existingRows) {
   // manual risk fields from the one open row that is being replaced.
   for (const row of newRows) {
     const openSymbolRows = openRowsBySymbol.get(row.symbol) ?? []
-    if (row.exit_time != null && openSymbolRows.length !== 1) continue
+    const candidateOpenRows = row.exit_time != null && usesStopLossFirstSizing(row.entry_time)
+      ? openSymbolRows.filter(r => normalizeTs(r.entry_time) === normalizeTs(row.entry_time))
+      : openSymbolRows
+    if (row.exit_time != null && candidateOpenRows.length !== 1) continue
     const rowWithStopLoss = row.stop_loss == null
-      ? openSymbolRows.find(r => r.stop_loss != null)
+      ? candidateOpenRows.find(r => r.stop_loss != null)
       : null
     if (rowWithStopLoss) {
       row.stop_loss = rowWithStopLoss.stop_loss
@@ -294,6 +307,24 @@ function fresh(overrides = {}) {
   if (rows[0].stop_loss !== 89.48) fail(`closed replacement row: stop_loss not preserved, got ${rows[0].stop_loss}`)
   if (!rows[0].stop_loss_locked) fail('closed replacement row: stop_loss_locked not preserved')
   if (rows[0].initial_risk_amount !== 1825) fail(`closed replacement row: initial_risk_amount not preserved, got ${rows[0].initial_risk_amount}`)
+}
+
+// ---------------------------------------------------------------------------
+// 12. New stop-loss-first trade close: an older open row for the same symbol
+//     must not leak stale $2000-risk stop loss into a separate new trade.
+// ---------------------------------------------------------------------------
+{
+  const existing = [
+    { symbol: 'SPCX', entry_time: '2026-08-25T14:00:00.000Z', exit_time: null,
+      stop_loss: 135.51, stop_loss_locked: true, initial_risk_amount: 2000,
+      r_multiple: null, setup_tag: 'untagged', notes: null, needs_review: false },
+  ]
+  const rows = [{ ...fresh({ symbol: 'SPCX', entry_time: '2026-09-15T14:01:30.000Z', exit_time: '2026-09-15T16:11:24.000Z' }),
+    stop_loss: null, stop_loss_locked: false, initial_risk_amount: null }]
+  preserveManualFields(rows, existing)
+  if (rows[0].stop_loss != null) fail(`new-rule closed trade inherited stale stop_loss ${rows[0].stop_loss}`)
+  if (rows[0].stop_loss_locked) fail('new-rule closed trade inherited stale stop_loss_locked')
+  if (rows[0].initial_risk_amount != null) fail(`new-rule closed trade inherited stale initial_risk_amount ${rows[0].initial_risk_amount}`)
 }
 
 console.log('notes-preservation-regression: PASS')
