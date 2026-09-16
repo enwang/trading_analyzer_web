@@ -206,6 +206,33 @@ if (Math.abs((sndkClosedAddon.pnl ?? 0) - ((1545.5 - 1559.75) * 50)) > 1e-9) {
   fail(`expected SNDK add-on pnl = ${(1545.5 - 1559.75) * 50}, got ${sndkClosedAddon.pnl}`)
 }
 
+const existingOpenAddonCsv = `ClientAccountID,Open/CloseIndicator,Symbol,Quantity,Date/Time,Open Date/Time,Buy/Sell,T. Price,Basis
+U123,O,SPCX,500,2026-08-25 10:00:00,,BUY,137.935,
+U123,O,SPCX,25,2026-08-26 10:19:23,,BUY,137.08,
+U123,O,SPCX,475,2026-08-26 10:19:23,,BUY,137.09,
+U123,C,SPCX,500,2026-08-26 10:22:03,2026-08-26 10:19:23,SELL,136.4,68542.75
+U123,O,XYZ,10,2026-08-26 09:30:00,,BUY,20,
+U123,C,XYZ,10,2026-08-26 10:30:00,2026-08-26 09:30:00,SELL,21,200
+ClientAccountID,CurrencyPrimary,AssetCategory,Symbol,Position,CostBasisPrice
+U123,USD,STK,SPCX,500,137.935
+`
+const existingOpenAddonTrades = parseFlexCsv(existingOpenAddonCsv)
+const spcxRows = existingOpenAddonTrades.filter((t) => t.symbol === 'SPCX')
+if (spcxRows.length !== 2) {
+  fail(`expected existing SPCX open lot + separate closed add-on, got ${JSON.stringify(spcxRows)}`)
+}
+const spcxOpen = spcxRows.find((t) => t.outcome === 'open')
+if (!spcxOpen || spcxOpen.entry_price !== 137.935 || spcxOpen.shares !== 500 || spcxOpen.pnl !== null) {
+  fail(`expected existing SPCX lot to remain open 500 @ 137.935, got ${JSON.stringify(spcxOpen)}`)
+}
+const spcxClosedAddon = spcxRows.find((t) => t.exit_time != null)
+if (!spcxClosedAddon || spcxClosedAddon.shares !== 500 || Math.abs((spcxClosedAddon.entry_price ?? 0) - 137.0895) > 1e-9) {
+  fail(`expected SPCX add-on to close as separate 500 @ 137.0895 lot, got ${JSON.stringify(spcxClosedAddon)}`)
+}
+if (Math.abs((spcxClosedAddon.pnl ?? 0) - ((136.4 - 137.0895) * 500)) > 1e-9) {
+  fail(`expected SPCX add-on pnl = ${(136.4 - 137.0895) * 500}, got ${spcxClosedAddon.pnl}`)
+}
+
 const afterSellAddonCsv = `Open/CloseIndicator,Symbol,Quantity,Date/Time,Open Date/Time,Buy/Sell,T. Price,Basis
 O,ARM,100,2026-03-01 09:30:00,,BUY,100,
 C,ARM,50,2026-03-02 10:00:00,,SELL,110,5000

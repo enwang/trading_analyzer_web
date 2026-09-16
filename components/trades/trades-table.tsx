@@ -35,7 +35,6 @@ import {
 } from '@/components/ui/table'
 import { riskSharesForTrade } from '@/lib/trades'
 import {
-  DEFAULT_INITIAL_RISK_AMOUNT,
   initialRiskFromStopLoss,
   riskAmountForTrade,
   suggestedStopLossFromRisk,
@@ -151,7 +150,6 @@ const SORT_KEYS: SortKey[] = [
   'currentRisk',
   'currentRiskPct',
 ]
-const DEFAULT_INITIAL_RISK_INPUT = DEFAULT_INITIAL_RISK_AMOUNT.toFixed(2)
 const TRADE_INITIAL_RISK_STORAGE_KEY = 'trades-table-initial-risk-v1'
 
 function loadStoredInitialRisks(): Record<string, string> {
@@ -323,9 +321,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
             notes: t.notes ?? '',
             initialRisk: usesStopLossFirstSizing(t.entryTime)
               ? (t.initialRiskAmount != null ? t.initialRiskAmount.toFixed(2) : '')
-              : (t.initialRiskAmount != null
-                  ? t.initialRiskAmount.toFixed(2)
-                  : riskAmountForTrade(addonTradeIds.has(t.id)).toFixed(2)),
+              : (t.initialRiskAmount != null ? t.initialRiskAmount.toFixed(2) : ''),
           },
         ])
       ),
@@ -1289,7 +1285,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
               const stopLossFirst = usesStopLossFirstSizing(t.entryTime)
               const draftInitialRisk =
                 drafts[t.id]?.initialRisk
-                ?? (stopLossFirst ? '' : DEFAULT_INITIAL_RISK_INPUT)
+                ?? ''
               const parsedDraftInitialRisk = draftInitialRisk.trim() === '' ? null : Number(draftInitialRisk)
               const stopLossDraftValue = stopLossDrafts[t.id] ?? t.stopLoss?.toFixed(2) ?? ''
               const parsedStopLossDraft = stopLossDraftValue !== '' ? Number(stopLossDraftValue) : null
@@ -1393,7 +1389,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
                           className="h-8 w-[92px] rounded-md border px-2 text-right text-xs"
                           value={draftInitialRisk}
                           onChange={(e) => updateDraft(t.id, 'initialRisk', e.target.value)}
-                          placeholder="2000.00"
+                          placeholder="Initial risk"
                           inputMode="decimal"
                         />
                       </TableCell>

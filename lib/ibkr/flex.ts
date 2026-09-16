@@ -503,6 +503,7 @@ function parseTradesCsv(csvStr: string, openPositionSnapshots: OpenPositionSnaps
     legs: { time: string; action: 'BUY' | 'SELL'; shares: number; price: number }[]
   }>()
   const openGroupIdsByRow = new Map<Record<string, string>, string>()
+  const activeOpenSymbols = new Set(openPositionSnapshots.map((snapshot) => snapshot.symbol))
 
   const ADD_ON_SPLIT_MIN_GAP_MS = 5 * 60_000
   type SegmentState = { id: number; hasClose: boolean; basePrice: number | null; baseIso: string | null }
@@ -538,7 +539,7 @@ function parseTradesCsv(csvStr: string, openPositionSnapshots: OpenPositionSnaps
       const newRuleAddOn =
         state != null &&
         event.iso != null &&
-        event.iso.slice(0, 10) >= STOP_LOSS_FIRST_SIZING_START_DATE &&
+        (event.iso.slice(0, 10) >= STOP_LOSS_FIRST_SIZING_START_DATE || activeOpenSymbols.has(event.sym)) &&
         state.baseIso != null &&
         new Date(event.iso).getTime() - new Date(state.baseIso).getTime() > ADD_ON_SPLIT_MIN_GAP_MS
       let nextState = state
@@ -685,7 +686,7 @@ function parseTradesCsv(csvStr: string, openPositionSnapshots: OpenPositionSnaps
     const candidates = lots.filter(l => l.entryIso <= exitTime && l.remainingShares > 0)
     if (!candidates.length) return null
 
-    const useNewestLotFirst = exitTime.slice(0, 10) >= STOP_LOSS_FIRST_SIZING_START_DATE
+    const useNewestLotFirst = exitTime.slice(0, 10) >= STOP_LOSS_FIRST_SIZING_START_DATE || activeOpenSymbols.has(sym)
     const chosen = candidates
       .slice()
       .sort((a, b) => {

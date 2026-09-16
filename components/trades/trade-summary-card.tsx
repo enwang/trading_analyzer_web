@@ -7,7 +7,6 @@ import { Info } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import {
-  DEFAULT_INITIAL_RISK_AMOUNT,
   initialRiskFromStopLoss,
   suggestedStopLossFromRisk,
   usesStopLossFirstSizing,
@@ -141,7 +140,7 @@ export function TradeSummaryCard({
   )
   const stopLossFirst = usesStopLossFirstSizing(entryTime)
   const [initialRiskInput, setInitialRiskInput] = useState(
-    () => (initialRiskAmount ?? (stopLossFirst ? null : DEFAULT_INITIAL_RISK_AMOUNT))?.toFixed(2) ?? ''
+    () => initialRiskAmount?.toFixed(2) ?? ''
   )
   const [stopLossInput, setStopLossInput] = useState(
     () => initialStopLoss?.toFixed(2) ?? ''
@@ -360,7 +359,7 @@ export function TradeSummaryCard({
                   riskInputTouchedRef.current = true
                   setInitialRiskInput(e.target.value)
                 }}
-                placeholder="2000.00"
+                placeholder="Initial risk"
                 className="h-8"
               />
             )}

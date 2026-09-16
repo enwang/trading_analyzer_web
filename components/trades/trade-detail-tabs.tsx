@@ -10,7 +10,6 @@ import { LocalTime } from '@/components/ui/local-time'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { TradeAiAnalyzer } from '@/components/trades/trade-ai-analyzer'
 import {
-  DEFAULT_INITIAL_RISK_AMOUNT,
   initialRiskFromStopLoss,
   suggestedStopLossFromRisk,
   usesStopLossFirstSizing,
@@ -185,7 +184,7 @@ export function TradeDetailTabs(props: Props) {
   )
   const stopLossFirst = usesStopLossFirstSizing(entryTime)
   const [initialRiskInput, setInitialRiskInput] = useState(
-    () => (initialRiskAmount ?? (stopLossFirst ? null : DEFAULT_INITIAL_RISK_AMOUNT))?.toFixed(2) ?? ''
+    () => initialRiskAmount?.toFixed(2) ?? ''
   )
   const [stopLossInput, setStopLossInput] = useState(
     () => initialStopLoss?.toFixed(2) ?? ''
