@@ -8,6 +8,7 @@ import {
   type ScoreBreakdown,
   type TradePattern,
 } from '@/lib/report-metrics'
+import { countMergedExecutionLegsByAction } from '@/lib/execution-legs'
 import { runLlmText } from '@/lib/ai/llm-analysis'
 import { getCachedAnalysis, setCachedAnalysis, simpleHash } from '@/lib/rag/analysis-cache'
 import type {
@@ -282,22 +283,11 @@ function advancedCards(metrics: ExtendedMetrics, summary: ReturnType<typeof comp
   ] satisfies ConsistencyMetricCard[]
 }
 
-function countMergedLegs(legs: Trade['executionLegs'], action: 'BUY' | 'SELL'): number {
-  if (!legs) return 0
-  const buckets = new Set<string>()
-  for (const leg of legs) {
-    if (leg.action !== action) continue
-    const ts = Date.parse(leg.time)
-    buckets.add(Number.isNaN(ts) ? leg.time : String(Math.floor(ts / 60000)))
-  }
-  return buckets.size
-}
-
 function buildSpotlightHighlights(trade: Trade, summary: ReturnType<typeof computeSummary>) {
   const entryAction = trade.side === 'short' ? 'SELL' : 'BUY'
   const exitAction = trade.side === 'short' ? 'BUY' : 'SELL'
-  const buys = countMergedLegs(trade.executionLegs, entryAction)
-  const sells = countMergedLegs(trade.executionLegs, exitAction)
+  const buys = countMergedExecutionLegsByAction(trade.executionLegs, entryAction)
+  const sells = countMergedExecutionLegsByAction(trade.executionLegs, exitAction)
   const peakGap = trade.mfe != null && trade.pnl != null ? trade.mfe - trade.pnl : null
   const drawdown = trade.mae != null ? Math.abs(trade.mae) : null
 

@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { LocalTime } from '@/components/ui/local-time'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { TradeAiAnalyzer } from '@/components/trades/trade-ai-analyzer'
+import { mergeExecutionLegs } from '@/lib/execution-legs'
 import {
   initialRiskFromStopLoss,
   suggestedStopLossFromRisk,
@@ -97,24 +98,6 @@ function perFillGrossPnl(leg: ExecutionLeg, side: Side, entryPrice: number | nul
   if (leg.action === oa) return 0
   if (side === 'long') return (leg.price - entryPrice) * leg.shares
   return (entryPrice - leg.price) * leg.shares
-}
-
-function mergeExecutionLegs(legs: ExecutionLeg[] | null): ExecutionLeg[] {
-  if (!legs || legs.length === 0) return []
-  const buckets = new Map<string, { time: string; action: 'BUY' | 'SELL'; shares: number; weightedCost: number; sortTs: number }>()
-  for (const leg of legs) {
-    const ts = Date.parse(leg.time)
-    const bucket = Number.isNaN(ts) ? leg.time : String(Math.floor(ts / 60000))
-    const key = `${bucket}|${leg.action}`
-    const ex = buckets.get(key) ?? { time: leg.time, action: leg.action, shares: 0, weightedCost: 0, sortTs: Number.isNaN(ts) ? 0 : ts }
-    ex.shares += leg.shares
-    ex.weightedCost += leg.price * leg.shares
-    if (!Number.isNaN(ts) && (ex.sortTs === 0 || ts < ex.sortTs)) { ex.sortTs = ts; ex.time = leg.time }
-    buckets.set(key, ex)
-  }
-  return Array.from(buckets.values())
-    .map((b) => ({ time: b.time, action: b.action, shares: b.shares, price: b.shares > 0 ? b.weightedCost / b.shares : 0 }))
-    .sort((a, b) => { const ta = Date.parse(a.time); const tb = Date.parse(b.time); if (Number.isNaN(ta) || Number.isNaN(tb)) return a.time < b.time ? -1 : 1; return ta - tb })
 }
 
 function InfoTooltip({ text }: { text: string }) {

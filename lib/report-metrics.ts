@@ -1,4 +1,5 @@
 import type { Trade, SummaryStats } from '@/types/trade'
+import { countMergedExecutionLegsByAction } from '@/lib/execution-legs'
 import { closedTrades } from '@/lib/metrics'
 
 // ---------------------------------------------------------------------------
@@ -64,27 +65,14 @@ export function detectTradingPatterns(trades: Trade[]): TradePattern[] {
     (t) => t.mfe != null && t.mfe > 0 && t.outcome === 'loss',
   )
 
-  // Use the same minute-bucket merging as the execution details tab: fills within the same minute
-  // are one logical entry/exit. Scale In/Out only triggers when there are 2+ distinct minute buckets.
-  function countMergedLegs(legs: Trade['executionLegs'], action: 'BUY' | 'SELL'): number {
-    if (!legs) return 0
-    const buckets = new Set<string>()
-    for (const leg of legs) {
-      if (leg.action !== action) continue
-      const ts = Date.parse(leg.time)
-      buckets.add(Number.isNaN(ts) ? leg.time : String(Math.floor(ts / 60000)))
-    }
-    return buckets.size
-  }
-
   // For long trades: entry = BUY, exit = SELL. For short trades: entry = SELL, exit = BUY.
   const scaleIn = closed.filter((t) => {
     const entryAction = t.side === 'short' ? 'SELL' : 'BUY'
-    return countMergedLegs(t.executionLegs, entryAction) > 1
+    return countMergedExecutionLegsByAction(t.executionLegs, entryAction) > 1
   })
   const scaleOut = closed.filter((t) => {
     const exitAction = t.side === 'short' ? 'BUY' : 'SELL'
-    return countMergedLegs(t.executionLegs, exitAction) > 1
+    return countMergedExecutionLegsByAction(t.executionLegs, exitAction) > 1
   })
 
   const timeInDrawdown = closed.filter(
