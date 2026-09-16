@@ -408,7 +408,13 @@ export function TradeDetailTabs(props: Props) {
                 <div className="border-t py-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-muted-foreground">Initial Risk</span>
-                    <span className="text-xs font-medium">{fmtMoney(calculatedInitialRisk)}</span>
+                    <Input
+                      value={calculatedInitialRisk != null ? calculatedInitialRisk.toFixed(2) : ''}
+                      readOnly
+                      tabIndex={-1}
+                      className="h-7 w-24 bg-muted/30 text-right text-xs text-muted-foreground"
+                      aria-label="Calculated initial risk"
+                    />
                   </div>
                   <div className="mt-1 flex items-center justify-between">
                     <span className="text-xs text-muted-foreground">Shares</span>

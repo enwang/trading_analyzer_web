@@ -368,7 +368,19 @@ export function TradeSummaryCard({
         </div>
 
         {stopLossFirst && (
-          <Row label="Initial Risk" value={fmtMoney(calculatedInitialRisk)} />
+          <div className="border-b py-2">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Initial Risk</span>
+            </div>
+            <Input
+              value={calculatedInitialRisk != null ? calculatedInitialRisk.toFixed(2) : ''}
+              readOnly
+              tabIndex={-1}
+              placeholder="Initial risk"
+              className="h-8 bg-muted/30 text-muted-foreground"
+              aria-label="Calculated initial risk"
+            />
+          </div>
         )}
         <Row label="Initial Risk %" value={initialRiskPct != null ? `${initialRiskPct.toFixed(2)}%` : '—'} />
         <Row label="R Multiple" value={

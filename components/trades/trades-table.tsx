@@ -1377,9 +1377,16 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
                   if (col === 'initialAmount') return <TableCell key={col} className="text-right">{initialAmount(t) != null ? fmtMoney(initialAmount(t) as number) : '—'}</TableCell>
                   if (col === 'initialRisk') {
                     if (stopLossFirst) {
+                      const calculatedRisk = initialRisk(t, effectiveInitialStopLoss)
                       return (
-                        <TableCell key={col} className="text-right font-medium">
-                          {initialRisk(t, effectiveInitialStopLoss) != null ? fmtMoney(initialRisk(t, effectiveInitialStopLoss) as number) : '—'}
+                        <TableCell key={col} className="text-right">
+                          <input
+                            className="h-8 w-[92px] rounded-md border bg-muted/30 px-2 text-right text-xs text-muted-foreground"
+                            value={calculatedRisk != null ? calculatedRisk.toFixed(2) : ''}
+                            readOnly
+                            tabIndex={-1}
+                            aria-label="Calculated initial risk"
+                          />
                         </TableCell>
                       )
                     }
