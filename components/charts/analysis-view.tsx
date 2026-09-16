@@ -16,6 +16,7 @@ import {
   Tooltip,
   ResponsiveContainer,
   Legend,
+  ReferenceLine,
 } from 'recharts'
 import { Plus, Settings2 } from 'lucide-react'
 
@@ -131,13 +132,11 @@ function fmtMoney(n: number) {
 
 function fmtBucketMoney(n: number) {
   const sign = n < 0 ? '-' : ''
-  return `${sign}$${Math.abs(n).toLocaleString('en-US', {
-    maximumFractionDigits: 0,
-  })}`
+  return `${sign}${Math.abs(n).toFixed(0)}`
 }
 
 function fmtBucketLabel(min: number, max: number) {
-  if (min === 0 && max === 0) return '[$0]'
+  if (min === 0 && max === 0) return '[0]'
   return `[${fmtBucketMoney(min)}, ${fmtBucketMoney(max)}]`
 }
 
@@ -338,7 +337,25 @@ type PnlDistributionBucket = {
   max: number
   label: string
   count: number
+  signedCount: number
   totalPnl: number
+  signedTotalPnl: number
+}
+
+type DistributionMode = 'count' | 'pnl'
+
+function niceCeil(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return 1
+  const magnitude = 10 ** Math.floor(Math.log10(value))
+  const normalized = value / magnitude
+  const niceNormalized = normalized <= 1
+    ? 1
+    : normalized <= 2
+      ? 2
+      : normalized <= 5
+        ? 5
+        : 10
+  return niceNormalized * magnitude
 }
 
 function buildSideBuckets(values: number[]) {
@@ -359,7 +376,9 @@ function buildSideBuckets(values: number[]) {
       max,
       label: fmtBucketLabel(min, max),
       count: 0,
+      signedCount: 0,
       totalPnl: 0,
+      signedTotalPnl: 0,
     })
   }
 
@@ -370,7 +389,9 @@ function buildSideBuckets(values: number[]) {
     const bucket = bucketMap.get(min)
     if (!bucket) continue
     bucket.count += 1
+    bucket.signedCount = bucket.max <= 0 ? -bucket.count : bucket.count
     bucket.totalPnl += value
+    bucket.signedTotalPnl = bucket.totalPnl
   }
 
   return Array.from(bucketMap.values()).filter((bucket) => bucket.count > 0)
@@ -387,7 +408,15 @@ function buildPnlDistribution(trades: ClosedTrade[]) {
   const wins = pnls.filter((pnl) => pnl > 0)
   const buckets = [
     ...buildSideBuckets(losses),
-    ...(breakevens.length ? [{ min: 0, max: 0, label: '[$0]', count: breakevens.length, totalPnl: 0 }] : []),
+    ...(breakevens.length ? [{
+      min: 0,
+      max: 0,
+      label: '[0]',
+      count: breakevens.length,
+      signedCount: breakevens.length,
+      totalPnl: 0,
+      signedTotalPnl: 0,
+    }] : []),
     ...buildSideBuckets(wins),
   ]
 
@@ -395,8 +424,20 @@ function buildPnlDistribution(trades: ClosedTrade[]) {
 }
 
 function PnlDistributionCard({ trades }: { trades: ClosedTrade[] }) {
+  const [mode, setMode] = useState<DistributionMode>('count')
   const distribution = useMemo(() => buildPnlDistribution(trades), [trades])
-  const maxCount = Math.max(1, ...distribution.buckets.map((bucket) => bucket.count))
+  const maxCount = niceCeil(Math.max(1, ...distribution.buckets.map((bucket) => bucket.count)))
+  const maxTotalPnl = niceCeil(Math.max(1, ...distribution.buckets.map((bucket) => Math.abs(bucket.totalPnl))))
+  const yMax = mode === 'count' ? maxCount : maxTotalPnl
+  const yDomain: [number, number] = [-yMax, yMax]
+  const yTicks = [-yMax, -yMax / 2, 0, yMax / 2, yMax]
+  const barDataKey = mode === 'count' ? 'signedCount' : 'signedTotalPnl'
+  const xTicks = useMemo(() => {
+    const labels = distribution.buckets.map((bucket) => bucket.label)
+    if (labels.length <= 10) return labels
+    const every = Math.ceil(labels.length / 10)
+    return labels.filter((_, index) => index === 0 || index === labels.length - 1 || index % every === 0)
+  }, [distribution.buckets])
 
   return (
     <Card className="overflow-hidden">
@@ -404,27 +445,51 @@ function PnlDistributionCard({ trades }: { trades: ClosedTrade[] }) {
         <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
           <div>
             <div className="text-sm font-medium">P&L Distribution</div>
-            <div className="text-muted-foreground text-xs">{distribution.total} closed trades</div>
+            <div className="text-muted-foreground text-xs">
+              {distribution.total} closed trades · {mode === 'count' ? 'by trade count' : 'by total P&L'}
+            </div>
+          </div>
+          <div className="inline-flex rounded-md border bg-background p-0.5">
+            {(['count', 'pnl'] as const).map((nextMode) => (
+              <Button
+                key={nextMode}
+                type="button"
+                variant={mode === nextMode ? 'default' : 'ghost'}
+                size="sm"
+                className="h-7 px-3 text-xs"
+                onClick={() => setMode(nextMode)}
+              >
+                {nextMode === 'count' ? 'Count' : 'P&L'}
+              </Button>
+            ))}
           </div>
         </div>
 
         <div className="h-[320px] px-3 py-2">
           {distribution.buckets.length ? (
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={distribution.buckets} margin={{ top: 10, right: 14, left: 6, bottom: 10 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+              <BarChart data={distribution.buckets} margin={{ top: 16, right: 14, left: 6, bottom: 18 }}>
+                <CartesianGrid vertical={false} stroke="#f1f5f9" />
                 <XAxis
                   dataKey="label"
-                  interval="preserveStartEnd"
-                  tick={{ fontSize: 11 }}
-                  height={36}
+                  interval={0}
+                  ticks={xTicks}
+                  tick={{ fontSize: 10 }}
+                  tickLine={false}
+                  axisLine={false}
+                  height={44}
                 />
                 <YAxis
                   allowDecimals={false}
-                  domain={[0, maxCount]}
-                  tick={{ fontSize: 12 }}
-                  width={44}
+                  domain={yDomain}
+                  ticks={yTicks}
+                  tick={{ fontSize: 11 }}
+                  tickFormatter={(v: number) => mode === 'count' ? Math.abs(v).toFixed(0) : fmtMoney(v)}
+                  axisLine={false}
+                  tickLine={false}
+                  width={mode === 'count' ? 44 : 76}
                 />
+                <ReferenceLine y={0} stroke="#9ca3af" strokeWidth={1.25} />
                 <Tooltip
                   content={({ active, payload }) => {
                     if (!active || !payload?.length) return null
@@ -437,15 +502,18 @@ function PnlDistributionCard({ trades }: { trades: ClosedTrade[] }) {
                         <div className={bucket.totalPnl >= 0 ? 'text-emerald-600' : 'text-red-600'}>
                           Total P&L: {fmtMoney(bucket.totalPnl)}
                         </div>
+                        <div className="text-muted-foreground">
+                          Avg P&L: {fmtMoney(bucket.totalPnl / bucket.count)}
+                        </div>
                       </div>
                     )
                   }}
                 />
-                <Bar dataKey="count" name="Trades" radius={[3, 3, 0, 0]}>
+                <Bar dataKey={barDataKey} name={mode === 'count' ? 'Trades' : 'Total P&L'} radius={[3, 3, 0, 0]}>
                   {distribution.buckets.map((bucket) => (
                     <Cell
                       key={bucket.label}
-                      fill={bucket.min === 0 && bucket.max === 0 ? '#94a3b8' : bucket.max <= 0 ? '#ef4444' : '#10b981'}
+                      fill={bucket.min === 0 && bucket.max === 0 ? '#64748b' : bucket.max <= 0 ? '#dc2626' : '#10b981'}
                     />
                   ))}
                 </Bar>
