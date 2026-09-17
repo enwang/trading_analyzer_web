@@ -321,7 +321,9 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
             notes: t.notes ?? '',
             initialRisk: usesStopLossFirstSizing(t.entryTime)
               ? (t.initialRiskAmount != null ? t.initialRiskAmount.toFixed(2) : '')
-              : (t.initialRiskAmount != null ? t.initialRiskAmount.toFixed(2) : ''),
+              : (t.initialRiskAmount != null
+                  ? t.initialRiskAmount.toFixed(2)
+                  : riskAmountForTrade(addonTradeIds.has(t.id)).toFixed(2)),
           },
         ])
       ),
@@ -1285,7 +1287,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
               const stopLossFirst = usesStopLossFirstSizing(t.entryTime)
               const draftInitialRisk =
                 drafts[t.id]?.initialRisk
-                ?? ''
+                ?? (stopLossFirst ? '' : riskAmountForTrade(addonTradeIds.has(t.id)).toFixed(2))
               const parsedDraftInitialRisk = draftInitialRisk.trim() === '' ? null : Number(draftInitialRisk)
               const stopLossDraftValue = stopLossDrafts[t.id] ?? t.stopLoss?.toFixed(2) ?? ''
               const parsedStopLossDraft = stopLossDraftValue !== '' ? Number(stopLossDraftValue) : null
