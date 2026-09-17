@@ -116,17 +116,17 @@ C,XYZ,10,2026-03-03 10:00:00,2026-03-01 10:00:00,SELL,21,200
 `
 const multiLotTrades = parseFlexCsv(multiLotOpenCsv)
 const aaoi = multiLotTrades.filter((t) => t.symbol === 'AAOI')
-if (aaoi.length !== 1) {
-  fail(`expected 1 aggregated AAOI open trade, got ${aaoi.length}`)
+if (aaoi.length !== 2) {
+  fail(`expected existing AAOI open add-on to stay separate, got ${aaoi.length}`)
 }
-if (aaoi[0].outcome !== 'open') {
-  fail(`expected aggregated AAOI row to stay open, got ${aaoi[0].outcome}`)
+if (!aaoi.every((t) => t.outcome === 'open')) {
+  fail(`expected both AAOI rows to stay open, got ${JSON.stringify(aaoi)}`)
 }
-if ((aaoi[0].shares ?? 0) !== 150) {
-  fail(`expected aggregated AAOI shares = 150, got ${aaoi[0].shares}`)
+if (!aaoi.some((t) => t.entry_price === 10 && t.shares === 100)) {
+  fail(`expected original AAOI open 100 @ 10, got ${JSON.stringify(aaoi)}`)
 }
-if (Math.abs((aaoi[0].entry_price ?? 0) - (1450 / 150)) > 1e-9) {
-  fail(`expected aggregated AAOI entry price = ${1450 / 150}, got ${aaoi[0].entry_price}`)
+if (!aaoi.some((t) => t.entry_price === 9 && t.shares === 50)) {
+  fail(`expected AAOI add-on open 50 @ 9, got ${JSON.stringify(aaoi)}`)
 }
 
 const higherPriceAddonOpenCsv = `Open/CloseIndicator,Symbol,Quantity,Date/Time,Open Date/Time,Buy/Sell,T. Price,Basis
@@ -213,8 +213,6 @@ U123,O,SPCX,475,2026-08-26 10:19:23,,BUY,137.09,
 U123,C,SPCX,500,2026-08-26 10:22:03,2026-08-26 10:19:23,SELL,136.4,68542.75
 U123,O,XYZ,10,2026-08-26 09:30:00,,BUY,20,
 U123,C,XYZ,10,2026-08-26 10:30:00,2026-08-26 09:30:00,SELL,21,200
-ClientAccountID,CurrencyPrimary,AssetCategory,Symbol,Position,CostBasisPrice
-U123,USD,STK,SPCX,500,137.935
 `
 const existingOpenAddonTrades = parseFlexCsv(existingOpenAddonCsv)
 const spcxRows = existingOpenAddonTrades.filter((t) => t.symbol === 'SPCX')

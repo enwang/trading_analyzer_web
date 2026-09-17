@@ -504,6 +504,16 @@ function parseTradesCsv(csvStr: string, openPositionSnapshots: OpenPositionSnaps
   }>()
   const openGroupIdsByRow = new Map<Record<string, string>, string>()
   const activeOpenSymbols = new Set(openPositionSnapshots.map((snapshot) => snapshot.symbol))
+  const netQuantityBySymbol = new Map<string, number>()
+  for (const row of raw) {
+    const sym = col(row, 'symbol').toUpperCase().trim()
+    const quantity = parseNum(col(row, 'quantity'))
+    if (!sym || quantity == null) continue
+    netQuantityBySymbol.set(sym, (netQuantityBySymbol.get(sym) ?? 0) + quantity)
+  }
+  for (const [sym, netQuantity] of netQuantityBySymbol) {
+    if (Math.abs(netQuantity) > 1e-9) activeOpenSymbols.add(sym)
+  }
 
   const ADD_ON_SPLIT_MIN_GAP_MS = 5 * 60_000
   type SegmentState = { id: number; hasClose: boolean; basePrice: number | null; baseIso: string | null }
@@ -525,6 +535,17 @@ function parseTradesCsv(csvStr: string, openPositionSnapshots: OpenPositionSnaps
       return a.index - b.index
     })
 
+  // A close row's Open Date/Time identifies the exact lot IBKR closed. Use
+  // that signal to keep older add-ons separate even when the Flex response
+  // omits the optional Open Positions section.
+  const closeReferencedEntryKeys = new Set<string>()
+  for (const event of chronologicalRows) {
+    if (!event.isC) continue
+    const openDtStr = col(event.row, 'open date/time', 'opendatetime', 'open date', 'opendate')
+    const openIso = openDtStr ? toUtcIso(parseIbkrDatetime(openDtStr)) : null
+    if (openIso) closeReferencedEntryKeys.add(`${event.sym}|${openIso}`)
+  }
+
   for (const event of chronologicalRows) {
     const state = segmentStateBySymbol.get(event.sym)
     if (event.isO) {
@@ -539,7 +560,11 @@ function parseTradesCsv(csvStr: string, openPositionSnapshots: OpenPositionSnaps
       const newRuleAddOn =
         state != null &&
         event.iso != null &&
-        (event.iso.slice(0, 10) >= STOP_LOSS_FIRST_SIZING_START_DATE || activeOpenSymbols.has(event.sym)) &&
+        (
+          event.iso.slice(0, 10) >= STOP_LOSS_FIRST_SIZING_START_DATE ||
+          activeOpenSymbols.has(event.sym) ||
+          closeReferencedEntryKeys.has(`${event.sym}|${event.iso}`)
+        ) &&
         state.baseIso != null &&
         new Date(event.iso).getTime() - new Date(state.baseIso).getTime() > ADD_ON_SPLIT_MIN_GAP_MS
       let nextState = state
@@ -678,7 +703,7 @@ function parseTradesCsv(csvStr: string, openPositionSnapshots: OpenPositionSnaps
     sym: string,
     exitTime: string | null,
     requestedShares: number | null,
-    _preferredEntryTime: string | null,
+    preferredEntryTime: string | null,
     _basisEntryPrice: number | null
   ): { entryTime: string; shares: number } | null {
     if (!exitTime || requestedShares == null || requestedShares <= 0) return null
@@ -687,7 +712,10 @@ function parseTradesCsv(csvStr: string, openPositionSnapshots: OpenPositionSnaps
     if (!candidates.length) return null
 
     const useNewestLotFirst = exitTime.slice(0, 10) >= STOP_LOSS_FIRST_SIZING_START_DATE || activeOpenSymbols.has(sym)
-    const chosen = candidates
+    const exactPreferred = preferredEntryTime
+      ? candidates.find((lot) => lot.entryIso === preferredEntryTime)
+      : null
+    const chosen = exactPreferred ?? candidates
       .slice()
       .sort((a, b) => {
         if (useNewestLotFirst) {
