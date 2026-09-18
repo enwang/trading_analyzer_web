@@ -29,7 +29,7 @@ export async function PATCH(
 
   const { data: existingTrade, error: readError } = await supabase
     .from('trades')
-    .select('entry_time')
+    .select('entry_time, current_stop_loss')
     .eq('id', id)
     .eq('user_id', user.id)
     .single()
@@ -49,7 +49,13 @@ export async function PATCH(
     r_multiple: isStaleDefaultRiskSave ? null : payload.rMultiple,
   }
   if ('stopLossLocked' in payload) updatePayload.stop_loss_locked = payload.stopLossLocked
-  if ('currentStopLoss' in payload) updatePayload.current_stop_loss = isStaleDefaultRiskSave ? null : payload.currentStopLoss
+  if ('currentStopLoss' in payload) {
+    updatePayload.current_stop_loss = isStaleDefaultRiskSave ? null : payload.currentStopLoss
+  } else if (!isStaleDefaultRiskSave && payload.stopLoss != null && existingTrade.current_stop_loss == null) {
+    // Initialize live risk from Initial SL once. Future Current SL edits are
+    // independent because they send currentStopLoss explicitly.
+    updatePayload.current_stop_loss = payload.stopLoss
+  }
   if ('initialRiskAmount' in payload) updatePayload.initial_risk_amount = payload.initialRiskAmount
 
   const { error } = await supabase

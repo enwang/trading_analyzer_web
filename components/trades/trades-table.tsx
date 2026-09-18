@@ -982,8 +982,11 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
     const nextInitialRisk = stopLoss != null
       ? initialRiskFromStopLoss(trade.side, trade.entryPrice, riskShares(trade), stopLoss)
       : null
+    const currentDraft = currentStopLossDraftsRef.current[id] ?? ''
+    const initializesCurrentStopLoss =
+      stopLoss != null && trade.currentStopLoss == null && currentDraft.trim() === ''
     try {
-      await fetch(`/api/trades/${id}/risk`, {
+      const response = await fetch(`/api/trades/${id}/risk`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -993,6 +996,11 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
           initialRiskAmount: nextInitialRisk,
         }),
       })
+      if (response.ok && initializesCurrentStopLoss && stopLoss != null) {
+        const nextValue = stopLoss.toFixed(2)
+        savedCurrentStopLossRef.current[id] = nextValue
+        setCurrentStopLossDrafts((prev) => ({ ...prev, [id]: nextValue }))
+      }
     } catch {
       // silently ignore
     }
