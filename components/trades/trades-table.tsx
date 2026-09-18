@@ -1116,7 +1116,9 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
   // This is a one-time server-side calculation — stop losses are stored permanently
   // and never recalculated once set. After backfill, refresh to show the new values.
   useEffect(() => {
-    const hasMissing = trades.some((t) => t.stopLoss == null && t.side && t.entryTime)
+    const hasMissing = trades.some(
+      (t) => t.stopLoss == null && t.side && t.entryTime && !usesStopLossFirstSizing(t.entryTime)
+    )
     if (!hasMissing) return
 
     fetch('/api/trades/backfill-stop-losses', { method: 'POST' })

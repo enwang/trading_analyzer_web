@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { suggestedStopLossFromRisk } from '@/lib/market/stop-loss'
+import { suggestedStopLossFromRisk, usesStopLossFirstSizing } from '@/lib/market/stop-loss'
 
 export async function POST() {
   const supabase = await createClient()
@@ -33,6 +33,7 @@ export async function POST() {
 
   for (const row of rows) {
     try {
+      if (usesStopLossFirstSizing(row.entry_time)) continue
       const stopLoss = suggestedStopLossFromRisk(row.side, row.entry_price, row.shares)
       if (stopLoss == null) continue
 
