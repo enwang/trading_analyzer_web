@@ -216,7 +216,7 @@ export async function GET(request: Request) {
           // otherwise an older open position for the same symbol can leak a stale risk.
           for (const row of rows) {
             const openSymbolRows = openRowsBySymbol.get(row.symbol) ?? []
-            const candidateOpenRows = row.exit_time != null && usesStopLossFirstSizing(row.entry_time)
+            const candidateOpenRows = usesStopLossFirstSizing(row.entry_time)
               ? openSymbolRows.filter(r => normalizeTs(r.entry_time) === normalizeTs(row.entry_time))
               : openSymbolRows
             if (row.exit_time != null && candidateOpenRows.length !== 1) continue

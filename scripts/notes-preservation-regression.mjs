@@ -59,7 +59,13 @@ function preserveManualFields(newRows, existingRows) {
       : `${row.symbol}|${normalizeTs(row.entry_time)}`
     const exactExisting = byKey.get(key)
     const symbolOpenRows = openRowsBySymbol.get(row.symbol) ?? []
-    const existing = exactExisting ?? (row.exit_time == null && symbolOpenRows.length === 1 ? symbolOpenRows[0] : null)
+    const existing = exactExisting ?? (
+      row.exit_time == null &&
+      !usesStopLossFirstSizing(row.entry_time) &&
+      symbolOpenRows.length === 1
+        ? symbolOpenRows[0]
+        : null
+    )
     if (!existing) continue
     if (row.setup_tag === 'untagged' && existing.setup_tag) row.setup_tag = existing.setup_tag
     if (!row.notes && existing.notes) row.notes = existing.notes
@@ -75,7 +81,11 @@ function preserveManualFields(newRows, existingRows) {
   for (const row of newRows) {
     if (row.exit_time != null) continue
     if (row.stop_loss_locked) continue
-    const allSymbolRows = allRowsBySymbol.get(row.symbol) ?? []
+    const allSymbolRows = usesStopLossFirstSizing(row.entry_time)
+      ? (allRowsBySymbol.get(row.symbol) ?? []).filter(
+          r => normalizeTs(r.entry_time) === normalizeTs(row.entry_time)
+        )
+      : allRowsBySymbol.get(row.symbol) ?? []
     const lockedRow = allSymbolRows.find(r => r.stop_loss_locked)
     if (lockedRow) {
       row.stop_loss_locked = true
@@ -88,7 +98,7 @@ function preserveManualFields(newRows, existingRows) {
   // manual risk fields from the one open row that is being replaced.
   for (const row of newRows) {
     const openSymbolRows = openRowsBySymbol.get(row.symbol) ?? []
-    const candidateOpenRows = row.exit_time != null && usesStopLossFirstSizing(row.entry_time)
+    const candidateOpenRows = usesStopLossFirstSizing(row.entry_time)
       ? openSymbolRows.filter(r => normalizeTs(r.entry_time) === normalizeTs(row.entry_time))
       : openSymbolRows
     if (row.exit_time != null && candidateOpenRows.length !== 1) continue
@@ -325,6 +335,24 @@ function fresh(overrides = {}) {
   if (rows[0].stop_loss != null) fail(`new-rule closed trade inherited stale stop_loss ${rows[0].stop_loss}`)
   if (rows[0].stop_loss_locked) fail('new-rule closed trade inherited stale stop_loss_locked')
   if (rows[0].initial_risk_amount != null) fail(`new-rule closed trade inherited stale initial_risk_amount ${rows[0].initial_risk_amount}`)
+}
+
+// ---------------------------------------------------------------------------
+// 13. New stop-loss-first open add-on must not inherit risk fields from an
+//     older open lot for the same symbol.
+// ---------------------------------------------------------------------------
+{
+  const existing = [
+    { symbol: 'SNDK', entry_time: '2026-09-11T14:16:41.000Z', exit_time: null,
+      stop_loss: 1616, stop_loss_locked: true, initial_risk_amount: 1100,
+      r_multiple: null, setup_tag: 'untagged', notes: null, needs_review: false },
+  ]
+  const rows = [{ ...fresh({ symbol: 'SNDK', entry_time: '2026-09-16T19:51:44.000Z', exit_time: null }),
+    stop_loss: null, stop_loss_locked: false, initial_risk_amount: null }]
+  preserveManualFields(rows, existing)
+  if (rows[0].stop_loss != null) fail(`new-rule open add-on inherited stale stop_loss ${rows[0].stop_loss}`)
+  if (rows[0].stop_loss_locked) fail('new-rule open add-on inherited stale stop_loss_locked')
+  if (rows[0].initial_risk_amount != null) fail(`new-rule open add-on inherited stale initial_risk_amount ${rows[0].initial_risk_amount}`)
 }
 
 console.log('notes-preservation-regression: PASS')

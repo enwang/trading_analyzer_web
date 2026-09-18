@@ -91,9 +91,22 @@ export async function fetchFlexRaw(token: string, queryId: string): Promise<stri
 async function sendRequest(
   token: string,
   queryId: string,
-  retries = 3
+  retries = 6
 ): Promise<{ refCode: string; dlUrl: string }> {
   const body = new URLSearchParams({ t: token, q: queryId, v: FLEX_VERSION })
+  const retryableErrorCodes = new Set([
+    '1001', // Could not be generated at this time
+    '1003', // Statement is not available
+    '1004', // Statement is incomplete
+    '1005', // Settlement data is not ready
+    '1006', // FIFO P/L data is not ready
+    '1007', // MTM P/L data is not ready
+    '1008', // MTM and FIFO P/L data is not ready
+    '1009', // Server under heavy load
+    '1018', // Too many requests
+    '1019', // Statement generation in progress
+    '1021', // Statement could not be retrieved
+  ])
 
   for (let attempt = 0; attempt < retries; attempt++) {
     const resp = await fetch(SEND_REQUEST_URL, {
@@ -103,12 +116,18 @@ async function sendRequest(
     })
     const text = await resp.text()
     const status = extractXmlTag(text, 'Status')
-    if (status?.toLowerCase().includes('too many')) {
-      await sleep(15_000)
+    const errorCode = extractXmlTag(text, 'ErrorCode')
+    const errorMessage = extractXmlTag(text, 'ErrorMessage')
+    const isRetryable =
+      (errorCode != null && retryableErrorCodes.has(errorCode)) ||
+      status?.toLowerCase().includes('too many') ||
+      errorMessage?.toLowerCase().includes('too many requests')
+    if (isRetryable && attempt < retries - 1) {
+      await sleep(Math.min(5_000 * (attempt + 1), 15_000))
       continue
     }
     if (status?.toLowerCase() !== 'success' && status?.toLowerCase() !== 'processing') {
-      const errMsg = extractXmlTag(text, 'ErrorMessage') ?? text.slice(0, 200)
+      const errMsg = errorMessage ?? text.slice(0, 200)
       throw new Error(`IBKR SendRequest failed: ${errMsg}`)
     }
     const refCode = extractXmlTag(text, 'ReferenceCode')
