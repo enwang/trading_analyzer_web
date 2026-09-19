@@ -138,6 +138,17 @@ function computeDailyTWR(
       monthlyAnchors.set(row.monthKey, 1 + row.cumulativeReturnPct / 100)
     }
   }
+  // Flex Change in NAV can include IBKR's official TWR. Prefer period rows
+  // matching this chart's baseline; unlike NAV arithmetic, these account for
+  // the exact timing of every cash flow.
+  const firstPeriodDate = validRows[1]?.report_date ?? validRows[0].report_date
+  for (const change of changes) {
+    if (change.twr == null || change.from_date > firstPeriodDate) continue
+    const anchorDate = [...validRows]
+      .reverse()
+      .find((row) => row.report_date <= change.to_date)?.report_date
+    if (anchorDate) monthlyAnchors.set(anchorDate, 1 + change.twr / 100)
+  }
   // Determine the last observed date for each month
   const monthEndDate = new Map<string, string>()
   for (const row of validRows) {
@@ -160,7 +171,7 @@ function computeDailyTWR(
     if (!disableAnchors) {
       const monthKey = curr.report_date.slice(0, 7)
       if (monthEndDate.get(monthKey) === curr.report_date) {
-        const anchor = monthlyAnchors.get(monthKey)
+        const anchor = monthlyAnchors.get(curr.report_date) ?? monthlyAnchors.get(monthKey)
         if (anchor != null) factor = anchor
       }
     }

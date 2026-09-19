@@ -29,7 +29,7 @@ export default async function AnalysisPage() {
       .order('report_date', { ascending: true }),
     supabase
       .from('account_nav_change')
-      .select('from_date,to_date,deposits_withdrawals')
+      .select('*')
       .eq('user_id', userId),
     supabase
       .from('account_cash_transactions')

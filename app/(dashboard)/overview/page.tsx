@@ -48,7 +48,7 @@ export default async function OverviewPage() {
   const [{ data: rows }, { data: navRows }, { data: navChangeRows }, { data: cashTxRows }] = await Promise.all([
     supabase.from('trades').select('*').eq('user_id', userId).order('entry_time', { ascending: true }),
     supabase.from('account_nav_daily').select('report_date,total').eq('user_id', userId).order('report_date', { ascending: true }),
-    supabase.from('account_nav_change').select('from_date,to_date,deposits_withdrawals').eq('user_id', userId),
+    supabase.from('account_nav_change').select('*').eq('user_id', userId),
     supabase.from('account_cash_transactions').select('transaction_ts,amount,type').eq('user_id', userId),
   ])
 

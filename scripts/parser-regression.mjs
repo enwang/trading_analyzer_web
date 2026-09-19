@@ -1,5 +1,5 @@
 import fs from 'fs'
-import { parseFlexCsv } from '../lib/ibkr/flex.ts'
+import { parseFlexCsv, parseFlexStatement } from '../lib/ibkr/flex.ts'
 
 function fail(message) {
   console.error(`parser-regression: FAIL - ${message}`)
@@ -13,6 +13,13 @@ if (!fs.existsSync(csvPath)) {
 
 const csv = fs.readFileSync(csvPath, 'utf8')
 const trades = parseFlexCsv(csv)
+
+const navStatement = parseFlexStatement(`ClientAccountID,CurrencyPrimary,FromDate,ToDate,StartingValue,EndingValue,DepositsWithdrawals,TWR
+U123,USD,2026-01-01,2026-09-18,437549.39,530159.01,50000,8.31%
+`)
+if (navStatement.navChange.length !== 1 || navStatement.navChange[0].twr !== 8.31) {
+  fail(`expected IBKR TWR 8.31, got ${JSON.stringify(navStatement.navChange)}`)
+}
 
 const wins = trades.filter((t) => t.outcome === 'win').length
 if (wins !== 12) {

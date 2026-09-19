@@ -219,6 +219,7 @@ export interface NavChangeRow {
   interest: number | null
   other_fees: number | null
   commissions: number | null
+  twr: number | null
 }
 
 export interface CashTransactionRow {
@@ -289,8 +290,8 @@ function classifySection(header: string): FlexSectionKind {
   // Trades section is wide and includes Symbol + TradeID + OpenIndicator/OpenCloseIndicator
   if (hasSymbol && (h.includes('tradeid') || h.includes('"buysell"') || h.includes(',buysell,') || h.includes('buy/sell'))) return 'trades'
   if (hasSymbol && h.includes('position') && !h.includes('tradeid')) return 'open_positions'
-  if (h.includes('"reportdate"') && h.includes('"total"')) return 'nav_daily'
-  if (h.includes('"fromdate"') && h.includes('"todate"') && h.includes('startingvalue')) return 'nav_change'
+  if (h.includes('reportdate') && h.includes('total')) return 'nav_daily'
+  if (h.includes('fromdate') && h.includes('todate') && h.includes('startingvalue')) return 'nav_change'
   // Cash Transactions section: has Amount + Date/Time but NOT Symbol or TradeID
   // Handle both quoted ("Amount") and unquoted (Amount,) column headers
   const hasAmount = h.includes('"amount"') || h.includes(',amount,') || h.includes(',amount"') || h.endsWith(',amount')
@@ -304,6 +305,12 @@ function classifySection(header: string): FlexSectionKind {
 function num(v: string | undefined): number | null {
   if (v == null || v === '') return null
   const n = Number(v)
+  return Number.isFinite(n) ? n : null
+}
+
+function pct(v: string | undefined): number | null {
+  if (v == null || v.trim() === '') return null
+  const n = Number(v.trim().replace(/%$/, '').replace(/,/g, ''))
   return Number.isFinite(n) ? n : null
 }
 
@@ -364,6 +371,7 @@ function parseNavChangeCsv(csv: string): NavChangeRow[] {
       interest: num(row['interest']),
       other_fees: num(row['otherfees']),
       commissions: num(row['commissions']),
+      twr: pct(row['twr'] ?? row['timeweightedreturn'] ?? row['timeweightedrateofreturn']),
     })
   }
   return rows
@@ -470,6 +478,10 @@ function extractFlexCsv(csvStr: string): FlexExtract {
   }
 
   return { trades, navDaily, navChange, cashTransactions }
+}
+
+export function parseFlexStatement(csvStr: string): FlexExtract {
+  return extractFlexCsv(csvStr)
 }
 
 // ---------------------------------------------------------------------------

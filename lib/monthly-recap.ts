@@ -9,6 +9,7 @@ export interface NavChangeRow {
   from_date: string
   to_date: string
   deposits_withdrawals: number | null
+  twr?: number | null
 }
 
 export interface CashTransactionRow {
@@ -121,6 +122,24 @@ function depositsForMonth(
   return null
 }
 
+function twrForMonth(monthKey: string, changes: NavChangeRow[]): number | null {
+  const matches = changes
+    .filter((r) => r.twr != null && r.from_date.startsWith(monthKey) && r.to_date.startsWith(monthKey))
+    .sort((a, b) => b.to_date.localeCompare(a.to_date))
+  return matches[0]?.twr ?? null
+}
+
+function cumulativeTwrThrough(
+  endingDate: string,
+  initialDate: string,
+  changes: NavChangeRow[]
+): number | null {
+  const matches = changes
+    .filter((r) => r.twr != null && r.from_date <= initialDate && r.to_date <= endingDate)
+    .sort((a, b) => b.to_date.localeCompare(a.to_date))
+  return matches[0]?.twr ?? null
+}
+
 export function computeMonthlyReturns(
   nav: NavDailyRow[],
   changes: NavChangeRow[] = [],
@@ -167,6 +186,8 @@ export function computeMonthlyReturns(
     if (initialStartingNav != null && endingNav != null && initialStartingNav !== 0) {
       cumulativeReturnPct = ((endingNav - initialStartingNav - cumulativeDeposits) / initialStartingNav) * 100
     }
+    monthReturnPct = twrForMonth(key, changes) ?? monthReturnPct
+    cumulativeReturnPct = cumulativeTwrThrough(bucket.last.report_date, sorted[0].report_date, changes) ?? cumulativeReturnPct
     rows.push({
       monthKey: key,
       monthLabel: shortMonthLabel(key),

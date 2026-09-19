@@ -9,7 +9,7 @@ import { OverviewKpiGrid, type CardConfig } from '@/components/overview/overview
 import { type DateRangeKey, DATE_RANGES, getStartDate } from '@/lib/date-range'
 
 type NavRow = { report_date: string; total: number }
-type NavChange = { from_date: string; to_date: string; deposits_withdrawals: number | null }
+type NavChange = { from_date: string; to_date: string; deposits_withdrawals: number | null; twr?: number | null }
 type CashDeposit = { transaction_ts: string; amount: number }
 type BenchmarkRow = { date: string; pct: number }
 
@@ -206,8 +206,8 @@ export function OverviewContent({
           <CardContent>
             <AccountEquityCurve
               data={filteredNavData}
-              changes={navChanges}
-              deposits={cashDeposits}
+              changes={filteredNavChanges}
+              deposits={filteredDeposits}
               spy={filteredSpy}
               qqq={filteredQqq}
               soxx={filteredSoxx}
