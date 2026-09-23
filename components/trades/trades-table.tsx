@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
+import { memo, useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { ArrowLeft, Search, Trash2, X } from 'lucide-react'
@@ -90,6 +90,78 @@ type ColumnId =
   | 'currentStopLoss'
   | 'currentRisk'
   | 'currentRiskPct'
+
+const TradeNotesInput = memo(function TradeNotesInput({
+  value,
+  onCommit,
+}: {
+  value: string
+  onCommit: (value: string) => void
+}) {
+  const [localValue, setLocalValue] = useState(value)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const commitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const latestValueRef = useRef(value)
+  const committedValueRef = useRef(value)
+  const onCommitRef = useRef(onCommit)
+
+  useEffect(() => { onCommitRef.current = onCommit }, [onCommit])
+
+  useEffect(() => {
+    if (document.activeElement === textareaRef.current) return
+    latestValueRef.current = value
+    committedValueRef.current = value
+    setLocalValue(value)
+  }, [value])
+
+  function commit(valueToCommit: string) {
+    if (commitTimerRef.current) clearTimeout(commitTimerRef.current)
+    commitTimerRef.current = null
+    if (valueToCommit === committedValueRef.current) return
+    committedValueRef.current = valueToCommit
+    onCommitRef.current(valueToCommit)
+  }
+
+  useEffect(() => () => {
+    if (commitTimerRef.current) clearTimeout(commitTimerRef.current)
+    if (latestValueRef.current !== committedValueRef.current) {
+      onCommitRef.current(latestValueRef.current)
+    }
+  }, [])
+
+  return (
+    <div className="group relative">
+      <textarea
+        ref={textareaRef}
+        className="h-8 w-[160px] resize-none overflow-hidden rounded-md border px-2 py-1 text-xs leading-tight focus:h-20 focus:overflow-y-auto"
+        value={localValue}
+        onChange={(e) => {
+          const next = e.target.value
+          latestValueRef.current = next
+          setLocalValue(next)
+          if (commitTimerRef.current) clearTimeout(commitTimerRef.current)
+          commitTimerRef.current = setTimeout(() => commit(next), 300)
+        }}
+        onBlur={() => commit(latestValueRef.current)}
+        placeholder="Add notes"
+        title={localValue}
+        rows={1}
+        spellCheck={false}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !e.shiftKey && !e.altKey) {
+            e.preventDefault()
+            e.currentTarget.blur()
+          }
+        }}
+      />
+      {localValue.trim() && (
+        <div className="pointer-events-none absolute right-0 top-full z-30 mt-1 hidden w-72 max-w-[calc(100vw-2rem)] whitespace-pre-wrap rounded-md border bg-background p-2 text-xs leading-relaxed shadow-md group-hover:block group-focus-within:block">
+          {localValue}
+        </div>
+      )}
+    </div>
+  )
+})
 
 const COLUMN_ORDER_STORAGE_KEY = 'trades-table-column-order-v1'
 const FILTER_STORAGE_KEY = 'trades-table-last-filter-v1'
@@ -880,15 +952,19 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
     key: 'setupTag' | 'notes' | 'initialRisk',
     value: string
   ) {
-    setDrafts((prev) => ({
-      ...prev,
-      [id]: {
-        setupTag: prev[id]?.setupTag ?? 'untagged',
-        notes: prev[id]?.notes ?? '',
-        initialRisk: prev[id]?.initialRisk ?? '',
-        [key]: value,
-      },
-    }))
+    setDrafts((prev) => {
+      const next = {
+        ...prev,
+        [id]: {
+          setupTag: prev[id]?.setupTag ?? 'untagged',
+          notes: prev[id]?.notes ?? '',
+          initialRisk: prev[id]?.initialRisk ?? '',
+          [key]: value,
+        },
+      }
+      draftsRef.current = next
+      return next
+    })
   }
 
   function setFilterAndUrl(next: OutcomeFilter) {
@@ -1487,39 +1563,10 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
                   }
                   return (
                     <TableCell key={col}>
-                      <div className="group relative">
-                        <textarea
-                          className="h-8 w-[160px] resize-none overflow-hidden rounded-md border px-2 py-1 text-xs leading-tight focus:h-20 focus:overflow-y-auto"
-                          value={drafts[t.id]?.notes ?? t.notes ?? ''}
-                          onChange={(e) => updateDraft(t.id, 'notes', e.target.value)}
-                          placeholder="Add notes"
-                          title={drafts[t.id]?.notes ?? t.notes ?? ''}
-                          rows={1}
-                          spellCheck={false}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' && (e.shiftKey || e.altKey)) {
-                              e.preventDefault()
-                              const el = e.currentTarget
-                              const start = el.selectionStart ?? el.value.length
-                              const end = el.selectionEnd ?? el.value.length
-                              const next = el.value.slice(0, start) + '\n' + el.value.slice(end)
-                              updateDraft(t.id, 'notes', next)
-                              requestAnimationFrame(() => {
-                                el.selectionStart = start + 1
-                                el.selectionEnd = start + 1
-                              })
-                            } else if (e.key === 'Enter') {
-                              e.preventDefault()
-                              e.currentTarget.blur()
-                            }
-                          }}
-                        />
-                        {(drafts[t.id]?.notes ?? t.notes ?? '').trim() && (
-                          <div className="pointer-events-none absolute right-0 top-full z-30 mt-1 hidden w-72 max-w-[calc(100vw-2rem)] whitespace-pre-wrap rounded-md border bg-background p-2 text-xs leading-relaxed shadow-md group-hover:block group-focus-within:block">
-                            {drafts[t.id]?.notes ?? t.notes}
-                          </div>
-                        )}
-                      </div>
+                      <TradeNotesInput
+                        value={drafts[t.id]?.notes ?? t.notes ?? ''}
+                        onCommit={(value) => updateDraft(t.id, 'notes', value)}
+                      />
                     </TableCell>
                   )
                 })}
