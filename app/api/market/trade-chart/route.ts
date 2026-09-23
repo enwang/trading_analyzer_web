@@ -260,14 +260,24 @@ export async function GET(request: Request) {
     candles = deduplicateDailyCandles(candles)
   }
 
-  if (interval === '1d' && !exitTime) {
+  if (interval === '1d') {
     const latestDateKey = dateKeyInMarketTimeZone(Date.now())
     const entryDateKey = dateKeyInMarketTimeZone(entryMs)
+    const exitDateKey = exitTime ? dateKeyInMarketTimeZone(exitMs) : null
     const lastDateKey = candles.length > 0
       ? dateKeyInMarketTimeZone(candles[candles.length - 1].time * 1000)
       : null
-    const candidateDateKeys = Array.from(new Set([entryDateKey, latestDateKey]))
-      .filter((dateKey) => !lastDateKey || dateKey > lastDateKey)
+    const candidateDateKeys = Array.from(new Set([
+      entryDateKey,
+      exitDateKey ?? latestDateKey,
+    ]))
+      .filter((dateKey) => (
+        !lastDateKey
+        || dateKey > lastDateKey
+        // Yahoo may omit or return only a partial daily candle before its
+        // end-of-day dataset is finalized. Rebuild today's candle from 5m data.
+        || dateKey === latestDateKey
+      ))
       .sort()
 
     for (const dateKey of candidateDateKeys) {
