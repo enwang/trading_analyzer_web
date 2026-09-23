@@ -367,7 +367,7 @@ export function TradeDetailTabs(props: Props) {
                       riskInputTouchedRef.current = true
                       setStopLossInput(e.target.value)
                     }}
-                    className="h-7 w-24 text-xs"
+                    className="h-7 w-24 text-xs [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                   />
                 ) : (
                   <Input
