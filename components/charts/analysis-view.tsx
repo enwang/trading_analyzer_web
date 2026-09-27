@@ -580,16 +580,23 @@ function SummaryGrid({
       </span>
     </div>
   )
-  const items: { label: string; value: React.ReactNode }[] = [
-    { label: 'Net P&L', value: fmtMoney(summary.netPnl) },
-    { label: 'Win %', value: `${summary.winPct.toFixed(1)}%` },
-    { label: 'Profit Factor', value: fmtRatio(summary.profitFactor) },
-    { label: 'Avg win / loss ratio', value: winLossValue },
-    { label: 'Avg hold time (win / loss)', value: holdValue },
-    { label: 'Avg win/loss rate', value: fmtRatio(summary.avgTradeWinLoss) },
-    { label: 'Avg. realized r-multiple', value: `${summary.avgRealizedRMultiple.toFixed(2)}R` },
-    { label: 'Avg net trade P&L', value: fmtMoney(summary.tradeExpectancy) },
+  const winLossLabel = (
+    <div className="flex items-start justify-between gap-3">
+      <span>Avg win / loss</span>
+      <span className="text-right">Avg win / loss ratio</span>
+    </div>
+  )
+  const items: { key: string; label: React.ReactNode; value: React.ReactNode }[] = [
+    { key: 'net-pnl', label: 'Net P&L', value: fmtMoney(summary.netPnl) },
+    { key: 'win-pct', label: 'Win %', value: `${summary.winPct.toFixed(1)}%` },
+    { key: 'profit-factor', label: 'Profit Factor', value: fmtRatio(summary.profitFactor) },
+    { key: 'avg-win-loss', label: winLossLabel, value: winLossValue },
+    { key: 'avg-hold', label: 'Avg hold time (win / loss)', value: holdValue },
+    { key: 'avg-win-loss-rate', label: 'Avg win/loss rate', value: fmtRatio(summary.avgTradeWinLoss) },
+    { key: 'avg-r', label: 'Avg. realized r-multiple', value: `${summary.avgRealizedRMultiple.toFixed(2)}R` },
+    { key: 'avg-net-trade', label: 'Avg net trade P&L', value: fmtMoney(summary.tradeExpectancy) },
     {
+      key: 'trades',
       label: 'Trades',
       value: (
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-base leading-tight sm:text-lg">
@@ -612,7 +619,7 @@ function SummaryGrid({
       <CardContent className="p-0">
         <div className="grid grid-cols-2 sm:grid-cols-3">
           {items.map((item) => (
-            <div key={item.label} className="border-b border-r p-4 last:border-b-0 [&:nth-child(3n)]:border-r-0 sm:[&:nth-last-child(-n+3)]:border-b-0">
+            <div key={item.key} className="border-b border-r p-4 last:border-b-0 [&:nth-child(3n)]:border-r-0 sm:[&:nth-last-child(-n+3)]:border-b-0">
               <div className="text-muted-foreground text-sm">{item.label}</div>
               <div className="text-xl leading-tight font-semibold tracking-tight sm:text-2xl lg:text-[1.6rem]">
                 {item.value}
