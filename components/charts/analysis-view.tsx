@@ -425,7 +425,7 @@ function buildPnlDistribution(trades: ClosedTrade[]) {
 }
 
 function PnlDistributionCard({ trades }: { trades: ClosedTrade[] }) {
-  const [mode, setMode] = useState<DistributionMode>('count')
+  const [mode, setMode] = useState<DistributionMode>('pnl')
   const distribution = useMemo(() => buildPnlDistribution(trades), [trades])
   const maxCount = niceCeil(Math.max(1, ...distribution.buckets.map((bucket) => bucket.count)))
   const maxTotalPnl = niceCeil(Math.max(1, ...distribution.buckets.map((bucket) => Math.abs(bucket.totalPnl))))
