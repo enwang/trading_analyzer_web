@@ -52,10 +52,16 @@ function addDaysToDateKey(dateKey: string, days: number) {
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`
 }
 
-function addMonthsToMonthStart(dateKey: string, months: number) {
-  const [year, month] = dateKey.split('-').map(Number)
-  const d = new Date(Date.UTC(year, month - 1 + months, 1))
-  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-01`
+function subtractCalendarMonth(dateKey: string) {
+  const [year, month, day] = dateKey.split('-').map(Number)
+  const previousMonthStart = new Date(Date.UTC(year, month - 2, 1))
+  const daysInPreviousMonth = new Date(Date.UTC(
+    previousMonthStart.getUTCFullYear(),
+    previousMonthStart.getUTCMonth() + 1,
+    0
+  )).getUTCDate()
+  previousMonthStart.setUTCDate(Math.min(day, daysInPreviousMonth))
+  return `${previousMonthStart.getUTCFullYear()}-${pad(previousMonthStart.getUTCMonth() + 1)}-${pad(previousMonthStart.getUTCDate())}`
 }
 
 export function getTodayDateKey(options: DateRangeOptions = {}) {
@@ -93,9 +99,8 @@ export function getStartDate(range: DateRangeKey, options: DateRangeOptions = {}
 
 export function getLastMonthRange(options: DateRangeOptions = {}): { start: string; endExclusive: string } {
   const todayKey = getTodayDateKey(options)
-  const currentMonthStart = addMonthsToMonthStart(todayKey, 0)
   return {
-    start: addMonthsToMonthStart(currentMonthStart, -1),
-    endExclusive: currentMonthStart,
+    start: subtractCalendarMonth(todayKey),
+    endExclusive: addDaysToDateKey(todayKey, 1),
   }
 }
