@@ -129,12 +129,15 @@ export async function POST(request: NextRequest) {
           : `${row.symbol}|${normalizeTs(row.entry_time)}`
         const exactExisting = byKey.get(key)
         const existing = exactExisting ?? null
+        if (row.exit_time != null) row.current_stop_loss = null
         if (!existing) continue
         if (row.setup_tag === 'untagged' && existing.setup_tag) row.setup_tag = existing.setup_tag
         if (!row.notes && existing.notes) row.notes = existing.notes
         if (!row.needs_review && existing.needs_review) row.needs_review = existing.needs_review
         if (row.stop_loss == null && existing.stop_loss != null) row.stop_loss = existing.stop_loss
-        if (row.current_stop_loss == null && existing.current_stop_loss != null) row.current_stop_loss = existing.current_stop_loss
+        if (row.exit_time == null && row.current_stop_loss == null && existing.current_stop_loss != null) {
+          row.current_stop_loss = existing.current_stop_loss
+        }
         if (existing.stop_loss_locked) row.stop_loss_locked = true
         if ((row as Record<string, unknown>).initial_risk_amount == null && existing.initial_risk_amount != null) {
           (row as Record<string, unknown>).initial_risk_amount = existing.initial_risk_amount
@@ -177,11 +180,13 @@ export async function POST(request: NextRequest) {
             (row as Record<string, unknown>).initial_risk_amount = rowWithStopLoss.initial_risk_amount
           }
         }
-        const rowWithCurrentStopLoss = (row as Record<string, unknown>).current_stop_loss == null
-          ? candidateOpenRows.find(r => r.current_stop_loss != null)
-          : null
-        if (rowWithCurrentStopLoss != null) {
-          (row as Record<string, unknown>).current_stop_loss = rowWithCurrentStopLoss.current_stop_loss
+        if (row.exit_time == null) {
+          const rowWithCurrentStopLoss = (row as Record<string, unknown>).current_stop_loss == null
+            ? candidateOpenRows.find(r => r.current_stop_loss != null)
+            : null
+          if (rowWithCurrentStopLoss != null) {
+            (row as Record<string, unknown>).current_stop_loss = rowWithCurrentStopLoss.current_stop_loss
+          }
         }
       }
 

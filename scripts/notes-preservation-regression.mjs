@@ -66,11 +66,15 @@ function preserveManualFields(newRows, existingRows) {
         ? symbolOpenRows[0]
         : null
     )
+    if (row.exit_time != null) row.current_stop_loss = null
     if (!existing) continue
     if (row.setup_tag === 'untagged' && existing.setup_tag) row.setup_tag = existing.setup_tag
     if (!row.notes && existing.notes) row.notes = existing.notes
     if (!row.needs_review && existing.needs_review) row.needs_review = existing.needs_review
     if (row.stop_loss == null && existing.stop_loss != null) row.stop_loss = existing.stop_loss
+    if (row.exit_time == null && row.current_stop_loss == null && existing.current_stop_loss != null) {
+      row.current_stop_loss = existing.current_stop_loss
+    }
     if (existing.stop_loss_locked) row.stop_loss_locked = true
     if (row.r_multiple == null && existing.r_multiple != null) row.r_multiple = existing.r_multiple
   }
@@ -112,6 +116,10 @@ function preserveManualFields(newRows, existingRows) {
         row.initial_risk_amount = rowWithStopLoss.initial_risk_amount
       }
     }
+    if (row.exit_time == null && row.current_stop_loss == null) {
+      const rowWithCurrentStopLoss = candidateOpenRows.find(r => r.current_stop_loss != null)
+      if (rowWithCurrentStopLoss) row.current_stop_loss = rowWithCurrentStopLoss.current_stop_loss
+    }
   }
 
   return newRows
@@ -123,6 +131,7 @@ function fresh(overrides = {}) {
     entry_time: '2026-01-10T14:00:00.000Z',
     exit_time: '2026-01-15T20:00:00.000Z',
     stop_loss: null,
+    current_stop_loss: null,
     r_multiple: null,
     setup_tag: 'untagged',
     notes: null,
@@ -353,6 +362,52 @@ function fresh(overrides = {}) {
   if (rows[0].stop_loss != null) fail(`new-rule open add-on inherited stale stop_loss ${rows[0].stop_loss}`)
   if (rows[0].stop_loss_locked) fail('new-rule open add-on inherited stale stop_loss_locked')
   if (rows[0].initial_risk_amount != null) fail(`new-rule open add-on inherited stale initial_risk_amount ${rows[0].initial_risk_amount}`)
+}
+
+// ---------------------------------------------------------------------------
+// 14. Current SL belongs to the exact open trade and survives a sync refresh.
+// ---------------------------------------------------------------------------
+{
+  const existing = [
+    { symbol: 'SNDK', entry_time: '2026-09-23T19:18:29.000Z', exit_time: null,
+      stop_loss: 1803, current_stop_loss: 1810, stop_loss_locked: true,
+      initial_risk_amount: 462.75, r_multiple: null, setup_tag: 'untagged', notes: null, needs_review: false },
+  ]
+  const rows = [{ ...fresh({ symbol: 'SNDK', entry_time: '2026-09-23T19:18:29.000Z', exit_time: null }),
+    stop_loss: null, current_stop_loss: null, stop_loss_locked: false }]
+  preserveManualFields(rows, existing)
+  if (rows[0].current_stop_loss !== 1810) fail(`exact open trade lost current_stop_loss, got ${rows[0].current_stop_loss}`)
+}
+
+// ---------------------------------------------------------------------------
+// 15. Current SL is live-position state and must never persist on closed rows.
+// ---------------------------------------------------------------------------
+{
+  const existing = [
+    { symbol: 'SNDK', entry_time: '2026-09-16T19:51:44.000Z', exit_time: '2026-09-17T19:21:03.000Z',
+      stop_loss: 1504, current_stop_loss: 1549.4, stop_loss_locked: true,
+      initial_risk_amount: 850, r_multiple: null, setup_tag: 'untagged', notes: null, needs_review: false },
+  ]
+  const rows = [{ ...fresh({ symbol: 'SNDK', entry_time: '2026-09-16T19:51:44.000Z', exit_time: '2026-09-17T19:21:03.000Z' }),
+    current_stop_loss: 1549.4 }]
+  preserveManualFields(rows, existing)
+  if (rows[0].current_stop_loss != null) fail(`closed trade retained current_stop_loss ${rows[0].current_stop_loss}`)
+}
+
+// ---------------------------------------------------------------------------
+// 16. Closing a legacy position may inherit its Initial SL, but never Current SL.
+// ---------------------------------------------------------------------------
+{
+  const existing = [
+    { symbol: 'LEGACY', entry_time: '2026-08-01T14:00:00.000Z', exit_time: null,
+      stop_loss: 95, current_stop_loss: 105, stop_loss_locked: true,
+      initial_risk_amount: 2000, r_multiple: null, setup_tag: 'untagged', notes: null, needs_review: false },
+  ]
+  const rows = [{ ...fresh({ symbol: 'LEGACY', entry_time: '2026-08-01T14:00:00.000Z', exit_time: '2026-08-10T14:00:00.000Z' }),
+    stop_loss: null, current_stop_loss: null, stop_loss_locked: false }]
+  preserveManualFields(rows, existing)
+  if (rows[0].stop_loss !== 95) fail(`legacy close did not inherit initial stop_loss, got ${rows[0].stop_loss}`)
+  if (rows[0].current_stop_loss != null) fail(`legacy close inherited current_stop_loss ${rows[0].current_stop_loss}`)
 }
 
 console.log('notes-preservation-regression: PASS')

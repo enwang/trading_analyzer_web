@@ -429,9 +429,6 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
   )
   const userMovedColumnRef = useRef(false)
   const columnOrderSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const stopLossTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
-  const currentStopLossTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
-  const stopLossDraftsRef = useRef<Record<string, string>>({})
   const currentStopLossDraftsRef = useRef<Record<string, string>>({})
   const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set())
   const tradeById = useMemo(() => new Map(trades.map((t) => [t.id, t])), [trades])
@@ -1104,28 +1101,20 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
     }
   }
 
-  useEffect(() => {
-    stopLossDraftsRef.current = stopLossDrafts
-    for (const [id, value] of Object.entries(stopLossDrafts)) {
-      if (savedStopLossRef.current[id] === value) continue
-      if (stopLossTimersRef.current[id]) clearTimeout(stopLossTimersRef.current[id])
-      stopLossTimersRef.current[id] = setTimeout(() => {
-        savedStopLossRef.current[id] = value
-        void saveInitialStopLoss(id, value)
-      }, 700)
-    }
-  }, [stopLossDrafts])
+  function commitInitialStopLoss(id: string, value: string) {
+    if (savedStopLossRef.current[id] === value) return
+    savedStopLossRef.current[id] = value
+    void saveInitialStopLoss(id, value)
+  }
+
+  function commitCurrentStopLoss(id: string, value: string) {
+    if (savedCurrentStopLossRef.current[id] === value) return
+    savedCurrentStopLossRef.current[id] = value
+    void saveCurrentStopLoss(id, value)
+  }
 
   useEffect(() => {
     currentStopLossDraftsRef.current = currentStopLossDrafts
-    for (const [id, value] of Object.entries(currentStopLossDrafts)) {
-      if (savedCurrentStopLossRef.current[id] === value) continue
-      if (currentStopLossTimersRef.current[id]) clearTimeout(currentStopLossTimersRef.current[id])
-      currentStopLossTimersRef.current[id] = setTimeout(() => {
-        savedCurrentStopLossRef.current[id] = value
-        void saveCurrentStopLoss(id, value)
-      }, 700)
-    }
   }, [currentStopLossDrafts])
 
   useEffect(() => {
@@ -1155,11 +1144,6 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
   // Flush any pending draft saves before unmount (e.g. client-side navigation away)
   const saveTradeFieldsRef = useRef(saveTradeFields)
   useEffect(() => { saveTradeFieldsRef.current = saveTradeFields })
-  const saveInitialStopLossRef = useRef(saveInitialStopLoss)
-  useEffect(() => { saveInitialStopLossRef.current = saveInitialStopLoss })
-  const saveCurrentStopLossRef = useRef(saveCurrentStopLoss)
-  useEffect(() => { saveCurrentStopLossRef.current = saveCurrentStopLoss })
-
   useEffect(() => {
     function flushPending() {
       for (const [id, timer] of Object.entries(timersRef.current)) {
@@ -1171,22 +1155,6 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
         void saveTradeFieldsRef.current(id, draft)
       }
       timersRef.current = {}
-      for (const [id, timer] of Object.entries(stopLossTimersRef.current)) {
-        clearTimeout(timer)
-        const value = stopLossDraftsRef.current[id]
-        if (value == null || savedStopLossRef.current[id] === value) continue
-        savedStopLossRef.current[id] = value
-        void saveInitialStopLossRef.current(id, value)
-      }
-      stopLossTimersRef.current = {}
-      for (const [id, timer] of Object.entries(currentStopLossTimersRef.current)) {
-        clearTimeout(timer)
-        const value = currentStopLossDraftsRef.current[id]
-        if (value == null || savedCurrentStopLossRef.current[id] === value) continue
-        savedCurrentStopLossRef.current[id] = value
-        void saveCurrentStopLossRef.current(id, value)
-      }
-      currentStopLossTimersRef.current = {}
     }
     window.addEventListener('pagehide', flushPending)
     return () => {
@@ -1500,6 +1468,8 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
                           className="h-8 w-[92px] rounded-md border px-2 text-right text-xs"
                           value={stopLossDraftValue}
                           onChange={(e) => setStopLossDrafts((prev) => ({ ...prev, [t.id]: e.target.value }))}
+                          onBlur={(e) => commitInitialStopLoss(t.id, e.currentTarget.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
                           placeholder="0.00"
                           inputMode="decimal"
                         />
@@ -1513,6 +1483,8 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
                           className="h-8 w-[92px] rounded-md border px-2 text-right text-xs"
                           value={currentStopLossDraftValue}
                           onChange={(e) => setCurrentStopLossDrafts((prev) => ({ ...prev, [t.id]: e.target.value }))}
+                          onBlur={(e) => commitCurrentStopLoss(t.id, e.currentTarget.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
                           placeholder="0.00"
                           inputMode="decimal"
                         />
