@@ -50,6 +50,7 @@ type ClosedTrade = {
   entryTime: string | null
   exitTime: string | null
   pnl: number
+  pnlPct: number | null
   outcome: 'win' | 'loss' | 'breakeven' | 'open' | null
   shares: number
   rMultiple: number | null
@@ -550,6 +551,8 @@ function SummaryGrid({
     avgDailyNetDrawdown: number
     avgWin: number
     avgLoss: number
+    avgWinPct: number
+    avgLossPct: number
     winCount: number
     lossCount: number
     breakevenCount: number
@@ -566,9 +569,15 @@ function SummaryGrid({
     </div>
   )
   const winLossValue = (
-    <div className="flex flex-col gap-0.5 text-base sm:text-lg lg:text-xl">
-      <span className="whitespace-nowrap text-emerald-600">{fmtMoney(summary.avgWin)}</span>
-      <span className="whitespace-nowrap text-red-600">{fmtMoney(summary.avgLoss)}</span>
+    <div className="flex min-w-0 flex-col gap-0.5 text-base sm:text-lg lg:text-xl">
+      <span className="flex items-baseline justify-between gap-3 whitespace-nowrap text-emerald-600">
+        <span>{fmtMoney(summary.avgWin)}</span>
+        <span>{summary.avgWinPct.toFixed(2)}%</span>
+      </span>
+      <span className="flex items-baseline justify-between gap-3 whitespace-nowrap text-red-600">
+        <span>{fmtMoney(summary.avgLoss)}</span>
+        <span>{summary.avgLossPct.toFixed(2)}%</span>
+      </span>
     </div>
   )
   const items: { label: string; value: React.ReactNode }[] = [
@@ -705,6 +714,12 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
     const avgDailyNetPnl = dayPnls.length ? dayPnls.reduce((s, v) => s + v, 0) / dayPnls.length : 0
     const lossDays = dayPnls.filter((v) => v < 0)
     const winDays = dayPnls.filter((v) => v > 0)
+    const winPcts = sorted
+      .filter((t) => t.outcome === 'win' && t.pnlPct != null)
+      .map((t) => Math.abs(t.pnlPct!))
+    const lossPcts = sorted
+      .filter((t) => t.outcome === 'loss' && t.pnlPct != null)
+      .map((t) => Math.abs(t.pnlPct!))
     return {
       trends,
       summary: {
@@ -719,6 +734,8 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
         payoffRatio: core.payoffRatio,
         avgWin: core.avgWin,
         avgLoss: core.avgLoss,
+        avgWinPct: winPcts.length > 0 ? (winPcts.reduce((sum, value) => sum + value, 0) / winPcts.length) * 100 : 0,
+        avgLossPct: lossPcts.length > 0 ? (lossPcts.reduce((sum, value) => sum + value, 0) / lossPcts.length) * 100 : 0,
         avgTradeWinLoss: core.payoffRatio,
         avgDailyNetPnl,
         avgDailyVolume: 0,
