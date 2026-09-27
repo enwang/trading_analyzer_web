@@ -6,6 +6,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { ArrowLeft, Search, Trash2, X } from 'lucide-react'
 
 import type { Trade } from '@/types/trade'
+import { totalOpenTradePnl } from '@/lib/trade-pnl'
 import {
   type DateRangeKey,
   DATE_RANGES,
@@ -711,15 +712,13 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
   }
 
   function currentWin(t: Trade) {
-    const price = currentPrice(t)
-    const remain = currentRemainShares(t)
-    if (!t.side || t.entryPrice == null || price == null || remain == null) return null
-    const unrealized =
-      t.side === 'long'
-        ? (price - t.entryPrice) * remain
-        : (t.entryPrice - price) * remain
-    const realized = t.pnl ?? 0
-    return realized + unrealized
+    return totalOpenTradePnl({
+      side: t.side,
+      entryPrice: t.entryPrice,
+      remainingShares: currentRemainShares(t),
+      currentPrice: currentPrice(t),
+      realizedPnl: t.pnl,
+    })
   }
 
   function riskShares(t: Trade): number | null {
@@ -804,7 +803,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
       case 'entryPrice':
         return t.entryPrice ?? null
       case 'pnl':
-        return t.pnl ?? null
+        return t.exitTime == null || t.outcome === 'open' ? currentWin(t) : t.pnl ?? null
       case 'pnlPct':
         return t.pnlPct ?? null
       case 'initialAmount':

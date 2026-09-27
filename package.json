@@ -13,6 +13,7 @@
     "test:notes-preservation-regression": "node --experimental-strip-types scripts/notes-preservation-regression.mjs",
     "test:chart-regression": "node --experimental-strip-types scripts/chart-regression.mjs",
     "test:date-range-regression": "node --experimental-strip-types scripts/date-range-regression.mjs",
+    "test:trade-pnl-regression": "node --experimental-strip-types scripts/trade-pnl-regression.mjs",
     "rag:transcribe": "node scripts/batch-transcribe.mjs",
     "rag:build": "node scripts/rag-build.mjs",
     "rag:query": "node scripts/rag-query.mjs"
