@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { createClient } from '@/lib/supabase/server'
-import { usesStopLossFirstSizing } from '@/lib/market/stop-loss'
+import { isPlausibleStopLossForEntry, usesStopLossFirstSizing } from '@/lib/market/stop-loss'
 
 interface RiskPayload {
   stopLoss: number | null
@@ -29,13 +29,22 @@ export async function PATCH(
 
   const { data: existingTrade, error: readError } = await supabase
     .from('trades')
-    .select('entry_time, current_stop_loss')
+    .select('entry_time, entry_price, current_stop_loss')
     .eq('id', id)
     .eq('user_id', user.id)
     .single()
 
   if (readError) {
     return NextResponse.json({ error: readError.message }, { status: 400 })
+  }
+
+  const suppliedStopLosses: Array<number | null | undefined> = [payload.stopLoss]
+  if ('currentStopLoss' in payload) suppliedStopLosses.push(payload.currentStopLoss)
+  if (suppliedStopLosses.some((value) => !isPlausibleStopLossForEntry(value, existingTrade.entry_price))) {
+    return NextResponse.json(
+      { error: 'Stop loss is implausibly far from the entry price. Check the decimal point.' },
+      { status: 400 }
+    )
   }
 
   const isStaleDefaultRiskSave =

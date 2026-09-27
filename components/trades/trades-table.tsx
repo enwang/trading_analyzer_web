@@ -1068,13 +1068,21 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
           initialRiskAmount: nextInitialRisk,
         }),
       })
-      if (response.ok && initializesCurrentStopLoss && stopLoss != null) {
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}))
+        setError(body.error ?? 'Failed to save Initial SL')
+        const previousValue = trade.stopLoss?.toFixed(2) ?? ''
+        savedStopLossRef.current[id] = previousValue
+        setStopLossDrafts((prev) => ({ ...prev, [id]: previousValue }))
+        return
+      }
+      if (initializesCurrentStopLoss && stopLoss != null) {
         const nextValue = stopLoss.toFixed(2)
         savedCurrentStopLossRef.current[id] = nextValue
         setCurrentStopLossDrafts((prev) => ({ ...prev, [id]: nextValue }))
       }
     } catch {
-      // silently ignore
+      setError('Failed to save Initial SL')
     }
   }
 
@@ -1085,7 +1093,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
     if (!trade) return
     const nextR = trade.stopLoss != null ? computedR(trade, trade.stopLoss) : null
     try {
-      await fetch(`/api/trades/${id}/risk`, {
+      const response = await fetch(`/api/trades/${id}/risk`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1096,8 +1104,15 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
           initialRiskAmount: trade.initialRiskAmount,
         }),
       })
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}))
+        setError(body.error ?? 'Failed to save Current SL')
+        const previousValue = (trade.currentStopLoss ?? trade.stopLoss)?.toFixed(2) ?? ''
+        savedCurrentStopLossRef.current[id] = previousValue
+        setCurrentStopLossDrafts((prev) => ({ ...prev, [id]: previousValue }))
+      }
     } catch {
-      // silently ignore
+      setError('Failed to save Current SL')
     }
   }
 

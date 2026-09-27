@@ -1,4 +1,4 @@
-import { enrichOpenTradesWithStopLosses } from '../lib/market/stop-loss.ts'
+import { enrichOpenTradesWithStopLosses, isPlausibleStopLossForEntry } from '../lib/market/stop-loss.ts'
 
 function fail(message) {
   console.error(`stop-loss-enrichment-regression: FAIL - ${message}`)
@@ -86,6 +86,19 @@ const mrna = enriched.find((row) => row.symbol === 'MRNA')
 if (!mrna) fail('missing MRNA row')
 if (mrna.stop_loss != null) {
   fail(`expected closed MRNA trade to stay untouched, got ${mrna.stop_loss}`)
+}
+
+if (!isPlausibleStopLossForEntry(1043.2, 1049)) {
+  fail('expected MU 1043.2 stop loss to be plausible for 1049 entry')
+}
+if (isPlausibleStopLossForEntry(10432, 1049)) {
+  fail('expected missing-decimal MU 10432 stop loss to be rejected')
+}
+if (isPlausibleStopLossForEntry(18, 1812.255)) {
+  fail('expected partial SNDK 18 stop loss to be rejected')
+}
+if (!isPlausibleStopLossForEntry(null, 1049)) {
+  fail('expected clearing a stop loss to remain valid')
 }
 
 console.log('stop-loss-enrichment-regression: PASS')

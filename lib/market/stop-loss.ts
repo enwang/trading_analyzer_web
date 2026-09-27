@@ -45,6 +45,17 @@ export const DEFAULT_INITIAL_RISK_AMOUNT = 2000
 export const DEFAULT_ADDON_RISK_AMOUNT = 1000
 export const STOP_LOSS_FIRST_SIZING_START_DATE = '2026-08-31'
 
+export function isPlausibleStopLossForEntry(
+  stopLoss: number | null | undefined,
+  entryPrice: number | null | undefined
+): boolean {
+  if (stopLoss == null) return true
+  if (entryPrice == null || !Number.isFinite(stopLoss) || !Number.isFinite(entryPrice)) return false
+  if (stopLoss <= 0 || entryPrice <= 0) return false
+  const ratio = stopLoss / entryPrice
+  return ratio >= 0.05 && ratio <= 5
+}
+
 // Returns the risk dollar amount for a given trade.
 // Add-on lots (later open entry for the same symbol) use a smaller risk.
 // Future: add date-based tiers here when needed.
