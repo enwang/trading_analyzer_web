@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { formatLocalStopSync, syncLocalOpenStopOrders } from '@/lib/ibkr/local-stop-sync'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -109,7 +110,10 @@ export default function ImportPage() {
       if (!res.ok) {
         setSyncMsg(`Error: ${json.error ?? res.statusText}`)
       } else {
-        setSyncMsg(`Synced ${json.upserted} trades (${json.skipped} skipped).`)
+        const { data: { user } } = await supabase.auth.getUser()
+        const stopSync = user ? await syncLocalOpenStopOrders(user.id) : null
+        const stopMessage = stopSync ? ` ${formatLocalStopSync(stopSync)}.` : ''
+        setSyncMsg(`Synced ${json.upserted} trades (${json.skipped} skipped).${stopMessage}`)
         setLastSync(new Date().toISOString().slice(0, 10))
         await loadSnapshots()
       }

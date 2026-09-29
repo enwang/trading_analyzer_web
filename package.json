@@ -14,6 +14,9 @@
     "test:chart-regression": "node --experimental-strip-types scripts/chart-regression.mjs",
     "test:date-range-regression": "node --experimental-strip-types scripts/date-range-regression.mjs",
     "test:trade-pnl-regression": "node --experimental-strip-types scripts/trade-pnl-regression.mjs",
+    "test:open-stop-orders-regression": "node --experimental-strip-types scripts/open-stop-orders-regression.mjs",
+    "ibkr:stop-bridge": "node --env-file=.env.local --experimental-strip-types scripts/ibkr-stop-bridge.mjs",
+    "ibkr:stop-bridge:install": "node scripts/install-ibkr-stop-bridge.mjs",
     "rag:transcribe": "node scripts/batch-transcribe.mjs",
     "rag:build": "node scripts/rag-build.mjs",
     "rag:query": "node scripts/rag-query.mjs"
@@ -23,6 +26,7 @@
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
+    "@stoqey/ib": "^1.6.10",
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.97.0",
     "class-variance-authority": "^0.7.1",

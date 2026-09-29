@@ -16,6 +16,18 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+## IBKR Open Stop Orders
+
+`Sync now` can copy active IBKR stop orders into the `Current SL` field of matching open trades. It never changes `Initial SL`.
+
+In TWS, enable **API > Settings > Enable ActiveX and Socket Clients** and allow `127.0.0.1`. The standard ports are `7496` for live TWS and `7497` for paper TWS. Then install the local bridge once:
+
+```bash
+npm run ibkr:stop-bridge:install
+```
+
+The bridge runs only on `127.0.0.1` and starts automatically at login. Keep TWS logged in when pressing `Sync now`.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

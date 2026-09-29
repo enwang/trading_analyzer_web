@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { RefreshCw } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import { formatLocalStopSync, syncLocalOpenStopOrders } from '@/lib/ibkr/local-stop-sync'
 import { createClient } from '@/lib/supabase/client'
 
 export function OverviewSyncButton() {
@@ -51,7 +52,8 @@ export function OverviewSyncButton() {
         return
       }
 
-      setMessage(`Synced ${json.upserted} trades (${json.skipped} skipped)`)
+      const stopSync = await syncLocalOpenStopOrders(user.id)
+      setMessage(`Synced ${json.upserted} trades (${json.skipped} skipped); ${formatLocalStopSync(stopSync)}`)
       router.refresh()
     } catch (e) {
       setMessage(e instanceof Error ? e.message : String(e))

@@ -1,0 +1,54 @@
+import { execFileSync } from 'node:child_process'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join, resolve } from 'node:path'
+
+const label = 'com.welsnake.trading-analyzer.ibkr-stop-bridge'
+const projectDir = resolve(process.cwd())
+const agentsDir = join(homedir(), 'Library', 'LaunchAgents')
+const plistPath = join(agentsDir, `${label}.plist`)
+const uid = process.getuid?.()
+
+function xml(value) {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+}
+
+const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${label}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${xml(process.execPath)}</string>
+    <string>--env-file=.env.local</string>
+    <string>--experimental-strip-types</string>
+    <string>scripts/ibkr-stop-bridge.mjs</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>${xml(projectDir)}</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/tmp/trading-analyzer-ibkr-stop-bridge.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/trading-analyzer-ibkr-stop-bridge.error.log</string>
+</dict>
+</plist>
+`
+
+if (uid == null) throw new Error('Could not determine the current macOS user')
+mkdirSync(agentsDir, { recursive: true })
+try {
+  execFileSync('launchctl', ['bootout', `gui/${uid}`, plistPath], { stdio: 'ignore' })
+} catch {}
+writeFileSync(plistPath, plist)
+execFileSync('launchctl', ['bootstrap', `gui/${uid}`, plistPath])
+console.log(`Installed and started ${label}`)
