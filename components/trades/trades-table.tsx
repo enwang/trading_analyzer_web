@@ -520,35 +520,17 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
 
     const raw = window.sessionStorage.getItem(TRADES_LAST_SCROLL_STORAGE_KEY)
     if (!raw) return
+    window.sessionStorage.removeItem(TRADES_LAST_SCROLL_STORAGE_KEY)
 
     const scrollY = Number(raw)
     if (!Number.isFinite(scrollY)) return
 
-    const restore = () => {
+    const frame = window.requestAnimationFrame(() => {
       const container = getDashboardScrollContainer()
-      if (!container) return false
-      container.scrollTop = scrollY
-      return true
-    }
+      if (container) container.scrollTop = scrollY
+    })
 
-    const timers: Array<ReturnType<typeof setTimeout>> = []
-    const attemptDelays = [0, 50, 150, 300, 600]
-
-    for (const delay of attemptDelays) {
-      timers.push(setTimeout(() => {
-        restore()
-      }, delay))
-    }
-
-    timers.push(setTimeout(() => {
-      if (restore()) {
-        window.sessionStorage.removeItem(TRADES_LAST_SCROLL_STORAGE_KEY)
-      }
-    }, 900))
-
-    return () => {
-      for (const timer of timers) clearTimeout(timer)
-    }
+    return () => window.cancelAnimationFrame(frame)
   }, [currentListUrl, filtered.length])
 
   useEffect(() => {
