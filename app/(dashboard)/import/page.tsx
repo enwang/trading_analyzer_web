@@ -42,6 +42,7 @@ export default function ImportPage() {
 
   const [settingsMsg, setSettingsMsg] = useState('')
   const [syncMsg, setSyncMsg] = useState('')
+  const [stopSyncMsg, setStopSyncMsg] = useState('')
   const [uploadMsg, setUploadMsg] = useState('')
 
   const [snapshots, setSnapshots] = useState<Snapshot[]>([])
@@ -100,6 +101,7 @@ export default function ImportPage() {
   async function syncIbkr() {
     setSyncing(true)
     setSyncMsg('')
+    setStopSyncMsg('')
     try {
       const res = await fetch('/api/ibkr/fetch', {
         method: 'POST',
@@ -113,12 +115,16 @@ export default function ImportPage() {
         const { data: { user } } = await supabase.auth.getUser()
         const tradeMessage = `Synced ${json.upserted} trades (${json.skipped} skipped).`
         setSyncMsg(tradeMessage)
+        setSyncing(false)
         setLastSync(new Date().toISOString().slice(0, 10))
-        await loadSnapshots()
+        void loadSnapshots()
         if (user) {
-          void syncLocalOpenStopOrders(user.id).then(stopSync => {
-            setSyncMsg(`${tradeMessage} ${formatLocalStopSync(stopSync)}.`)
-          })
+          window.setTimeout(() => {
+            setStopSyncMsg('Syncing open stops in background…')
+            void syncLocalOpenStopOrders(user.id).then(stopSync => {
+              setStopSyncMsg(formatLocalStopSync(stopSync))
+            })
+          }, 0)
         }
       }
     } catch (e: unknown) {
@@ -243,6 +249,9 @@ export default function ImportPage() {
             <p className={`text-sm ${syncMsg.startsWith('Error') ? 'text-red-500' : 'text-emerald-600'}`}>
               {syncMsg}
             </p>
+          )}
+          {stopSyncMsg && (
+            <p className="text-sm text-muted-foreground">{stopSyncMsg}</p>
           )}
         </CardContent>
       </Card>

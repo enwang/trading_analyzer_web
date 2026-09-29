@@ -13,10 +13,12 @@ export function OverviewSyncButton() {
   const supabase = createClient()
   const [syncing, setSyncing] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  const [stopMessage, setStopMessage] = useState<string | null>(null)
 
   async function syncNow() {
     setSyncing(true)
     setMessage(null)
+    setStopMessage(null)
     try {
       const {
         data: { user },
@@ -54,11 +56,15 @@ export function OverviewSyncButton() {
 
       const tradeMessage = `Synced ${json.upserted} trades (${json.skipped} skipped)`
       setMessage(tradeMessage)
+      setSyncing(false)
       router.refresh()
-      void syncLocalOpenStopOrders(user.id).then(stopSync => {
-        setMessage(`${tradeMessage}; ${formatLocalStopSync(stopSync)}`)
-        if (stopSync.available && stopSync.updated > 0) router.refresh()
-      })
+      window.setTimeout(() => {
+        setStopMessage('Syncing open stops in background…')
+        void syncLocalOpenStopOrders(user.id).then(stopSync => {
+          setStopMessage(formatLocalStopSync(stopSync))
+          if (stopSync.available && stopSync.updated > 0) router.refresh()
+        })
+      }, 0)
     } catch (e) {
       setMessage(e instanceof Error ? e.message : String(e))
     } finally {
@@ -75,6 +81,7 @@ export function OverviewSyncButton() {
         </Button>
       </div>
       {message && <div className="text-xs text-muted-foreground">{message}</div>}
+      {stopMessage && <div className="text-xs text-muted-foreground">{stopMessage}</div>}
     </div>
   )
 }
