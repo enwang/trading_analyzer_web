@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 
-import { matchOpenStopsToTrades } from '../lib/ibkr/open-stop-orders.ts'
+import { buildStopSyncDatabaseUpdate, matchOpenStopsToTrades } from '../lib/ibkr/open-stop-orders.ts'
 
 const trade = (id, shares, side = 'long', symbol = 'TEAM') => ({
   id,
@@ -8,7 +8,10 @@ const trade = (id, shares, side = 'long', symbol = 'TEAM') => ({
   side,
   shares,
   entry_time: '2026-09-28T15:00:00.000Z',
+  entry_price: side === 'long' ? 180 : 160,
+  stop_loss: null,
   current_stop_loss: null,
+  initial_risk_amount: null,
 })
 const stop = (orderId, quantity, stopPrice, action = 'SELL', symbol = 'TEAM') => ({
   orderId,
@@ -18,6 +21,28 @@ const stop = (orderId, quantity, stopPrice, action = 'SELL', symbol = 'TEAM') =>
   orderType: 'STP',
   stopPrice,
 })
+
+{
+  const emptyInitialSl = trade('initialize', 100)
+  assert.deepEqual(buildStopSyncDatabaseUpdate(emptyInitialSl, 172.5), {
+    current_stop_loss: 172.5,
+    stop_loss: 172.5,
+    stop_loss_locked: true,
+    initial_risk_amount: 750,
+  })
+
+  const existingInitialSl = { ...emptyInitialSl, stop_loss: 170, initial_risk_amount: 1000 }
+  assert.deepEqual(buildStopSyncDatabaseUpdate(existingInitialSl, 175), {
+    current_stop_loss: 175,
+  })
+
+  const existingRiskOnly = { ...emptyInitialSl, initial_risk_amount: 900 }
+  assert.deepEqual(buildStopSyncDatabaseUpdate(existingRiskOnly, 172.5), {
+    current_stop_loss: 172.5,
+    stop_loss: 172.5,
+    stop_loss_locked: true,
+  })
+}
 
 {
   const result = matchOpenStopsToTrades([trade('one', 100)], [stop(1, 100, 172.5)])

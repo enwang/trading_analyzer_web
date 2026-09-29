@@ -18,7 +18,7 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 
 ## IBKR Open Stop Orders
 
-`Sync now` can copy active IBKR stop orders into the `Current SL` field of matching open trades. It never changes `Initial SL`.
+`Sync now` can copy active IBKR stop orders into matching open trades. When `Initial SL` is empty, the first matched order initializes both `Initial SL` and `Current SL`. Later order changes update only `Current SL` and never overwrite an existing `Initial SL`.
 
 In TWS, enable **API > Settings > Enable ActiveX and Socket Clients** and allow `127.0.0.1`. The standard ports are `7496` for live TWS and `7497` for paper TWS. Then install the local bridge once:
 

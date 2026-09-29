@@ -4,7 +4,7 @@ import net from 'node:net'
 import { createClient } from '@supabase/supabase-js'
 import { EventName, IBApi } from '@stoqey/ib'
 
-import { matchOpenStopsToTrades } from '../lib/ibkr/open-stop-orders.ts'
+import { buildStopSyncDatabaseUpdate, matchOpenStopsToTrades } from '../lib/ibkr/open-stop-orders.ts'
 
 const BRIDGE_PORT = Number(process.env.IBKR_STOP_BRIDGE_PORT || 4317)
 const IBKR_HOST = process.env.IBKR_TWS_HOST || '127.0.0.1'
@@ -166,7 +166,7 @@ async function syncStops(userId) {
   const supabase = createClient(url, serviceRoleKey, { auth: { persistSession: false } })
   const { data: trades, error } = await supabase
     .from('trades')
-    .select('id, symbol, side, shares, entry_time, current_stop_loss')
+    .select('id, symbol, side, shares, entry_time, entry_price, stop_loss, current_stop_loss, initial_risk_amount')
     .eq('user_id', userId)
     .is('exit_time', null)
 
@@ -175,22 +175,30 @@ async function syncStops(userId) {
   const matched = matchOpenStopsToTrades(trades ?? [], orders)
   let updated = 0
   let unchanged = 0
+  let initialSlInitialized = 0
 
   for (const update of matched.updates) {
     const trade = trades?.find(candidate => candidate.id === update.tradeId)
-    if (trade?.current_stop_loss != null && Math.abs(trade.current_stop_loss - update.stopPrice) < 0.000001) {
+    if (!trade) continue
+    const initializesInitialSl = trade.stop_loss == null
+    const currentStopUnchanged = trade.current_stop_loss != null
+      && Math.abs(trade.current_stop_loss - update.stopPrice) < 0.000001
+    if (currentStopUnchanged && !initializesInitialSl) {
       unchanged += 1
       continue
     }
 
+    const updatePayload = buildStopSyncDatabaseUpdate(trade, update.stopPrice)
+
     const { error: updateError } = await supabase
       .from('trades')
-      .update({ current_stop_loss: update.stopPrice })
+      .update(updatePayload)
       .eq('id', update.tradeId)
       .eq('user_id', userId)
       .is('exit_time', null)
     if (updateError) throw new Error(`Could not update ${update.symbol}: ${updateError.message}`)
     updated += 1
+    if (initializesInitialSl) initialSlInitialized += 1
   }
 
   return {
@@ -198,6 +206,7 @@ async function syncStops(userId) {
     openStopOrders: orders.length,
     updated,
     unchanged,
+    initialSlInitialized,
     skipped: matched.skipped,
   }
 }

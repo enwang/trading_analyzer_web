@@ -6,6 +6,7 @@ export type LocalStopSyncResult = {
   available: boolean
   updated: number
   unchanged: number
+  initialSlInitialized: number
   skipped: Array<{ symbol: string; reason: string }>
   message?: string
 }
@@ -28,6 +29,7 @@ export async function syncLocalOpenStopOrders(userId: string): Promise<LocalStop
         available: false,
         updated: 0,
         unchanged: 0,
+        initialSlInitialized: 0,
         skipped: [],
         message: body?.error ?? `Local IBKR stop sync failed (${response.status})`,
       }
@@ -37,13 +39,14 @@ export async function syncLocalOpenStopOrders(userId: string): Promise<LocalStop
       available: true,
       updated: body.updated ?? 0,
       unchanged: body.unchanged ?? 0,
+      initialSlInitialized: body.initialSlInitialized ?? 0,
       skipped: body.skipped ?? [],
     }
   } catch (error) {
     const message = error instanceof Error && error.name === 'AbortError'
       ? 'Local IBKR stop sync timed out'
       : 'Local IBKR stop bridge is not running'
-    return { available: false, updated: 0, unchanged: 0, skipped: [], message }
+    return { available: false, updated: 0, unchanged: 0, initialSlInitialized: 0, skipped: [], message }
   } finally {
     window.clearTimeout(timeout)
   }
@@ -53,5 +56,8 @@ export function formatLocalStopSync(result: LocalStopSyncResult) {
   if (!result.available) return `Open stops not synced: ${result.message}`
 
   const skipped = result.skipped.length > 0 ? `, ${result.skipped.length} ambiguous ticker(s) skipped` : ''
-  return `${result.updated} Current SL updated${skipped}`
+  const initialized = result.initialSlInitialized > 0
+    ? `, ${result.initialSlInitialized} Initial SL initialized`
+    : ''
+  return `${result.updated} Current SL updated${initialized}${skipped}`
 }

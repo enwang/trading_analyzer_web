@@ -13,7 +13,10 @@ export type OpenTradeForStopSync = {
   side: string | null
   shares: number | null
   entry_time: string | null
+  entry_price?: number | null
+  stop_loss?: number | null
   current_stop_loss: number | null
+  initial_risk_amount?: number | null
 }
 
 export type StopLossUpdate = {
@@ -26,6 +29,13 @@ export type StopLossUpdate = {
 export type SkippedStopMatch = {
   symbol: string
   reason: string
+}
+
+export type StopSyncDatabaseUpdate = {
+  current_stop_loss: number
+  stop_loss?: number
+  stop_loss_locked?: true
+  initial_risk_amount?: number
 }
 
 const EPSILON = 0.000001
@@ -42,6 +52,31 @@ function closingAction(side: string | null) {
   if (side === 'long') return 'SELL'
   if (side === 'short') return 'BUY'
   return null
+}
+
+export function buildStopSyncDatabaseUpdate(
+  trade: OpenTradeForStopSync,
+  stopPrice: number,
+): StopSyncDatabaseUpdate {
+  const payload: StopSyncDatabaseUpdate = { current_stop_loss: stopPrice }
+  if (trade.stop_loss != null) return payload
+
+  payload.stop_loss = stopPrice
+  payload.stop_loss_locked = true
+
+  if (trade.initial_risk_amount == null && trade.entry_price != null && trade.shares != null) {
+    const riskPerShare = trade.side === 'long'
+      ? trade.entry_price - stopPrice
+      : trade.side === 'short'
+        ? stopPrice - trade.entry_price
+        : null
+    const initialRisk = riskPerShare == null ? null : riskPerShare * Math.abs(trade.shares)
+    if (initialRisk != null && Number.isFinite(initialRisk) && initialRisk > 0) {
+      payload.initial_risk_amount = initialRisk
+    }
+  }
+
+  return payload
 }
 
 function allSameStop(orders: ActiveStopOrder[]) {
