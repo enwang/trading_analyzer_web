@@ -52,9 +52,13 @@ export function OverviewSyncButton() {
         return
       }
 
-      const stopSync = await syncLocalOpenStopOrders(user.id)
-      setMessage(`Synced ${json.upserted} trades (${json.skipped} skipped); ${formatLocalStopSync(stopSync)}`)
+      const tradeMessage = `Synced ${json.upserted} trades (${json.skipped} skipped)`
+      setMessage(tradeMessage)
       router.refresh()
+      void syncLocalOpenStopOrders(user.id).then(stopSync => {
+        setMessage(`${tradeMessage}; ${formatLocalStopSync(stopSync)}`)
+        if (stopSync.available && stopSync.updated > 0) router.refresh()
+      })
     } catch (e) {
       setMessage(e instanceof Error ? e.message : String(e))
     } finally {

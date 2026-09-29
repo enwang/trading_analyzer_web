@@ -1,15 +1,24 @@
 import http from 'node:http'
-import net from 'node:net'
+import { execFile } from 'node:child_process'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+import { promisify } from 'node:util'
 
 import { createClient } from '@supabase/supabase-js'
-import { EventName, IBApi } from '@stoqey/ib'
 
 import { buildStopSyncDatabaseUpdate, matchOpenStopsToTrades } from '../lib/ibkr/open-stop-orders.ts'
 
 const BRIDGE_PORT = Number(process.env.IBKR_STOP_BRIDGE_PORT || 4317)
-const IBKR_HOST = process.env.IBKR_TWS_HOST || '127.0.0.1'
-const DEFAULT_TWS_PORTS = [7496, 7497, 4001, 4002]
-const INACTIVE_STATUSES = new Set(['Cancelled', 'ApiCancelled', 'Filled', 'Inactive'])
+const DESKTOP_ORDERS_HELPER = process.env.IBKR_DESKTOP_ORDERS_HELPER
+  || join(
+    homedir(),
+    'Applications',
+    'Trading Analyzer IBKR Reader.app',
+    'Contents',
+    'MacOS',
+    'ibkr-desktop-orders',
+  )
+const execFileAsync = promisify(execFile)
 
 function isAllowedOrigin(origin) {
   if (origin === 'https://trading-analyzer-web.vercel.app') return true
@@ -60,92 +69,19 @@ function readJson(request) {
   })
 }
 
-function canConnect(port) {
-  return new Promise(resolve => {
-    const socket = net.createConnection({ host: IBKR_HOST, port })
-    const finish = connected => {
-      socket.destroy()
-      resolve(connected)
-    }
-    socket.setTimeout(350)
-    socket.once('connect', () => finish(true))
-    socket.once('timeout', () => finish(false))
-    socket.once('error', () => finish(false))
-  })
-}
-
-async function findTwsPort() {
-  if (process.env.IBKR_TWS_PORT) {
-    const configured = Number(process.env.IBKR_TWS_PORT)
-    if (!Number.isFinite(configured)) throw new Error('IBKR_TWS_PORT must be a number')
-    return configured
-  }
-  for (const port of DEFAULT_TWS_PORTS) {
-    if (await canConnect(port)) return port
-  }
-  throw new Error('TWS API is unavailable. Open TWS and enable API socket clients, then try Sync Now again.')
-}
-
-function stopPriceFor(order) {
-  const orderType = String(order.orderType ?? '').trim().toUpperCase()
-  if (orderType.startsWith('TRAIL')) {
-    const value = Number(order.trailStopPrice)
-    return Number.isFinite(value) && value > 0 && value < 1_000_000_000 ? value : null
-  }
-  if (orderType === 'STP' || orderType === 'STP LMT' || orderType === 'STP PRT') {
-    const value = Number(order.auxPrice)
-    return Number.isFinite(value) && value > 0 && value < 1_000_000_000 ? value : null
-  }
-  return null
-}
-
-async function fetchOpenStopOrders(port) {
-  return new Promise((resolve, reject) => {
-    const api = new IBApi({ host: IBKR_HOST, port, clientId: 0 })
-    const orders = []
-    let settled = false
-    const timer = setTimeout(() => finish(new Error('Timed out while reading TWS open orders')), 15_000)
-
-    function finish(error) {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      try { api.disconnect() } catch {}
-      if (error) reject(error)
-      else resolve(orders)
-    }
-
-    api.on(EventName.connected, () => api.reqAllOpenOrders())
-    api.on(EventName.openOrder, (orderId, contract, order, orderState) => {
-      if (INACTIVE_STATUSES.has(String(orderState?.status ?? ''))) return
-      const stopPrice = stopPriceFor(order)
-      const symbol = String(contract?.symbol ?? '').trim().toUpperCase()
-      const quantity = Number(order?.totalQuantity)
-      if (!symbol || stopPrice == null || !Number.isFinite(quantity) || quantity <= 0) return
-      orders.push({
-        orderId: Number(orderId),
-        symbol,
-        action: String(order.action ?? '').trim().toUpperCase(),
-        quantity,
-        orderType: String(order.orderType ?? ''),
-        stopPrice,
-      })
+async function fetchOpenStopOrders() {
+  try {
+    const { stdout } = await execFileAsync(DESKTOP_ORDERS_HELPER, [], {
+      timeout: 15_000,
+      maxBuffer: 1_000_000,
     })
-    api.on(EventName.openOrderEnd, () => finish())
-    api.on(EventName.error, (error, code) => {
-      const numericCode = Number(code)
-      if ([2104, 2106, 2107, 2108, 2158].includes(numericCode)) return
-      if (!api.isConnected || numericCode === 502 || numericCode === 504) {
-        finish(new Error(error?.message ?? String(error)))
-      }
-    })
-
-    try {
-      api.connect()
-    } catch (error) {
-      finish(error instanceof Error ? error : new Error(String(error)))
-    }
-  })
+    const orders = JSON.parse(stdout)
+    if (!Array.isArray(orders)) throw new Error('Desktop order reader returned invalid data')
+    return orders
+  } catch (error) {
+    const stderr = error?.stderr?.trim()
+    throw new Error(stderr || error?.message || 'Could not read IBKR Desktop open orders')
+  }
 }
 
 function requireEnvironment() {
@@ -160,8 +96,7 @@ async function syncStops(userId) {
     throw new Error('A valid user ID is required')
   }
 
-  const port = await findTwsPort()
-  const orders = await fetchOpenStopOrders(port)
+  const orders = await fetchOpenStopOrders()
   const { url, serviceRoleKey } = requireEnvironment()
   const supabase = createClient(url, serviceRoleKey, { auth: { persistSession: false } })
   const { data: trades, error } = await supabase
@@ -202,7 +137,7 @@ async function syncStops(userId) {
   }
 
   return {
-    port,
+    source: 'IBKR Desktop',
     openStopOrders: orders.length,
     updated,
     unchanged,

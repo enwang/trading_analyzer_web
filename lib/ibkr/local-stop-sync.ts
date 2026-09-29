@@ -13,7 +13,7 @@ export type LocalStopSyncResult = {
 
 export async function syncLocalOpenStopOrders(userId: string): Promise<LocalStopSyncResult> {
   const controller = new AbortController()
-  const timeout = window.setTimeout(() => controller.abort(), 20_000)
+  const timeout = window.setTimeout(() => controller.abort(), 12_000)
 
   try {
     const response = await fetch(LOCAL_STOP_SYNC_URL, {
@@ -45,7 +45,7 @@ export async function syncLocalOpenStopOrders(userId: string): Promise<LocalStop
   } catch (error) {
     const message = error instanceof Error && error.name === 'AbortError'
       ? 'Local IBKR stop sync timed out'
-      : 'Local IBKR stop bridge is not running'
+      : 'Local IBKR Desktop bridge is not running'
     return { available: false, updated: 0, unchanged: 0, initialSlInitialized: 0, skipped: [], message }
   } finally {
     window.clearTimeout(timeout)

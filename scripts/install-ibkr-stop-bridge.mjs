@@ -7,6 +7,10 @@ const label = 'com.welsnake.trading-analyzer.ibkr-stop-bridge'
 const projectDir = resolve(process.cwd())
 const agentsDir = join(homedir(), 'Library', 'LaunchAgents')
 const plistPath = join(agentsDir, `${label}.plist`)
+const helperApp = join(homedir(), 'Applications', 'Trading Analyzer IBKR Reader.app')
+const helperContents = join(helperApp, 'Contents')
+const helperDir = join(helperContents, 'MacOS')
+const helperPath = join(helperDir, 'ibkr-desktop-orders')
 const uid = process.getuid?.()
 
 function xml(value) {
@@ -46,6 +50,37 @@ const plist = `<?xml version="1.0" encoding="UTF-8"?>
 
 if (uid == null) throw new Error('Could not determine the current macOS user')
 mkdirSync(agentsDir, { recursive: true })
+mkdirSync(helperDir, { recursive: true })
+writeFileSync(join(helperContents, 'Info.plist'), `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleExecutable</key>
+  <string>ibkr-desktop-orders</string>
+  <key>CFBundleIdentifier</key>
+  <string>com.welsnake.trading-analyzer.ibkr-reader</string>
+  <key>CFBundleName</key>
+  <string>Trading Analyzer IBKR Reader</string>
+  <key>CFBundleDisplayName</key>
+  <string>Trading Analyzer IBKR Reader</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.0</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>LSUIElement</key>
+  <true/>
+</dict>
+</plist>
+`)
+execFileSync('/usr/bin/xcrun', [
+  'swiftc',
+  '-O',
+  join(projectDir, 'scripts', 'ibkr-desktop-orders.swift'),
+  '-o',
+  helperPath,
+])
 try {
   execFileSync('launchctl', ['bootout', `gui/${uid}`, plistPath], { stdio: 'ignore' })
 } catch {}
