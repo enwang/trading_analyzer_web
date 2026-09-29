@@ -142,6 +142,25 @@ export function matchOpenStopsToTrades(
       const unmatchedOrders = new Set(sideOrders)
 
       for (const trade of sideTrades) {
+        if (trade.current_stop_loss == null) continue
+
+        const matchingOrders = [...unmatchedOrders].filter(order => (
+          sameNumber(order.stopPrice, trade.current_stop_loss as number)
+        ))
+        const matchingTrades = [...unmatchedTrades].filter(candidate => (
+          candidate.current_stop_loss != null
+          && sameNumber(candidate.current_stop_loss, trade.current_stop_loss as number)
+        ))
+        if (matchingOrders.length !== 1 || matchingTrades.length !== 1) continue
+
+        const order = matchingOrders[0]
+        updates.push(updateFor(trade, order))
+        unmatchedTrades.delete(trade)
+        unmatchedOrders.delete(order)
+      }
+
+      for (const trade of sideTrades) {
+        if (!unmatchedTrades.has(trade)) continue
         const shares = Math.abs(trade.shares ?? 0)
         if (shares <= 0) continue
 

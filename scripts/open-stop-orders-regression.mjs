@@ -79,6 +79,21 @@ const stop = (orderId, quantity, stopPrice, action = 'SELL', symbol = 'TEAM') =>
 }
 
 {
+  const result = matchOpenStopsToTrades(
+    [
+      trade('new', 100),
+      { ...trade('existing', 100), current_stop_loss: 168 },
+    ],
+    [stop(5, 100, 171), stop(6, 100, 168)],
+  )
+  assert.deepEqual(result.updates.map(update => [update.tradeId, update.stopPrice]), [
+    ['existing', 168],
+    ['new', 171],
+  ])
+  assert.equal(result.skipped.length, 0)
+}
+
+{
   const result = matchOpenStopsToTrades([trade('long', 100)], [stop(7, 100, 175, 'BUY')])
   assert.equal(result.updates.length, 0)
 }
