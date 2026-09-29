@@ -115,7 +115,7 @@ async function fetchOpenStopOrders(port) {
       else resolve(orders)
     }
 
-    api.on(EventName.connected, () => api.reqOpenOrders())
+    api.on(EventName.connected, () => api.reqAllOpenOrders())
     api.on(EventName.openOrder, (orderId, contract, order, orderState) => {
       if (INACTIVE_STATUSES.has(String(orderState?.status ?? ''))) return
       const stopPrice = stopPriceFor(order)
