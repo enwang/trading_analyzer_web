@@ -30,7 +30,9 @@ func number(from value: String) -> Double? {
     Double(value.replacingOccurrences(of: ",", with: ""))
 }
 
-let windowOptions: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+// A window can be fully capturable by ID even when macOS marks it off-screen
+// because another app is full-screen or the window is on a different Space.
+let windowOptions: CGWindowListOption = [.excludeDesktopElements]
 let windows = CGWindowListCopyWindowInfo(windowOptions, kCGNullWindowID) as? [[String: Any]] ?? []
 let desktopWindow = windows
     .filter { window in
@@ -53,7 +55,7 @@ let desktopWindow = windows
 
 guard let desktopWindow,
       let windowNumber = desktopWindow[kCGWindowNumber as String] as? Int else {
-    fail("IBKR Desktop is not open or its window is minimized")
+    fail("IBKR Desktop is not open or has no readable main window")
 }
 
 let captureURL = FileManager.default.temporaryDirectory
