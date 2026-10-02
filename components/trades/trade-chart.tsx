@@ -72,6 +72,7 @@ const TF_TO_BACKEND: Record<Timeframe, string> = {
 const CHART_STYLE_STORAGE_KEY = 'trade-chart-style-v2'
 const TV_UP_COLOR = '#089981'
 const TV_DOWN_COLOR = '#f23645'
+const TV_VWAP_COLOR = '#787b86'
 const MARKET_DATE_FORMATTER = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'America/New_York',
   year: 'numeric',
@@ -146,6 +147,26 @@ function calcDollarVolumeSMA(candles: Candle[], period: number): { time: number;
     }
   }
   return result
+}
+
+function formatCompactIndicator(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return '—'
+  const absolute = Math.abs(value)
+  if (absolute >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)}B`
+  if (absolute >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`
+  if (absolute >= 1_000) return `${(value / 1_000).toFixed(2)}K`
+  return value.toFixed(2)
+}
+
+function getLatestDollarVolume(candles: Candle[] | null) {
+  if (!candles) return null
+  for (let index = candles.length - 1; index >= 0; index--) {
+    const candle = candles[index]
+    if ((candle.volume ?? 0) > 0) {
+      return { candle, value: candle.volume! * candle.close }
+    }
+  }
+  return null
 }
 
 function marketDateKey(time: number) {
@@ -286,6 +307,9 @@ function mergeLegsForMarkers(legs: ExecutionLeg[]) {
 export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exitPrice, executionLegs }: Props) {
   const containerRef     = useRef<HTMLDivElement>(null)
   const ohlcOverlayRef   = useRef<HTMLDivElement>(null)
+  const dollarVolumeValueRef = useRef<HTMLSpanElement>(null)
+  const dollarVolumeMaValueRef = useRef<HTMLSpanElement>(null)
+  const rvolValueRef = useRef<HTMLSpanElement>(null)
   const arrowsOverlayRef = useRef<HTMLDivElement>(null)
 
   const [topTab,    setTopTab]    = useState<'chart' | 'notes' | 'running'>('chart')
@@ -473,6 +497,15 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
     ro.observe(container)
 
     const ts = (t: number) => t as UTCTimestamp
+    const dollarVolume = candles.map((candle) => ({
+      time: candle.time,
+      value: (candle.volume ?? 0) * candle.close,
+    }))
+    const dollarVolumeMa20 = calcDollarVolumeSMA(candles, 20)
+    const rvol = calcRVOL(candles)
+    const dollarVolumeByTime = new Map(dollarVolume.map((point) => [point.time, point.value]))
+    const dollarVolumeMaByTime = new Map(dollarVolumeMa20.map((point) => [point.time, point.value]))
+    const rvolByTime = new Map(rvol.map((point) => [point.time, point.value]))
 
     // --- Dollar volume (before main series so it sits behind) ---
     if (volumeOn) {
@@ -487,16 +520,15 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
         scaleMargins: { top: 0.61, bottom: 0.28 },
       })
       vol.setData(
-        candles.map(c => ({
-          time:  ts(c.time),
-          value: (c.volume ?? 0) * c.close,
-          color: c.close >= c.open ? 'rgba(8,153,129,0.5)' : 'rgba(242,54,69,0.5)',
+        dollarVolume.map((point, index) => ({
+          time:  ts(point.time),
+          value: point.value,
+          color: candles[index].close >= candles[index].open ? 'rgba(8,153,129,0.5)' : 'rgba(242,54,69,0.5)',
         }))
       )
 
       if (volumeMa20On) {
-        const volMa20 = calcDollarVolumeSMA(candles, 20)
-        if (volMa20.length) {
+        if (dollarVolumeMa20.length) {
           const s = chart.addLineSeries({
             color: '#f4a261',
             lineWidth: 2,
@@ -507,7 +539,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
             lastValueVisible: false,
           })
           s.setData(
-            volMa20.map((d) => ({
+            dollarVolumeMa20.map((d) => ({
               time: ts(d.time),
               value: d.value,
             }))
@@ -556,7 +588,6 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
 
     // --- Relative volume by matching intraday slot over the prior 5 sessions ---
     if (rvolOn) {
-      const rvol = calcRVOL(candles)
       if (rvol.length) {
         const rvolSeries = chart.addHistogramSeries({
           priceScaleId: 'rvol',
@@ -695,7 +726,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
       const data = calcSessionVWAP(candles)
       if (data.length) {
         const s = chart.addLineSeries({
-          color: '#2962ff', lineWidth: 2, priceLineVisible: false, lastValueVisible: true,
+          color: TV_VWAP_COLOR, lineWidth: 1, priceLineVisible: false, lastValueVisible: true,
         })
         s.setData(data.map((point) => ({ time: ts(point.time), value: point.value })))
       }
@@ -843,6 +874,19 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
       if (!overlay) return
       if (!param.time) {
         overlay.style.opacity = '0'
+        const latestDollarVolume = getLatestDollarVolume(candles)
+        const lastCandle = latestDollarVolume?.candle ?? candles[candles.length - 1]
+        if (dollarVolumeValueRef.current) {
+          dollarVolumeValueRef.current.textContent = formatCompactIndicator(latestDollarVolume?.value)
+          dollarVolumeValueRef.current.style.color = lastCandle.close >= lastCandle.open ? TV_UP_COLOR : TV_DOWN_COLOR
+        }
+        if (dollarVolumeMaValueRef.current) {
+          dollarVolumeMaValueRef.current.textContent = formatCompactIndicator(dollarVolumeMa20.at(-1)?.value)
+        }
+        if (rvolValueRef.current) {
+          rvolValueRef.current.textContent = rvol.at(-1)?.value.toFixed(2) ?? '—'
+          rvolValueRef.current.style.color = lastCandle.close >= lastCandle.open ? TV_UP_COLOR : TV_DOWN_COLOR
+        }
         return
       }
       const idx = candles.findIndex((c) => c.time === Number(param.time))
@@ -850,6 +894,19 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
       if (!candle) {
         overlay.style.opacity = '0'
         return
+      }
+      const time = Number(param.time)
+      if (dollarVolumeValueRef.current) {
+        dollarVolumeValueRef.current.textContent = formatCompactIndicator(dollarVolumeByTime.get(time))
+        dollarVolumeValueRef.current.style.color = candle.close >= candle.open ? TV_UP_COLOR : TV_DOWN_COLOR
+      }
+      if (dollarVolumeMaValueRef.current) {
+        dollarVolumeMaValueRef.current.textContent = formatCompactIndicator(dollarVolumeMaByTime.get(time))
+      }
+      if (rvolValueRef.current) {
+        const rvolValue = rvolByTime.get(time)
+        rvolValueRef.current.textContent = rvolValue != null ? rvolValue.toFixed(2) : '—'
+        rvolValueRef.current.style.color = candle.close >= candle.open ? TV_UP_COLOR : TV_DOWN_COLOR
       }
       const prevClose = idx > 0 ? candles[idx - 1].close : null
       const base = prevClose ?? candle.open
@@ -962,6 +1019,10 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
+  const latestDollarVolume = getLatestDollarVolume(candles)
+  const latestDollarVolumeMa = candles ? calcDollarVolumeSMA(candles, 20).at(-1)?.value : null
+  const latestRvol = candles ? calcRVOL(candles).at(-1)?.value : null
+
   return (
     <div className="min-h-[930px] rounded-xl border border-[#d9dce3] bg-[#f4f5f8] p-2.5">
 
@@ -1104,8 +1165,8 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
             size="xs"
             className={`h-7 text-[11px] ${
               vwapOn
-                ? 'border-[#2962ff] bg-[#edf2ff] text-[#2455dc] hover:bg-[#dce6ff]'
-                : 'text-[#2455dc]'
+                ? 'border-[#787b86] bg-[#f4f4f5] text-[#5d606b] hover:bg-[#e7e8ea]'
+                : 'text-[#5d606b]'
             }`}
             variant="outline"
             onClick={() => setVwapOn(v => !v)}
@@ -1186,7 +1247,23 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
                 {volumeOn && (
                   <>
                     <div className="absolute left-0 right-0 top-[59%] border-t border-[#e6e9ef]" />
-                    <span className="absolute left-2 top-[60%]">Dollar Vol · 20</span>
+                    <div className="absolute left-2 top-[60%] flex items-center gap-1.5">
+                      <span>Dollar Vol</span>
+                      <span>20</span>
+                      <span
+                        ref={dollarVolumeValueRef}
+                        style={{
+                          color: latestDollarVolume && latestDollarVolume.candle.close >= latestDollarVolume.candle.open
+                            ? TV_UP_COLOR
+                            : TV_DOWN_COLOR,
+                        }}
+                      >
+                        {formatCompactIndicator(latestDollarVolume?.value)}
+                      </span>
+                      <span ref={dollarVolumeMaValueRef} className="text-[#f4a261]">
+                        {formatCompactIndicator(latestDollarVolumeMa)}
+                      </span>
+                    </div>
                   </>
                 )}
                 {macdOn && (
@@ -1198,7 +1275,15 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
                 {rvolOn && (
                   <>
                     <div className="absolute left-0 right-0 top-[90%] border-t border-[#e6e9ef]" />
-                    <span className="absolute left-2 top-[91%]">RVOL 5D</span>
+                    <div className="absolute left-2 top-[91%] flex items-center gap-1.5">
+                      <span>RVOL</span>
+                      <span>5</span>
+                      <span>0</span>
+                      <span ref={rvolValueRef} className="text-[#089981]">
+                        {latestRvol?.toFixed(2) ?? '—'}
+                      </span>
+                      <span className="text-[#787b86]">0.00</span>
+                    </div>
                   </>
                 )}
               </div>
@@ -1210,7 +1295,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
               {/* OHLC crosshair overlay — updated directly via DOM to avoid re-renders */}
               <div
                 ref={ohlcOverlayRef}
-                className="pointer-events-none absolute left-2 top-[18%] z-10 flex items-center gap-1 rounded bg-white/85 px-2 py-1 text-[11px] text-[#374151] opacity-0 shadow-sm backdrop-blur-sm transition-opacity"
+                className="pointer-events-none absolute left-2 top-2 z-10 flex items-center gap-1 rounded bg-white/85 px-2 py-1 text-[11px] text-[#374151] opacity-0 shadow-sm backdrop-blur-sm transition-opacity"
                 style={{ fontVariantNumeric: 'tabular-nums' }}
               />
 
