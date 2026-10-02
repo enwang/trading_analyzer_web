@@ -149,6 +149,37 @@ async function fetchIntradayDailyCandle(symbol: string, dateKey: string): Promis
   }
 }
 
+async function fetchDailyContext(symbol: string, period1: number, period2: number): Promise<Candle[]> {
+  const dailyLookbackSec = 400 * 86400
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&period1=${period1 - dailyLookbackSec}&period2=${period2}&includePrePost=false`
+
+  try {
+    const response = await fetch(url, { cache: 'no-store' })
+    if (!response.ok) return []
+
+    const payload = (await response.json()) as YahooChartResponse
+    const result = payload.chart?.result?.[0]
+    const timestamps = result?.timestamp ?? []
+    const quote = result?.indicators?.quote?.[0]
+    const opens = quote?.open ?? []
+    const highs = quote?.high ?? []
+    const lows = quote?.low ?? []
+    const closes = quote?.close ?? []
+    const volumes = quote?.volume ?? []
+
+    return deduplicateDailyCandles(timestamps
+      .map((time, index) => {
+        const open = opens[index]; const high = highs[index]
+        const low = lows[index]; const close = closes[index]
+        if ([open, high, low, close].some((value) => value == null || !Number.isFinite(value))) return null
+        return { time, open: open!, high: high!, low: low!, close: close!, volume: volumes[index] ?? null }
+      })
+      .filter((candle): candle is Candle => candle != null))
+  } catch {
+    return []
+  }
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const symbol    = searchParams.get('symbol')
@@ -218,6 +249,9 @@ export async function GET(request: Request) {
   }
 
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&period1=${period1}&period2=${period2}&includePrePost=false`
+  const dailyContextPromise = interval === '1d' || interval === '1wk'
+    ? null
+    : fetchDailyContext(symbol, period1, period2)
 
   let response: Response
   try {
@@ -291,6 +325,7 @@ export async function GET(request: Request) {
   // Repair corrupt volume values (Yahoo sometimes returns placeholder values like 745).
   // Re-fetches the affected days at 1h resolution and sums hourly volumes.
   candles = await repairCorruptVolume(symbol, candles)
+  const dailyCandles = dailyContextPromise ? await dailyContextPromise : candles
 
   const visiblePreMs = Math.max(spanMs * 0.8, Math.floor(lookbackMs * 0.6))
   // Show ~3 calendar days of context after exit on every timeframe so the trend
@@ -302,7 +337,7 @@ export async function GET(request: Request) {
   const visibleTo   = Math.ceil((visibleToMs + visiblePostMs) / 1000)
 
   return NextResponse.json({
-    symbol, interval, timeframe, candles,
+    symbol, interval, timeframe, candles, dailyCandles,
     entryTimeSec: entryTime ? Math.floor(entryMs / 1000) : null,
     exitTimeSec:  exitTime  ? Math.floor(exitMs  / 1000) : null,
     visibleRange: { from: visibleFrom, to: visibleTo },

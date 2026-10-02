@@ -4,6 +4,7 @@ import {
   nextUtcDayStartSec,
   synthesizeDailyCandle,
 } from '../lib/market/chart-utils.ts'
+import { buildSwingDataSnapshot } from '../lib/market/swing-data.ts'
 
 function fail(message) {
   console.error(`chart-regression: FAIL - ${message}`)
@@ -133,6 +134,44 @@ function makeCandle(isoDate, offsetSec = 0, close = 100) {
   const result = dateKeyInMarketTimeZone(marketOpenMs)
 
   assert(result === '2026-08-18', `expected market date 2026-08-18, got ${result}`)
+}
+
+// ── Test: Swing Data Desktop/Replay session levels ───────────────────────
+
+{
+  const anchorMs = Date.parse('2026-09-22T13:30:00Z')
+  const dailyCandles = Array.from({ length: 220 }, (_, index) => {
+    const close = 120 + index * 0.005
+    return {
+      time: Math.floor((anchorMs - (219 - index) * 86400_000) / 1000),
+      open: close - 0.5,
+      high: close + 1,
+      low: close - 1,
+      close,
+      volume: 1_000_000,
+    }
+  })
+  const intradayCandles = [0, 5, 10, 15, 20, 25, 30].map((minutes, index) => ({
+    time: Math.floor((anchorMs + minutes * 60_000) / 1000),
+    open: 121 + index * 0.1,
+    high: 122 + index * 0.1,
+    low: 120.5 - index * 0.05,
+    close: 121.5 + index * 0.1,
+    volume: 100_000,
+  }))
+
+  const snapshot = buildSwingDataSnapshot(intradayCandles, dailyCandles, '2026-09-22')
+  assert(snapshot != null, 'expected Swing Data snapshot')
+  const keys = new Set(snapshot.levels.map((level) => level.key))
+  assert(keys.has('sma10'), 'expected 10D SMA level')
+  assert(keys.has('sma200'), 'expected 200D SMA level')
+  assert(keys.has('pd-high') && keys.has('pd-low'), 'expected previous-day high/low levels')
+  assert(keys.has('today-low'), 'expected today-low level')
+  assert(keys.has('or5') && keys.has('or30'), 'expected 5m and 30m opening-range levels')
+
+  const liveSnapshot = buildSwingDataSnapshot(intradayCandles, dailyCandles.slice(0, -1), '2026-09-22')
+  assert(liveSnapshot != null, 'expected current session to synthesize a missing daily candle')
+  assert(liveSnapshot.levels.some((level) => level.key === 'sma200'), 'expected live 200D SMA level')
 }
 
 console.log('chart-regression: PASS')

@@ -5,6 +5,7 @@ import {
   createChart,
   ColorType,
   CrosshairMode,
+  LineStyle,
   LineType,
 } from 'lightweight-charts'
 import type {
@@ -14,6 +15,7 @@ import type {
   SeriesType,
 } from 'lightweight-charts'
 import type { ExecutionLeg } from '@/types/trade'
+import { buildSwingDataSnapshot, swingMarketDateKey } from '@/lib/market/swing-data'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -312,7 +314,6 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
   const rvolValueRef = useRef<HTMLSpanElement>(null)
   const arrowsOverlayRef = useRef<HTMLDivElement>(null)
 
-  const [topTab,    setTopTab]    = useState<'chart' | 'notes' | 'running'>('chart')
   const [timeframe, setTimeframe] = useState<Timeframe>(() => getDefaultTimeframe(entryTime, exitTime))
   const [style,     setStyle]     = useState<ChartStyle>(() => {
     if (typeof window === 'undefined') return 'hollow'
@@ -333,9 +334,11 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
   const [macdOn,    setMacdOn]    = useState(true)
   const [rvolOn,    setRvolOn]    = useState(true)
   const [volumeMa20On, setVolumeMa20On] = useState(true)
+  const [swingDataOn, setSwingDataOn] = useState(true)
   const [loading,   setLoading]   = useState(false)
   const [error,     setError]     = useState<string | null>(null)
   const [candles,   setCandles]   = useState<Candle[] | null>(null)
+  const [dailyCandles, setDailyCandles] = useState<Candle[]>([])
   const [meta,      setMeta]      = useState<ChartMeta | null>(null)
   const [userTimeZone, setUserTimeZone] = useState('UTC')
 
@@ -379,6 +382,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const data = await res.json() as {
           candles: Candle[]
+          dailyCandles?: Candle[]
           interval?: string
           entryTimeSec: number | null
           exitTimeSec: number | null
@@ -391,6 +395,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
           return
         }
         setCandles(data.candles)
+        setDailyCandles(data.dailyCandles ?? [])
         setMeta({
           entryTimeSec: data.entryTimeSec ?? null,
           exitTimeSec:  data.exitTimeSec  ?? null,
@@ -412,7 +417,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
   // Effect 2 — build / rebuild chart whenever data or display options change
   // -------------------------------------------------------------------------
   useEffect(() => {
-    if (!candles || !meta || !containerRef.current || topTab !== 'chart') return
+    if (!candles || !meta || !containerRef.current) return
 
     const container = containerRef.current
 
@@ -506,6 +511,12 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
     const dollarVolumeByTime = new Map(dollarVolume.map((point) => [point.time, point.value]))
     const dollarVolumeMaByTime = new Map(dollarVolumeMa20.map((point) => [point.time, point.value]))
     const rvolByTime = new Map(rvol.map((point) => [point.time, point.value]))
+    const latestSessionDate = candles.length > 0 ? swingMarketDateKey(candles[candles.length - 1].time) : null
+    const entrySessionDate = entryTime ? swingMarketDateKey(Date.parse(entryTime) / 1000) : null
+    const swingAnchorDate = exitTime ? entrySessionDate : latestSessionDate
+    const swingSnapshot = swingDataOn && swingAnchorDate && (timeframe === '5' || timeframe === '60')
+      ? buildSwingDataSnapshot(candles, dailyCandles, swingAnchorDate)
+      : null
 
     // --- Dollar volume (before main series so it sits behind) ---
     if (volumeOn) {
@@ -669,6 +680,28 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
       main = s
     }
 
+    // --- Swing Data Desktop / Replay levels ---
+    if (swingSnapshot) {
+      for (const level of swingSnapshot.levels) {
+        const lineStyle = level.lineStyle === 'dashed'
+          ? LineStyle.Dashed
+          : level.lineStyle === 'dotted'
+            ? LineStyle.Dotted
+            : LineStyle.Solid
+        const series = chart.addLineSeries({
+          color: level.color,
+          lineWidth: level.lineWidth,
+          lineStyle,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        })
+        series.setData([
+          { time: ts(swingSnapshot.sessionStart), value: level.value },
+          { time: ts(swingSnapshot.sessionEnd), value: level.value },
+        ])
+      }
+    }
+
     // --- Moving Averages script: intraday EMA 6 / 10 / 20 / 50 + SMA 200 ---
     if (ema6On) {
       const data = calcEMA(candles, 6)
@@ -684,7 +717,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
       const data = calcEMA(candles, 10)
       if (data.length) {
         const s = chart.addLineSeries({
-          color: '#f9a825', lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
+          color: '#d32f2f', lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
         })
         s.setData(data.map(d => ({ time: ts(d.time), value: d.value })))
       }
@@ -695,7 +728,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
       const data = calcSMA(candles, 10)
       if (data.length) {
         const s = chart.addLineSeries({
-          color: '#7e57c2', lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
+          color: '#ff9999', lineWidth: 2, priceLineVisible: false, lastValueVisible: false,
         })
         s.setData(data.map(d => ({ time: ts(d.time), value: d.value })))
       }
@@ -705,7 +738,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
       const data = calcEMA(candles, 20)
       if (data.length) {
         const s = chart.addLineSeries({
-          color: '#f57c00', lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
+          color: '#ef6c00', lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
         })
         s.setData(data.map(d => ({ time: ts(d.time), value: d.value })))
       }
@@ -715,7 +748,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
       const data = calcEMA(candles, 50)
       if (data.length) {
         const s = chart.addLineSeries({
-          color: '#e91e63', lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
+          color: '#1565c0', lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
         })
         s.setData(data.map(d => ({ time: ts(d.time), value: d.value })))
       }
@@ -737,7 +770,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
       const data = calcSMA(candles, 200)
       if (data.length) {
         const s = chart.addLineSeries({
-          color: '#3949ab', lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
+          color: '#be96ff', lineWidth: 2, priceLineVisible: false, lastValueVisible: false,
         })
         s.setData(data.map(d => ({ time: ts(d.time), value: d.value })))
       }
@@ -794,6 +827,36 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
           divider.style.bottom = '0'
           divider.style.borderLeft = '1px dashed rgba(148, 163, 184, 0.55)'
           overlay.appendChild(divider)
+        }
+      }
+
+      if (swingSnapshot) {
+        const baseX = chart.timeScale().timeToCoordinate(ts(swingSnapshot.sessionEnd))
+        if (baseX != null) {
+          const labels = swingSnapshot.levels
+            .flatMap((level) => {
+              const coordinate = main.priceToCoordinate(level.value)
+              return coordinate == null ? [] : [{ level, y: Number(coordinate) }]
+            })
+            .sort((a, b) => a.y - b.y)
+          let previousY = Number.NEGATIVE_INFINITY
+          let slot = 0
+          for (const { level, y } of labels) {
+            slot = y - previousY < 14 ? Math.min(slot + 1, 2) : 0
+            previousY = y
+            const label = document.createElement('div')
+            label.textContent = level.label
+            label.style.position = 'absolute'
+            label.style.left = `${Math.max(4, Math.min(overlay.clientWidth - 96, baseX + 8 + slot * 34))}px`
+            label.style.top = `${y - 8}px`
+            label.style.whiteSpace = 'nowrap'
+            label.style.color = level.color
+            label.style.background = 'rgba(255,255,255,0.9)'
+            label.style.fontSize = '10px'
+            label.style.fontWeight = '600'
+            label.style.padding = '1px 3px'
+            overlay.appendChild(label)
+          }
         }
       }
 
@@ -995,6 +1058,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
     }
   }, [
     candles,
+    dailyCandles,
     meta,
     style,
     volumeOn,
@@ -1008,7 +1072,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
     ema20On,
     ema50On,
     ma200On,
-    topTab,
+    swingDataOn,
     side,
     entryPrice,
     exitPrice,
@@ -1024,23 +1088,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
   const latestRvol = candles ? calcRVOL(candles).at(-1)?.value : null
 
   return (
-    <div className="min-h-[930px] rounded-xl border border-[#d9dce3] bg-[#f4f5f8] p-2.5">
-
-      {/* Top tabs */}
-      <div className="mb-2 flex items-center gap-1 rounded-md border border-[#d7dae2] bg-[#eeeff3] p-1">
-        {(['chart', 'notes', 'running'] as const).map((tab) => (
-          <button
-            key={tab}
-            className={`rounded-sm px-3 py-1.5 text-sm font-medium transition-colors ${
-              topTab === tab ? 'bg-white text-[#272a30] shadow-sm' : 'text-[#5a6071] hover:text-[#272a30]'
-            }`}
-            onClick={() => setTopTab(tab)}
-          >
-            {tab === 'chart' ? 'Chart' : tab === 'notes' ? 'Notes' : 'Running P&L'}
-          </button>
-        ))}
-      </div>
-
+    <div className="rounded-xl border border-[#d9dce3] bg-[#f4f5f8] p-2.5">
       <div className="overflow-hidden rounded-lg border border-[#d8dce5] bg-white">
 
         {/* Header bar */}
@@ -1105,8 +1153,8 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
             size="xs"
             className={`h-7 text-[11px] ${
               ema10On
-                ? 'border-[#f9a825] bg-[#fff8df] text-[#b77900] hover:bg-[#fff1bd]'
-                : 'text-[#b77900]'
+                ? 'border-[#d32f2f] bg-[#fdecec] text-[#b71c1c] hover:bg-[#fbd9d9]'
+                : 'text-[#b71c1c]'
             }`}
             variant="outline"
             onClick={() => setEma10On(v => !v)}
@@ -1117,8 +1165,8 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
             size="xs"
             className={`h-7 text-[11px] ${
               sma10On
-                ? 'border-[#7e57c2] bg-[#f1edfa] text-[#6746a5] hover:bg-[#e6def5]'
-                : 'text-[#6746a5]'
+                ? 'border-[#ff9999] bg-[#fff1f1] text-[#c85f5f] hover:bg-[#ffe2e2]'
+                : 'text-[#c85f5f]'
             }`}
             variant="outline"
             onClick={() => setSma10On(v => !v)}
@@ -1129,8 +1177,8 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
             size="xs"
             className={`h-7 text-[11px] ${
               ema20On
-                ? 'border-[#f57c00] bg-[#fff2e2] text-[#c56200] hover:bg-[#ffe3c2]'
-                : 'text-[#c56200]'
+                ? 'border-[#ef6c00] bg-[#fff2e5] text-[#c45a00] hover:bg-[#ffe2c2]'
+                : 'text-[#c45a00]'
             }`}
             variant="outline"
             onClick={() => setEma20On(v => !v)}
@@ -1141,8 +1189,8 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
             size="xs"
             className={`h-7 text-[11px] ${
               ema50On
-                ? 'border-[#e91e63] bg-[#fdebf1] text-[#be1850] hover:bg-[#fbd5e2]'
-                : 'text-[#be1850]'
+                ? 'border-[#1565c0] bg-[#eaf2fb] text-[#0d4f9b] hover:bg-[#d8e8f8]'
+                : 'text-[#0d4f9b]'
             }`}
             variant="outline"
             onClick={() => setEma50On(v => !v)}
@@ -1153,13 +1201,25 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
             size="xs"
             className={`h-7 text-[11px] ${
               ma200On
-                ? 'border-[#3949ab] bg-[#eef0fb] text-[#3949ab] hover:bg-[#dee2f7]'
-                : 'text-[#3949ab]'
+                ? 'border-[#be96ff] bg-[#f6f0ff] text-[#8055bd] hover:bg-[#eadfff]'
+                : 'text-[#8055bd]'
             }`}
             variant="outline"
             onClick={() => setMa200On(v => !v)}
           >
             SMA 200
+          </Button>
+          <Button
+            size="xs"
+            className={`h-7 text-[11px] ${
+              swingDataOn
+                ? 'border-[#00897b] bg-[#e9f7f5] text-[#007268] hover:bg-[#d4efeb]'
+                : 'text-[#007268]'
+            }`}
+            variant="outline"
+            onClick={() => setSwingDataOn(value => !value)}
+          >
+            Swing Data
           </Button>
           <Button
             size="xs"
@@ -1226,24 +1286,22 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
           )}
         </div>
 
-        {/* Chart / placeholder area */}
+        {/* Chart area */}
         <div className="relative h-[720px]">
-          {topTab === 'chart' ? (
-            <>
-              {/* Chart container — always mounted so the ref stays valid */}
-              <div
-                ref={containerRef}
-                className={`h-full w-full ${(loading || !candles) && !error ? 'invisible' : ''}`}
-              />
+          {/* Chart container — always mounted so the ref stays valid */}
+          <div
+            ref={containerRef}
+            className={`h-full w-full ${(loading || !candles) && !error ? 'invisible' : ''}`}
+          />
 
-              {/* Execution-arrow overlay — horizontal triangles drawn directly via DOM */}
-              <div
-                ref={arrowsOverlayRef}
-                className="pointer-events-none absolute inset-0 z-[5] overflow-hidden"
-              />
+          {/* Execution-arrow and Swing Data label overlay. */}
+          <div
+            ref={arrowsOverlayRef}
+            className="pointer-events-none absolute inset-0 z-[5] overflow-hidden"
+          />
 
-              {/* TradingView-style pane labels and separators. */}
-              <div className="pointer-events-none absolute inset-0 z-[4] text-[10px] font-medium text-[#667085]">
+          {/* TradingView-style pane labels and separators. */}
+          <div className="pointer-events-none absolute inset-0 z-[4] text-[10px] font-medium text-[#667085]">
                 {volumeOn && (
                   <>
                     <div className="absolute left-0 right-0 top-[59%] border-t border-[#e6e9ef]" />
@@ -1286,38 +1344,32 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
                     </div>
                   </>
                 )}
+          </div>
+          <div
+            className="pointer-events-none absolute bottom-0 right-0 top-[59%] z-[3] w-[72px] bg-white"
+            aria-hidden="true"
+          />
+
+          {/* OHLC crosshair overlay — updated directly via DOM to avoid re-renders */}
+          <div
+            ref={ohlcOverlayRef}
+            className="pointer-events-none absolute left-2 top-2 z-10 flex items-center gap-1 rounded bg-white/85 px-2 py-1 text-[11px] text-[#374151] opacity-0 shadow-sm backdrop-blur-sm transition-opacity"
+            style={{ fontVariantNumeric: 'tabular-nums' }}
+          />
+
+          {/* Loading overlay */}
+          {loading && (
+            <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
+              Loading chart data…
+            </div>
+          )}
+
+          {/* Error overlay */}
+          {!loading && error && (
+            <div className="absolute inset-0 flex items-center justify-center px-8">
+              <div className="max-w-sm rounded-md bg-amber-50 p-4 text-center text-sm text-amber-700">
+                {error}
               </div>
-              <div
-                className="pointer-events-none absolute bottom-0 right-0 top-[59%] z-[3] w-[72px] bg-white"
-                aria-hidden="true"
-              />
-
-              {/* OHLC crosshair overlay — updated directly via DOM to avoid re-renders */}
-              <div
-                ref={ohlcOverlayRef}
-                className="pointer-events-none absolute left-2 top-2 z-10 flex items-center gap-1 rounded bg-white/85 px-2 py-1 text-[11px] text-[#374151] opacity-0 shadow-sm backdrop-blur-sm transition-opacity"
-                style={{ fontVariantNumeric: 'tabular-nums' }}
-              />
-
-              {/* Loading overlay */}
-              {loading && (
-                <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
-                  Loading chart data…
-                </div>
-              )}
-
-              {/* Error overlay */}
-              {!loading && error && (
-                <div className="absolute inset-0 flex items-center justify-center px-8">
-                  <div className="max-w-sm rounded-md bg-amber-50 p-4 text-center text-sm text-amber-700">
-                    {error}
-                  </div>
-                </div>
-              )}
-            </>
-          ) : (
-            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              {topTab === 'notes' ? 'Notes panel coming next.' : 'Running P&L panel coming next.'}
             </div>
           )}
         </div>
