@@ -69,13 +69,30 @@ const QUICK_TIMEFRAMES: Array<{ value: Timeframe; label: string }> = [
 const TF_TO_BACKEND: Record<Timeframe, string> = {
   '5': '5m', '60': '1h', '1D': '1d', '1W': '1wk',
 }
-const CHART_STYLE_STORAGE_KEY = 'trade-chart-style-v1'
+const CHART_STYLE_STORAGE_KEY = 'trade-chart-style-v2'
+const TV_UP_COLOR = '#089981'
+const TV_DOWN_COLOR = '#f23645'
+const MARKET_DATE_FORMATTER = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/New_York',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+})
+const MARKET_TIME_FORMATTER = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/New_York',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+})
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-function getDefaultTimeframe(_entryTime: string | null, _exitTime: string | null): Timeframe {
-  return '1D'
+function getDefaultTimeframe(entryTime: string | null, _exitTime: string | null): Timeframe {
+  if (!entryTime) return '1D'
+  const entryMs = Date.parse(entryTime)
+  if (!Number.isFinite(entryMs)) return '1D'
+  return Date.now() - entryMs <= 55 * 86_400_000 ? '5' : '1D'
 }
 
 function intervalLabel(interval: string | null | undefined) {
@@ -107,26 +124,108 @@ function calcSMA(candles: Candle[], period: number): { time: number; value: numb
     if (i >= period) {
       rollingSum -= candles[i - period].close
     }
-    const windowSize = Math.min(i + 1, period)
-    result.push({ time: candles[i].time, value: rollingSum / windowSize })
+    if (i >= period - 1) {
+      result.push({ time: candles[i].time, value: rollingSum / period })
+    }
   }
   return result
 }
 
-function calcVolumeSMA(candles: Candle[], period: number): { time: number; value: number }[] {
+function calcDollarVolumeSMA(candles: Candle[], period: number): { time: number; value: number }[] {
   const result: { time: number; value: number }[] = []
   if (candles.length === 0 || period <= 0) return result
 
   let rollingSum = 0
   for (let i = 0; i < candles.length; i++) {
-    rollingSum += candles[i].volume ?? 0
+    rollingSum += (candles[i].volume ?? 0) * candles[i].close
     if (i >= period) {
-      rollingSum -= candles[i - period].volume ?? 0
+      rollingSum -= (candles[i - period].volume ?? 0) * candles[i - period].close
     }
-    const windowSize = Math.min(i + 1, period)
-    result.push({ time: candles[i].time, value: rollingSum / windowSize })
+    if (i >= period - 1) {
+      result.push({ time: candles[i].time, value: rollingSum / period })
+    }
   }
   return result
+}
+
+function marketDateKey(time: number) {
+  return MARKET_DATE_FORMATTER.format(new Date(time * 1000))
+}
+
+function marketTimeSlot(time: number) {
+  return MARKET_TIME_FORMATTER.format(new Date(time * 1000))
+}
+
+function calcSessionVWAP(candles: Candle[]) {
+  let session = ''
+  let cumulativePriceVolume = 0
+  let cumulativeVolume = 0
+
+  return candles.map((candle) => {
+    const nextSession = marketDateKey(candle.time)
+    if (nextSession !== session) {
+      session = nextSession
+      cumulativePriceVolume = 0
+      cumulativeVolume = 0
+    }
+    const volume = candle.volume ?? 0
+    cumulativePriceVolume += ((candle.high + candle.low + candle.close) / 3) * volume
+    cumulativeVolume += volume
+    return {
+      time: candle.time,
+      value: cumulativeVolume > 0 ? cumulativePriceVolume / cumulativeVolume : candle.close,
+    }
+  })
+}
+
+function emaValues(values: number[], period: number) {
+  const result: Array<number | null> = Array(values.length).fill(null)
+  if (values.length < period) return result
+  const multiplier = 2 / (period + 1)
+  let ema = values.slice(0, period).reduce((sum, value) => sum + value, 0) / period
+  result[period - 1] = ema
+  for (let index = period; index < values.length; index++) {
+    ema = values[index] * multiplier + ema * (1 - multiplier)
+    result[index] = ema
+  }
+  return result
+}
+
+function calcMACD(candles: Candle[]) {
+  const closes = candles.map((candle) => candle.close)
+  const fast = emaValues(closes, 12)
+  const slow = emaValues(closes, 26)
+  const macdValues = candles.map((_, index) => (
+    fast[index] != null && slow[index] != null ? fast[index]! - slow[index]! : null
+  ))
+  const validMacd = macdValues.filter((value): value is number => value != null)
+  const validSignal = emaValues(validMacd, 9)
+  let signalIndex = 0
+
+  return candles.flatMap((candle, index) => {
+    const macd = macdValues[index]
+    if (macd == null) return []
+    const signal = validSignal[signalIndex++]
+    if (signal == null) return []
+    return [{ time: candle.time, macd, signal, histogram: macd - signal }]
+  })
+}
+
+function calcRVOL(candles: Candle[], lookbackDays = 5) {
+  const history = new Map<string, Array<{ date: string; volume: number }>>()
+  return candles.flatMap((candle) => {
+    const volume = candle.volume ?? 0
+    const date = marketDateKey(candle.time)
+    const slot = marketTimeSlot(candle.time)
+    const prior = history.get(slot) ?? []
+    const comparison = prior.filter((item) => item.date !== date).slice(-lookbackDays)
+    const average = comparison.length
+      ? comparison.reduce((sum, item) => sum + item.volume, 0) / comparison.length
+      : 0
+    prior.push({ date, volume })
+    history.set(slot, prior)
+    return average > 0 ? [{ time: candle.time, value: volume / average }] : []
+  })
 }
 
 function formatTradeDate(entryTime: string | null, timeZone: string) {
@@ -192,20 +291,24 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
   const [topTab,    setTopTab]    = useState<'chart' | 'notes' | 'running'>('chart')
   const [timeframe, setTimeframe] = useState<Timeframe>(() => getDefaultTimeframe(entryTime, exitTime))
   const [style,     setStyle]     = useState<ChartStyle>(() => {
-    if (typeof window === 'undefined') return 'candles'
+    if (typeof window === 'undefined') return 'hollow'
     const raw = window.localStorage.getItem(CHART_STYLE_STORAGE_KEY)
     return raw === 'candles' || raw === 'hollow' || raw === 'bars' || raw === 'line' || raw === 'area'
       ? raw
-      : 'candles'
+      : 'hollow'
   })
   const [styleHydrated, setStyleHydrated] = useState(false)
   const [volumeOn,  setVolumeOn]  = useState(true)
-  const [ema9On,    setEma9On]    = useState(true)
-  const [ma10On,    setMa10On]    = useState(true)
-  const [ma20On,    setMa20On]    = useState(true)
-  const [ma50On,    setMa50On]    = useState(true)
+  const [ema6On,    setEma6On]    = useState(true)
+  const [ema10On,   setEma10On]   = useState(true)
+  const [sma10On,   setSma10On]   = useState(true)
+  const [ema20On,   setEma20On]   = useState(true)
+  const [ema50On,   setEma50On]   = useState(true)
   const [ma200On,   setMa200On]   = useState(true)
-  const [volumeMa50On, setVolumeMa50On] = useState(true)
+  const [vwapOn,    setVwapOn]    = useState(true)
+  const [macdOn,    setMacdOn]    = useState(true)
+  const [rvolOn,    setRvolOn]    = useState(true)
+  const [volumeMa20On, setVolumeMa20On] = useState(true)
   const [loading,   setLoading]   = useState(false)
   const [error,     setError]     = useState<string | null>(null)
   const [candles,   setCandles]   = useState<Candle[] | null>(null)
@@ -303,7 +406,10 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
         horzLines: { color: '#f0f0f0' },
       },
       crosshair: { mode: CrosshairMode.Normal },
-      rightPriceScale: { borderColor: '#e5e7eb' },
+      rightPriceScale: {
+        borderColor: '#e5e7eb',
+        scaleMargins: { top: 0.04, bottom: 0.43 },
+      },
       timeScale: {
         borderColor:    '#e5e7eb',
         timeVisible:    true,
@@ -368,26 +474,31 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
 
     const ts = (t: number) => t as UTCTimestamp
 
-    // --- Volume (before main series so it sits behind) ---
+    // --- Dollar volume (before main series so it sits behind) ---
     if (volumeOn) {
       const vol = chart.addHistogramSeries({
         priceFormat:  { type: 'volume' },
         priceScaleId: 'volume',
+        priceLineVisible: false,
+        lastValueVisible: false,
       })
-      chart.priceScale('volume').applyOptions({ scaleMargins: { top: 0.75, bottom: 0 } })
+      chart.priceScale('volume').applyOptions({
+        visible: false,
+        scaleMargins: { top: 0.61, bottom: 0.28 },
+      })
       vol.setData(
         candles.map(c => ({
           time:  ts(c.time),
-          value: c.volume ?? 0,
-          color: c.close >= c.open ? 'rgba(22,163,74,0.4)' : 'rgba(220,38,38,0.4)',
+          value: (c.volume ?? 0) * c.close,
+          color: c.close >= c.open ? 'rgba(8,153,129,0.5)' : 'rgba(242,54,69,0.5)',
         }))
       )
 
-      if (volumeMa50On) {
-        const volMa50 = calcVolumeSMA(candles, 50)
-        if (volMa50.length) {
+      if (volumeMa20On) {
+        const volMa20 = calcDollarVolumeSMA(candles, 20)
+        if (volMa20.length) {
           const s = chart.addLineSeries({
-            color: '#f97316',
+            color: '#f4a261',
             lineWidth: 2,
             lineStyle: 0,
             lineType: LineType.WithSteps,
@@ -396,12 +507,78 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
             lastValueVisible: false,
           })
           s.setData(
-            volMa50.map((d) => ({
+            volMa20.map((d) => ({
               time: ts(d.time),
               value: d.value,
             }))
           )
         }
+      }
+    }
+
+    // --- MACD 12 / 26 / 9 ---
+    if (macdOn) {
+      const macd = calcMACD(candles)
+      if (macd.length) {
+        const histogram = chart.addHistogramSeries({
+          priceScaleId: 'macd',
+          priceLineVisible: false,
+          lastValueVisible: false,
+          base: 0,
+        })
+        chart.priceScale('macd').applyOptions({
+          visible: false,
+          scaleMargins: { top: 0.76, bottom: 0.11 },
+        })
+        histogram.setData(macd.map((point) => ({
+          time: ts(point.time),
+          value: point.histogram,
+          color: point.histogram >= 0 ? 'rgba(8,153,129,0.7)' : 'rgba(242,54,69,0.7)',
+        })))
+        const macdLine = chart.addLineSeries({
+          priceScaleId: 'macd',
+          color: '#3b82f6',
+          lineWidth: 1,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        })
+        macdLine.setData(macd.map((point) => ({ time: ts(point.time), value: point.macd })))
+        const signalLine = chart.addLineSeries({
+          priceScaleId: 'macd',
+          color: '#f59e0b',
+          lineWidth: 1,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        })
+        signalLine.setData(macd.map((point) => ({ time: ts(point.time), value: point.signal })))
+      }
+    }
+
+    // --- Relative volume by matching intraday slot over the prior 5 sessions ---
+    if (rvolOn) {
+      const rvol = calcRVOL(candles)
+      if (rvol.length) {
+        const rvolSeries = chart.addHistogramSeries({
+          priceScaleId: 'rvol',
+          priceLineVisible: false,
+          lastValueVisible: false,
+          base: 0,
+        })
+        chart.priceScale('rvol').applyOptions({
+          visible: false,
+          scaleMargins: { top: 0.92, bottom: 0.01 },
+        })
+        const candleByTime = new Map(candles.map((candle) => [candle.time, candle]))
+        rvolSeries.setData(rvol.map((point) => {
+          const candle = candleByTime.get(point.time)
+          return {
+            time: ts(point.time),
+            value: point.value,
+            color: candle && candle.close >= candle.open
+              ? 'rgba(8,153,129,0.8)'
+              : 'rgba(242,54,69,0.8)',
+          }
+        }))
       }
     }
 
@@ -411,12 +588,12 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
 
     if (style === 'candles') {
       const s = chart.addCandlestickSeries({
-        upColor:         '#22c55e',
-        downColor:       '#ef4444',
-        borderUpColor:   '#22c55e',
-        borderDownColor: '#ef4444',
-        wickUpColor:     '#22c55e',
-        wickDownColor:   '#ef4444',
+        upColor:         TV_UP_COLOR,
+        downColor:       TV_DOWN_COLOR,
+        borderUpColor:   TV_UP_COLOR,
+        borderDownColor: TV_DOWN_COLOR,
+        wickUpColor:     TV_UP_COLOR,
+        wickDownColor:   TV_DOWN_COLOR,
       })
       s.setData(candles.map(c => ({ time: ts(c.time), open: c.open, high: c.high, low: c.low, close: c.close })))
       main = s
@@ -426,17 +603,17 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
       //   body   = hollow (transparent) if close >= open, filled with color if close < open
       const s = chart.addCandlestickSeries({
         upColor:         'rgba(0,0,0,0)',
-        downColor:       '#ef4444',
-        borderUpColor:   '#22c55e',
-        borderDownColor: '#ef4444',
-        wickUpColor:     '#22c55e',
-        wickDownColor:   '#ef4444',
+        downColor:       TV_DOWN_COLOR,
+        borderUpColor:   TV_UP_COLOR,
+        borderDownColor: TV_DOWN_COLOR,
+        wickUpColor:     TV_UP_COLOR,
+        wickDownColor:   TV_DOWN_COLOR,
       })
       s.setData(candles.map((c, i) => {
         const prevClose = i > 0 ? candles[i - 1].close : c.open
         const isGreen   = c.close >= prevClose
         const isHollow  = c.close >= c.open
-        const color     = isGreen ? '#22c55e' : '#ef4444'
+        const color     = isGreen ? TV_UP_COLOR : TV_DOWN_COLOR
         return { time: ts(c.time), open: c.open, high: c.high, low: c.low, close: c.close,
           color:       isHollow ? 'rgba(0,0,0,0)' : color,
           borderColor: color,
@@ -444,7 +621,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
       }))
       main = s
     } else if (style === 'bars') {
-      const s = chart.addBarSeries({ upColor: '#22c55e', downColor: '#ef4444' })
+      const s = chart.addBarSeries({ upColor: TV_UP_COLOR, downColor: TV_DOWN_COLOR })
       s.setData(candles.map(c => ({ time: ts(c.time), open: c.open, high: c.high, low: c.low, close: c.close })))
       main = s
     } else if (style === 'area') {
@@ -461,47 +638,66 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
       main = s
     }
 
-    // --- EMA 9 ---
-    if (ema9On) {
-      const data = calcEMA(candles, 9)
+    // --- Moving Averages script: intraday EMA 6 / 10 / 20 / 50 + SMA 200 ---
+    if (ema6On) {
+      const data = calcEMA(candles, 6)
       if (data.length) {
         const s = chart.addLineSeries({
-          color: '#f97316', lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
+          color: '#089981', lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
         })
         s.setData(data.map(d => ({ time: ts(d.time), value: d.value })))
       }
     }
 
-    // --- MA 10 ---
-    if (ma10On) {
+    if (ema10On) {
+      const data = calcEMA(candles, 10)
+      if (data.length) {
+        const s = chart.addLineSeries({
+          color: '#f9a825', lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
+        })
+        s.setData(data.map(d => ({ time: ts(d.time), value: d.value })))
+      }
+    }
+
+    // Separate visible SMA 10 indicator.
+    if (sma10On) {
       const data = calcSMA(candles, 10)
       if (data.length) {
         const s = chart.addLineSeries({
-          color: '#0ea5e9', lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
+          color: '#7e57c2', lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
         })
         s.setData(data.map(d => ({ time: ts(d.time), value: d.value })))
       }
     }
 
-    // --- MA 20 ---
-    if (ma20On) {
-      const data = calcSMA(candles, 20)
+    if (ema20On) {
+      const data = calcEMA(candles, 20)
       if (data.length) {
         const s = chart.addLineSeries({
-          color: '#8b5cf6', lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
+          color: '#f57c00', lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
         })
         s.setData(data.map(d => ({ time: ts(d.time), value: d.value })))
       }
     }
 
-    // --- MA 50 ---
-    if (ma50On) {
-      const data = calcSMA(candles, 50)
+    if (ema50On) {
+      const data = calcEMA(candles, 50)
       if (data.length) {
         const s = chart.addLineSeries({
-          color: '#22c55e', lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
+          color: '#e91e63', lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
         })
         s.setData(data.map(d => ({ time: ts(d.time), value: d.value })))
+      }
+    }
+
+    // --- Session VWAP ---
+    if (vwapOn) {
+      const data = calcSessionVWAP(candles)
+      if (data.length) {
+        const s = chart.addLineSeries({
+          color: '#2962ff', lineWidth: 2, priceLineVisible: false, lastValueVisible: true,
+        })
+        s.setData(data.map((point) => ({ time: ts(point.time), value: point.value })))
       }
     }
 
@@ -510,7 +706,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
       const data = calcSMA(candles, 200)
       if (data.length) {
         const s = chart.addLineSeries({
-          color: '#b45309', lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
+          color: '#3949ab', lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
         })
         s.setData(data.map(d => ({ time: ts(d.time), value: d.value })))
       }
@@ -551,6 +747,25 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
       const overlay = arrowsOverlayRef.current
       if (!overlay) return
       overlay.innerHTML = ''
+
+      if (timeframe === '5' || timeframe === '60') {
+        let previousSession = marketDateKey(candles[0].time)
+        for (const candle of candles.slice(1)) {
+          const session = marketDateKey(candle.time)
+          if (session === previousSession) continue
+          previousSession = session
+          const x = chart.timeScale().timeToCoordinate(ts(candle.time))
+          if (x == null) continue
+          const divider = document.createElement('div')
+          divider.style.position = 'absolute'
+          divider.style.left = `${x}px`
+          divider.style.top = '15%'
+          divider.style.bottom = '0'
+          divider.style.borderLeft = '1px dashed rgba(148, 163, 184, 0.55)'
+          overlay.appendChild(divider)
+        }
+      }
+
       if (arrowPoints.length === 0) return
 
       for (const pt of arrowPoints) {
@@ -721,13 +936,34 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
       ro.disconnect()
       chart.remove()
     }
-  }, [candles, meta, style, volumeOn, ema9On, ma10On, ma20On, ma50On, ma200On, volumeMa50On, topTab, side, entryPrice, exitPrice, executionLegs, userTimeZone])
+  }, [
+    candles,
+    meta,
+    style,
+    volumeOn,
+    volumeMa20On,
+    macdOn,
+    rvolOn,
+    vwapOn,
+    ema6On,
+    ema10On,
+    sma10On,
+    ema20On,
+    ema50On,
+    ma200On,
+    topTab,
+    side,
+    entryPrice,
+    exitPrice,
+    executionLegs,
+    userTimeZone,
+  ])
 
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
   return (
-    <div className="h-[720px] rounded-xl border border-[#d9dce3] bg-[#f4f5f8] p-2.5">
+    <div className="min-h-[930px] rounded-xl border border-[#d9dce3] bg-[#f4f5f8] p-2.5">
 
       {/* Top tabs */}
       <div className="mb-2 flex items-center gap-1 rounded-md border border-[#d7dae2] bg-[#eeeff3] p-1">
@@ -791,66 +1027,138 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
         </div>
 
         {/* Indicator toggles */}
-        <div className="flex items-center gap-1.5 border-b border-[#e6e9ef] px-3 py-1.5">
+        <div className="flex flex-wrap items-center gap-1.5 border-b border-[#e6e9ef] px-3 py-1.5">
           <Button
             size="xs"
             className={`h-7 text-[11px] ${
-              ema9On
-                ? 'border-[#f97316] bg-[#ffedd5] text-[#f97316] hover:bg-[#fed7aa]'
-                : 'text-[#f97316]'
+              ema6On
+                ? 'border-[#089981] bg-[#e8f7f3] text-[#087f6c] hover:bg-[#d3f0e9]'
+                : 'text-[#087f6c]'
             }`}
             variant="outline"
-            onClick={() => setEma9On(v => !v)}
+            onClick={() => setEma6On(v => !v)}
           >
-            EMA 9
+            EMA 6
           </Button>
           <Button
             size="xs"
             className={`h-7 text-[11px] ${
-              ma10On
-                ? 'border-[#0ea5e9] bg-[#e0f2fe] text-[#0ea5e9] hover:bg-[#bae6fd]'
-                : 'text-[#0ea5e9]'
+              ema10On
+                ? 'border-[#f9a825] bg-[#fff8df] text-[#b77900] hover:bg-[#fff1bd]'
+                : 'text-[#b77900]'
             }`}
             variant="outline"
-            onClick={() => setMa10On(v => !v)}
+            onClick={() => setEma10On(v => !v)}
           >
-            MA 10
+            EMA 10
           </Button>
           <Button
             size="xs"
             className={`h-7 text-[11px] ${
-              ma20On
-                ? 'border-[#8b5cf6] bg-[#f3e8ff] text-[#8b5cf6] hover:bg-[#e9d5ff]'
-                : 'text-[#8b5cf6]'
+              sma10On
+                ? 'border-[#7e57c2] bg-[#f1edfa] text-[#6746a5] hover:bg-[#e6def5]'
+                : 'text-[#6746a5]'
             }`}
             variant="outline"
-            onClick={() => setMa20On(v => !v)}
+            onClick={() => setSma10On(v => !v)}
           >
-            MA 20
+            SMA 10
           </Button>
           <Button
             size="xs"
             className={`h-7 text-[11px] ${
-              ma50On
-                ? 'border-[#22c55e] bg-[#dcfce7] text-[#22c55e] hover:bg-[#bbf7d0]'
-                : 'text-[#22c55e]'
+              ema20On
+                ? 'border-[#f57c00] bg-[#fff2e2] text-[#c56200] hover:bg-[#ffe3c2]'
+                : 'text-[#c56200]'
             }`}
             variant="outline"
-            onClick={() => setMa50On(v => !v)}
+            onClick={() => setEma20On(v => !v)}
           >
-            MA 50
+            EMA 20
+          </Button>
+          <Button
+            size="xs"
+            className={`h-7 text-[11px] ${
+              ema50On
+                ? 'border-[#e91e63] bg-[#fdebf1] text-[#be1850] hover:bg-[#fbd5e2]'
+                : 'text-[#be1850]'
+            }`}
+            variant="outline"
+            onClick={() => setEma50On(v => !v)}
+          >
+            EMA 50
           </Button>
           <Button
             size="xs"
             className={`h-7 text-[11px] ${
               ma200On
-                ? 'border-[#b45309] bg-[#fef3c7] text-[#b45309] hover:bg-[#fde68a]'
-                : 'text-[#b45309]'
+                ? 'border-[#3949ab] bg-[#eef0fb] text-[#3949ab] hover:bg-[#dee2f7]'
+                : 'text-[#3949ab]'
             }`}
             variant="outline"
             onClick={() => setMa200On(v => !v)}
           >
-            MA 200
+            SMA 200
+          </Button>
+          <Button
+            size="xs"
+            className={`h-7 text-[11px] ${
+              vwapOn
+                ? 'border-[#2962ff] bg-[#edf2ff] text-[#2455dc] hover:bg-[#dce6ff]'
+                : 'text-[#2455dc]'
+            }`}
+            variant="outline"
+            onClick={() => setVwapOn(v => !v)}
+          >
+            VWAP
+          </Button>
+          <Button
+            size="xs"
+            className={`h-7 text-[11px] ${
+              volumeOn
+                ? 'border-[#14b8a6] bg-[#f0fdfa] text-[#0f766e] hover:bg-[#ccfbf1]'
+                : 'text-[#0f766e]'
+            }`}
+            variant="outline"
+            onClick={() => setVolumeOn(v => !v)}
+          >
+            Dollar Vol
+          </Button>
+          <Button
+            size="xs"
+            className={`h-7 text-[11px] ${
+              volumeMa20On
+                ? 'border-[#f97316] bg-[#fff7ed] text-[#ea580c] hover:bg-[#ffedd5]'
+                : 'text-[#ea580c]'
+            }`}
+            variant="outline"
+            onClick={() => setVolumeMa20On(v => !v)}
+          >
+            DV MA20
+          </Button>
+          <Button
+            size="xs"
+            className={`h-7 text-[11px] ${
+              macdOn
+                ? 'border-[#3b82f6] bg-[#eff6ff] text-[#2563eb] hover:bg-[#dbeafe]'
+                : 'text-[#2563eb]'
+            }`}
+            variant="outline"
+            onClick={() => setMacdOn(v => !v)}
+          >
+            MACD
+          </Button>
+          <Button
+            size="xs"
+            className={`h-7 text-[11px] ${
+              rvolOn
+                ? 'border-[#16a34a] bg-[#f0fdf4] text-[#15803d] hover:bg-[#dcfce7]'
+                : 'text-[#15803d]'
+            }`}
+            variant="outline"
+            onClick={() => setRvolOn(v => !v)}
+          >
+            RVOL 5D
           </Button>
           {loading && (
             <span className="ml-2 text-[11px] text-[#7b8291]">Loading…</span>
@@ -858,7 +1166,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
         </div>
 
         {/* Chart / placeholder area */}
-        <div className="relative h-[592px]">
+        <div className="relative h-[720px]">
           {topTab === 'chart' ? (
             <>
               {/* Chart container — always mounted so the ref stays valid */}
@@ -873,10 +1181,36 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
                 className="pointer-events-none absolute inset-0 z-[5] overflow-hidden"
               />
 
+              {/* TradingView-style pane labels and separators. */}
+              <div className="pointer-events-none absolute inset-0 z-[4] text-[10px] font-medium text-[#667085]">
+                {volumeOn && (
+                  <>
+                    <div className="absolute left-0 right-0 top-[59%] border-t border-[#e6e9ef]" />
+                    <span className="absolute left-2 top-[60%]">Dollar Vol · 20</span>
+                  </>
+                )}
+                {macdOn && (
+                  <>
+                    <div className="absolute left-0 right-0 top-[74%] border-t border-[#e6e9ef]" />
+                    <span className="absolute left-2 top-[75%]">MACD 12 26 9</span>
+                  </>
+                )}
+                {rvolOn && (
+                  <>
+                    <div className="absolute left-0 right-0 top-[90%] border-t border-[#e6e9ef]" />
+                    <span className="absolute left-2 top-[91%]">RVOL 5D</span>
+                  </>
+                )}
+              </div>
+              <div
+                className="pointer-events-none absolute bottom-0 right-0 top-[59%] z-[3] w-[72px] bg-white"
+                aria-hidden="true"
+              />
+
               {/* OHLC crosshair overlay — updated directly via DOM to avoid re-renders */}
               <div
                 ref={ohlcOverlayRef}
-                className="pointer-events-none absolute left-2 top-2 z-10 flex items-center gap-1 rounded bg-white/85 px-2 py-1 text-[11px] text-[#374151] opacity-0 shadow-sm backdrop-blur-sm transition-opacity"
+                className="pointer-events-none absolute left-2 top-[18%] z-10 flex items-center gap-1 rounded bg-white/85 px-2 py-1 text-[11px] text-[#374151] opacity-0 shadow-sm backdrop-blur-sm transition-opacity"
                 style={{ fontVariantNumeric: 'tabular-nums' }}
               />
 
