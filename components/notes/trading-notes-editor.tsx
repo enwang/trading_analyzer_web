@@ -1,7 +1,29 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { BookOpenCheck, Check, LogIn, LogOut, NotebookText, Save } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { EditorContent, useEditor, type Editor } from '@tiptap/react'
+import StarterKit from '@tiptap/starter-kit'
+import {
+  Bold,
+  BookOpenCheck,
+  Check,
+  Code2,
+  Heading1,
+  Heading2,
+  Heading3,
+  Italic,
+  List,
+  ListOrdered,
+  LogIn,
+  LogOut,
+  Minus,
+  NotebookText,
+  Quote,
+  Redo2,
+  Save,
+  Strikethrough,
+  Undo2,
+} from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -30,13 +52,202 @@ function savedTimeLabel(value: string | null) {
   }).format(new Date(value))
 }
 
-function replaceSelection(
-  value: string,
-  selectionStart: number,
-  selectionEnd: number,
-  replacement: string,
-) {
-  return value.slice(0, selectionStart) + replacement + value.slice(selectionEnd)
+function escapeHtml(value: string) {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;')
+}
+
+function editorContent(value: string) {
+  if (!value) return ''
+  if (/<(?:p|h[1-6]|ul|ol|li|blockquote|pre|hr|br)\b/i.test(value)) return value
+
+  const content: string[] = []
+  let listType: 'ul' | 'ol' | null = null
+  const closeList = () => {
+    if (!listType) return
+    content.push(`</${listType}>`)
+    listType = null
+  }
+
+  for (const line of value.split('\n')) {
+    const heading = line.match(/^\s*(#{1,3})\s+(.+)$/)
+    const bullet = line.match(/^\s*[•*-]\s+(.+)$/)
+    const numbered = line.match(/^\s*\d+[.)]\s+(.+)$/)
+    const quote = line.match(/^\s*>\s+(.+)$/)
+
+    if (bullet || numbered) {
+      const nextListType = bullet ? 'ul' : 'ol'
+      if (listType !== nextListType) {
+        closeList()
+        content.push(`<${nextListType}>`)
+        listType = nextListType
+      }
+      content.push(`<li><p>${escapeHtml((bullet ?? numbered)?.[1] ?? '')}</p></li>`)
+      continue
+    }
+
+    if (!line.trim() && listType) continue
+    closeList()
+
+    if (heading) {
+      const level = heading[1].length
+      content.push(`<h${level}>${escapeHtml(heading[2])}</h${level}>`)
+    } else if (quote) {
+      content.push(`<blockquote><p>${escapeHtml(quote[1])}</p></blockquote>`)
+    } else {
+      content.push(`<p>${line ? escapeHtml(line) : '<br>'}</p>`)
+    }
+  }
+
+  closeList()
+  return content.join('')
+}
+
+function ToolbarButton({
+  active = false,
+  disabled = false,
+  label,
+  onClick,
+  children,
+}: {
+  active?: boolean
+  disabled?: boolean
+  label: string
+  onClick: () => void
+  children: ReactNode
+}) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-sm"
+      aria-label={label}
+      aria-pressed={active}
+      title={label}
+      disabled={disabled}
+      onClick={onClick}
+      className={active ? 'bg-accent text-accent-foreground' : undefined}
+    >
+      {children}
+    </Button>
+  )
+}
+
+function NotesToolbar({ editor }: { editor: Editor }) {
+  const [, forceUpdate] = useState(0)
+
+  useEffect(() => {
+    const update = () => forceUpdate((value) => value + 1)
+    editor.on('selectionUpdate', update)
+    editor.on('transaction', update)
+    return () => {
+      editor.off('selectionUpdate', update)
+      editor.off('transaction', update)
+    }
+  }, [editor])
+
+  return (
+    <div className="flex min-h-10 flex-wrap items-center gap-0.5 border-b bg-muted/25 px-2 py-1" role="toolbar" aria-label="Text formatting">
+      <ToolbarButton label="Bold" active={editor.isActive('bold')} onClick={() => editor.chain().focus().toggleBold().run()}>
+        <Bold className="size-4" />
+      </ToolbarButton>
+      <ToolbarButton label="Italic" active={editor.isActive('italic')} onClick={() => editor.chain().focus().toggleItalic().run()}>
+        <Italic className="size-4" />
+      </ToolbarButton>
+      <ToolbarButton label="Strikethrough" active={editor.isActive('strike')} onClick={() => editor.chain().focus().toggleStrike().run()}>
+        <Strikethrough className="size-4" />
+      </ToolbarButton>
+      <ToolbarButton label="Inline code" active={editor.isActive('code')} onClick={() => editor.chain().focus().toggleCode().run()}>
+        <Code2 className="size-4" />
+      </ToolbarButton>
+
+      <span className="mx-1 h-5 w-px bg-border" aria-hidden="true" />
+
+      <ToolbarButton label="Heading 1" active={editor.isActive('heading', { level: 1 })} onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}>
+        <Heading1 className="size-4" />
+      </ToolbarButton>
+      <ToolbarButton label="Heading 2" active={editor.isActive('heading', { level: 2 })} onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}>
+        <Heading2 className="size-4" />
+      </ToolbarButton>
+      <ToolbarButton label="Heading 3" active={editor.isActive('heading', { level: 3 })} onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}>
+        <Heading3 className="size-4" />
+      </ToolbarButton>
+
+      <span className="mx-1 h-5 w-px bg-border" aria-hidden="true" />
+
+      <ToolbarButton label="Bullet list" active={editor.isActive('bulletList')} onClick={() => editor.chain().focus().toggleBulletList().run()}>
+        <List className="size-4" />
+      </ToolbarButton>
+      <ToolbarButton label="Numbered list" active={editor.isActive('orderedList')} onClick={() => editor.chain().focus().toggleOrderedList().run()}>
+        <ListOrdered className="size-4" />
+      </ToolbarButton>
+      <ToolbarButton label="Blockquote" active={editor.isActive('blockquote')} onClick={() => editor.chain().focus().toggleBlockquote().run()}>
+        <Quote className="size-4" />
+      </ToolbarButton>
+      <ToolbarButton label="Horizontal rule" onClick={() => editor.chain().focus().setHorizontalRule().run()}>
+        <Minus className="size-4" />
+      </ToolbarButton>
+
+      <span className="mx-1 h-5 w-px bg-border" aria-hidden="true" />
+
+      <ToolbarButton label="Undo" disabled={!editor.can().undo()} onClick={() => editor.chain().focus().undo().run()}>
+        <Undo2 className="size-4" />
+      </ToolbarButton>
+      <ToolbarButton label="Redo" disabled={!editor.can().redo()} onClick={() => editor.chain().focus().redo().run()}>
+        <Redo2 className="size-4" />
+      </ToolbarButton>
+    </div>
+  )
+}
+
+function RichNotesEditor({
+  label,
+  value,
+  onChange,
+  onBlur,
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+  onBlur: () => void
+}) {
+  const editor = useEditor({
+    immediatelyRender: false,
+    extensions: [
+      StarterKit.configure({
+        bulletList: { keepMarks: true },
+        orderedList: { keepMarks: true },
+      }),
+    ],
+    content: editorContent(value),
+    editorProps: {
+      attributes: {
+        'aria-label': label,
+        class: 'trading-notes-editor min-h-[calc(100vh-16rem)] px-4 py-3 text-sm leading-6 outline-none',
+      },
+    },
+    onUpdate: ({ editor: currentEditor }) => onChange(currentEditor.getHTML()),
+    onBlur,
+  })
+
+  useEffect(() => {
+    if (!editor) return
+    const nextContent = editorContent(value)
+    if (editor.getHTML() !== nextContent) editor.commands.setContent(nextContent, { emitUpdate: false })
+  }, [editor, value])
+
+  if (!editor) return <div className="min-h-[calc(100vh-13rem)] rounded-md border" />
+
+  return (
+    <div className="min-h-[calc(100vh-13rem)] w-full overflow-hidden rounded-md border bg-background transition-colors focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20">
+      <NotesToolbar editor={editor} />
+      <EditorContent editor={editor} />
+    </div>
+  )
 }
 
 export function TradingNotesEditor({
@@ -127,57 +338,6 @@ export function TradingNotesEditor({
     scheduleSave()
   }
 
-  function updateNoteFromShortcut(
-    key: NotesKey,
-    textarea: HTMLTextAreaElement,
-    value: string,
-    cursor: number,
-  ) {
-    updateNote(key, value)
-    requestAnimationFrame(() => {
-      textarea.setSelectionRange(cursor, cursor)
-    })
-  }
-
-  function handleEditorKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>, key: NotesKey) {
-    if (event.metaKey || event.ctrlKey || event.altKey) return
-
-    const textarea = event.currentTarget
-    const { value, selectionStart, selectionEnd } = textarea
-    if (selectionStart !== selectionEnd) return
-
-    const lineStart = value.lastIndexOf('\n', selectionStart - 1) + 1
-    const beforeCursor = value.slice(lineStart, selectionStart)
-
-    if (event.key === ' ' && /^(\s*)[*-]$/.test(beforeCursor)) {
-      event.preventDefault()
-      const indentation = beforeCursor.match(/^\s*/)?.[0] ?? ''
-      const replacement = `${indentation}• `
-      const nextValue = replaceSelection(value, lineStart, selectionStart, replacement)
-      updateNoteFromShortcut(key, textarea, nextValue, lineStart + replacement.length)
-      return
-    }
-
-    if (event.key !== 'Enter') return
-
-    const lineEnd = value.indexOf('\n', selectionStart)
-    const currentLine = value.slice(lineStart, lineEnd === -1 ? value.length : lineEnd)
-    const listItem = currentLine.match(/^(\s*)•\s?(.*)$/)
-    if (!listItem) return
-
-    event.preventDefault()
-    const [, indentation, itemText] = listItem
-    if (!itemText.trim()) {
-      const nextValue = replaceSelection(value, lineStart, selectionStart, indentation)
-      updateNoteFromShortcut(key, textarea, nextValue, lineStart + indentation.length)
-      return
-    }
-
-    const replacement = `\n${indentation}• `
-    const nextValue = replaceSelection(value, selectionStart, selectionEnd, replacement)
-    updateNoteFromShortcut(key, textarea, nextValue, selectionStart + replacement.length)
-  }
-
   const savedLabel = savedTimeLabel(updatedAt)
   const statusLabel = saveState === 'saving'
     ? 'Saving…'
@@ -185,11 +345,11 @@ export function TradingNotesEditor({
       ? 'Save failed'
       : saveState === 'dirty'
         ? 'Unsaved changes'
-      : saveState === 'saved'
-        ? 'Saved'
-        : savedLabel
-          ? `Saved ${savedLabel}`
-          : 'Not saved yet'
+        : saveState === 'saved'
+          ? 'Saved'
+          : savedLabel
+            ? `Saved ${savedLabel}`
+            : 'Not saved yet'
 
   return (
     <div className="flex min-h-[calc(100vh-7rem)] flex-col">
@@ -226,14 +386,11 @@ export function TradingNotesEditor({
 
         {TAB_CONFIG.map(({ key, label }) => (
           <TabsContent key={key} value={key} className="mt-4 flex flex-1">
-            <textarea
-              aria-label={label}
+            <RichNotesEditor
+              label={label}
               value={notes[key]}
-              onChange={(event) => updateNote(key, event.target.value)}
-              onKeyDown={(event) => handleEditorKeyDown(event, key)}
+              onChange={(value) => updateNote(key, value)}
               onBlur={() => void persist()}
-              className="min-h-[calc(100vh-13rem)] w-full resize-none rounded-md border bg-background px-4 py-3 text-sm leading-6 outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/20"
-              spellCheck={false}
             />
           </TabsContent>
         ))}
