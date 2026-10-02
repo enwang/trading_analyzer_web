@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { BookOpenCheck, Check, LogIn, LogOut, NotebookText, Save } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -28,6 +28,15 @@ function savedTimeLabel(value: string | null) {
     hour: 'numeric',
     minute: '2-digit',
   }).format(new Date(value))
+}
+
+function replaceSelection(
+  value: string,
+  selectionStart: number,
+  selectionEnd: number,
+  replacement: string,
+) {
+  return value.slice(0, selectionStart) + replacement + value.slice(selectionEnd)
 }
 
 export function TradingNotesEditor({
@@ -118,6 +127,57 @@ export function TradingNotesEditor({
     scheduleSave()
   }
 
+  function updateNoteFromShortcut(
+    key: NotesKey,
+    textarea: HTMLTextAreaElement,
+    value: string,
+    cursor: number,
+  ) {
+    updateNote(key, value)
+    requestAnimationFrame(() => {
+      textarea.setSelectionRange(cursor, cursor)
+    })
+  }
+
+  function handleEditorKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>, key: NotesKey) {
+    if (event.metaKey || event.ctrlKey || event.altKey) return
+
+    const textarea = event.currentTarget
+    const { value, selectionStart, selectionEnd } = textarea
+    if (selectionStart !== selectionEnd) return
+
+    const lineStart = value.lastIndexOf('\n', selectionStart - 1) + 1
+    const beforeCursor = value.slice(lineStart, selectionStart)
+
+    if (event.key === ' ' && /^(\s*)[*-]$/.test(beforeCursor)) {
+      event.preventDefault()
+      const indentation = beforeCursor.match(/^\s*/)?.[0] ?? ''
+      const replacement = `${indentation}• `
+      const nextValue = replaceSelection(value, lineStart, selectionStart, replacement)
+      updateNoteFromShortcut(key, textarea, nextValue, lineStart + replacement.length)
+      return
+    }
+
+    if (event.key !== 'Enter') return
+
+    const lineEnd = value.indexOf('\n', selectionStart)
+    const currentLine = value.slice(lineStart, lineEnd === -1 ? value.length : lineEnd)
+    const listItem = currentLine.match(/^(\s*)•\s?(.*)$/)
+    if (!listItem) return
+
+    event.preventDefault()
+    const [, indentation, itemText] = listItem
+    if (!itemText.trim()) {
+      const nextValue = replaceSelection(value, lineStart, selectionStart, indentation)
+      updateNoteFromShortcut(key, textarea, nextValue, lineStart + indentation.length)
+      return
+    }
+
+    const replacement = `\n${indentation}• `
+    const nextValue = replaceSelection(value, selectionStart, selectionEnd, replacement)
+    updateNoteFromShortcut(key, textarea, nextValue, selectionStart + replacement.length)
+  }
+
   const savedLabel = savedTimeLabel(updatedAt)
   const statusLabel = saveState === 'saving'
     ? 'Saving…'
@@ -170,6 +230,7 @@ export function TradingNotesEditor({
               aria-label={label}
               value={notes[key]}
               onChange={(event) => updateNote(key, event.target.value)}
+              onKeyDown={(event) => handleEditorKeyDown(event, key)}
               onBlur={() => void persist()}
               className="min-h-[calc(100vh-13rem)] w-full resize-none rounded-md border bg-background px-4 py-3 text-sm leading-6 outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/20"
               spellCheck={false}
