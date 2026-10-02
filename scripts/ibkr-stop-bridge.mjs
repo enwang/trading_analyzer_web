@@ -6,7 +6,12 @@ import { promisify } from 'node:util'
 
 import { createClient } from '@supabase/supabase-js'
 
-import { buildStopSyncDatabaseUpdate, matchOpenStopsToTrades } from '../lib/ibkr/open-stop-orders.ts'
+import {
+  buildInitialStopSyncDatabaseUpdate,
+  buildStopSyncDatabaseUpdate,
+  matchFilledStopsToClosedTrades,
+  matchOpenStopsToTrades,
+} from '../lib/ibkr/open-stop-orders.ts'
 
 const BRIDGE_PORT = Number(process.env.IBKR_STOP_BRIDGE_PORT || 4317)
 const DESKTOP_ORDERS_HELPER = process.env.IBKR_DESKTOP_ORDERS_HELPER
@@ -91,6 +96,20 @@ function requireEnvironment() {
   return { url, serviceRoleKey }
 }
 
+const marketDateFormatter = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/New_York',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+})
+
+function marketDateKey(value) {
+  const parts = Object.fromEntries(
+    marketDateFormatter.formatToParts(new Date(value)).map(part => [part.type, part.value]),
+  )
+  return `${parts.year}-${parts.month}-${parts.day}`
+}
+
 async function syncStops(userId) {
   if (typeof userId !== 'string' || !/^[0-9a-f-]{36}$/i.test(userId)) {
     throw new Error('A valid user ID is required')
@@ -107,7 +126,8 @@ async function syncStops(userId) {
 
   if (error) throw new Error(`Could not load open trades: ${error.message}`)
 
-  const matched = matchOpenStopsToTrades(trades ?? [], orders)
+  const activeOrders = orders.filter(order => ['SUBMITTED', 'PRESUBMITTED'].includes(order.status?.toUpperCase() ?? 'SUBMITTED'))
+  const matched = matchOpenStopsToTrades(trades ?? [], activeOrders)
   let updated = 0
   let unchanged = 0
   let initialSlInitialized = 0
@@ -136,13 +156,46 @@ async function syncStops(userId) {
     if (initializesInitialSl) initialSlInitialized += 1
   }
 
+  const recentCutoff = new Date(Date.now() - 96 * 60 * 60 * 1000).toISOString()
+  const { data: recentClosedTrades, error: closedError } = await supabase
+    .from('trades')
+    .select('id, symbol, side, shares, entry_time, entry_price, exit_time, exit_price, stop_loss, current_stop_loss, initial_risk_amount')
+    .eq('user_id', userId)
+    .not('exit_time', 'is', null)
+    .is('stop_loss', null)
+    .gte('exit_time', recentCutoff)
+  if (closedError) throw new Error(`Could not load recent closed trades: ${closedError.message}`)
+
+  const sameDayClosedTrades = (recentClosedTrades ?? []).filter(trade => (
+    trade.entry_time != null
+    && trade.exit_time != null
+    && marketDateKey(trade.entry_time) === marketDateKey(trade.exit_time)
+  ))
+  const filledMatched = matchFilledStopsToClosedTrades(sameDayClosedTrades, orders)
+  for (const update of filledMatched.updates) {
+    const trade = sameDayClosedTrades.find(candidate => candidate.id === update.tradeId)
+    if (!trade) continue
+    const updatePayload = buildInitialStopSyncDatabaseUpdate(trade, update.stopPrice)
+    const { error: updateError } = await supabase
+      .from('trades')
+      .update(updatePayload)
+      .eq('id', update.tradeId)
+      .eq('user_id', userId)
+      .not('exit_time', 'is', null)
+      .is('stop_loss', null)
+    if (updateError) throw new Error(`Could not initialize ${update.symbol} Initial SL: ${updateError.message}`)
+    updated += 1
+    initialSlInitialized += 1
+  }
+
   return {
     source: 'IBKR Desktop',
-    openStopOrders: orders.length,
+    openStopOrders: activeOrders.length,
+    filledStopOrders: orders.filter(order => order.status?.toUpperCase() === 'FILLED').length,
     updated,
     unchanged,
     initialSlInitialized,
-    skipped: matched.skipped,
+    skipped: [...matched.skipped, ...filledMatched.skipped],
   }
 }
 

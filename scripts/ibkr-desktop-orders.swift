@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 import ImageIO
@@ -19,6 +20,8 @@ struct DesktopStopOrder: Codable {
     let quantity: Double
     let orderType: String
     let stopPrice: Double
+    let status: String
+    let fillPrice: Double?
 }
 
 func fail(_ message: String) -> Never {
@@ -28,6 +31,41 @@ func fail(_ message: String) -> Never {
 
 func number(from value: String) -> Double? {
     Double(value.replacingOccurrences(of: ",", with: ""))
+}
+
+func action(from token: TextToken) -> String? {
+    if token.normalized.hasPrefix("SELL") { return "SELL" }
+    if token.normalized.hasPrefix("BUY") { return "BUY" }
+    return nil
+}
+
+func normalizedSymbol(from token: TextToken) -> String {
+    var value = token.normalized.replacingOccurrences(of: "•", with: "")
+        .trimmingCharacters(in: .whitespaces)
+    let lookalikes = [
+        "А": "A", "В": "B", "Е": "E", "К": "K", "М": "M", "Н": "H",
+        "О": "O", "Р": "P", "С": "C", "Т": "T", "Х": "X", "У": "Y",
+    ]
+    for (source, replacement) in lookalikes {
+        value = value.replacingOccurrences(of: source, with: replacement)
+    }
+    return value
+}
+
+let workspace = NSWorkspace.shared
+let previousApplication = workspace.frontmostApplication
+let ibkrApplication = workspace.runningApplications.first { $0.localizedName == "IBKR Desktop" }
+guard let ibkrApplication else {
+    fail("IBKR Desktop is not open")
+}
+if !ibkrApplication.isActive {
+    _ = ibkrApplication.activate(options: [.activateAllWindows])
+    Thread.sleep(forTimeInterval: 0.6)
+}
+defer {
+    if let previousApplication, previousApplication != ibkrApplication {
+        _ = previousApplication.activate(options: [.activateAllWindows])
+    }
 }
 
 // A window can be fully capturable by ID even when macOS marks it off-screen
@@ -92,43 +130,67 @@ let tokens = (request.results ?? []).compactMap { observation -> TextToken? in
     return TextToken(text: candidate.string, box: observation.boundingBox)
 }
 
-guard tokens.contains(where: { $0.normalized == "ORDERS TABLE" }) else {
+// The Orders Table occupies the left side of the IBKR workspace. Excluding the
+// right-side order-entry panels prevents their Buy/Sell/Stop controls from
+// being interpreted as order rows.
+let tableTokens = tokens.filter { $0.box.midX < 0.63 }
+if ProcessInfo.processInfo.environment["IBKR_OCR_DEBUG"] == "1" {
+    for token in tableTokens.sorted(by: {
+        if abs($0.box.midY - $1.box.midY) > 0.005 { return $0.box.midY > $1.box.midY }
+        return $0.box.midX < $1.box.midX
+    }) {
+        FileHandle.standardError.write(Data(String(
+            format: "y=%.4f x=%.4f %@\n",
+            token.box.midY,
+            token.box.midX,
+            token.text
+        ).utf8))
+    }
+}
+
+guard tableTokens.contains(where: { $0.normalized == "ORDERS TABLE" }) else {
     fail("Open the Orders Table in IBKR Desktop before using Sync Now")
 }
 
-let countPattern = try! NSRegularExpression(pattern: #"OPEN\s+ORDERS\s*\((\d+)\)"#)
-let openOrderCount = tokens.compactMap { token -> Int? in
+let countPattern = try! NSRegularExpression(pattern: #"(OPEN|ALL)\s+ORDERS\s*\((\d+)\)"#)
+let ordersView = tableTokens.compactMap { token -> (String, Int)? in
     let value = token.normalized
     let range = NSRange(value.startIndex..<value.endIndex, in: value)
     guard let match = countPattern.firstMatch(in: value, range: range),
-          let countRange = Range(match.range(at: 1), in: value) else { return nil }
-    return Int(value[countRange])
+          let viewRange = Range(match.range(at: 1), in: value),
+          let countRange = Range(match.range(at: 2), in: value),
+          let count = Int(value[countRange]) else { return nil }
+    return (String(value[viewRange]), count)
 }.first
 
-guard let openOrderCount else {
-    fail("Select Open Orders in the IBKR Desktop Orders Table before using Sync Now")
+guard let ordersView else {
+    fail("Select Open Orders or All Orders in the IBKR Desktop Orders Table before using Sync Now")
 }
 
 let quantityPattern = try! NSRegularExpression(pattern: #"^\d[\d,]*\s*/\s*\d[\d,]*$"#)
+let filledQuantityPattern = try! NSRegularExpression(pattern: #"^\d[\d,]*$"#)
 let symbolPattern = try! NSRegularExpression(pattern: #"^[A-Z][A-Z0-9.\-]{0,9}$"#)
-let actionTokens = tokens.filter { ["SELL", "BUY"].contains($0.normalized) }
+let actionTokens = tableTokens.filter { action(from: $0) != nil }
 var stopOrders: [DesktopStopOrder] = []
 var recognizedRows = 0
 
 for actionToken in actionTokens {
-    let row = tokens.filter { abs($0.box.midY - actionToken.box.midY) <= 0.009 }
-    let action = actionToken.normalized
+    let row = tableTokens.filter { abs($0.box.midY - actionToken.box.midY) <= 0.009 }
+    let orderAction = action(from: actionToken)!
     let hasStopType = row.contains { ["STOP", "STP", "STOP LIMIT", "STP LMT"].contains($0.normalized) }
-    let quantityToken = row.first { token in
+    let quantityToken = row
+      .filter { $0.box.minX > actionToken.box.maxX }
+      .filter { token in
         let value = token.normalized
         let range = NSRange(value.startIndex..<value.endIndex, in: value)
         return quantityPattern.firstMatch(in: value, range: range) != nil
-    }
+          || filledQuantityPattern.firstMatch(in: value, range: range) != nil
+      }
+      .min { $0.box.minX < $1.box.minX }
     let symbolToken = row
         .filter { token in
             guard token.box.midX < actionToken.box.midX else { return false }
-            let value = token.normalized.replacingOccurrences(of: "•", with: "")
-                .trimmingCharacters(in: .whitespaces)
+            let value = normalizedSymbol(from: token)
             let range = NSRange(value.startIndex..<value.endIndex, in: value)
             return symbolPattern.firstMatch(in: value, range: range) != nil
         }
@@ -139,8 +201,8 @@ for actionToken in actionTokens {
     guard hasStopType else { continue }
 
     let quantityParts = quantityToken.normalized.split(separator: "/", maxSplits: 1)
-    guard quantityParts.count == 2,
-          let quantity = number(from: String(quantityParts[1])),
+    let quantityValue = quantityParts.count == 2 ? String(quantityParts[1]) : quantityToken.normalized
+    guard let quantity = number(from: quantityValue),
           quantity > 0 else { continue }
 
     let timeInForceToken = row
@@ -155,20 +217,33 @@ for actionToken in actionTokens {
           let stopPrice = number(from: priceToken.normalized),
           stopPrice > 0 else { continue }
 
-    let symbol = symbolToken!.normalized.replacingOccurrences(of: "•", with: "")
-        .trimmingCharacters(in: .whitespaces)
+    let statusToken = row.first { ["SUBMITTED", "PRESUBMITTED", "FILLED", "CANCELLED"].contains($0.normalized) }
+    guard let statusToken else { continue }
+    let fillPriceToken = row
+        .filter { token in
+            guard let timeInForceToken,
+                  token.box.minX > timeInForceToken.box.maxX,
+                  token.box.maxX < statusToken.box.minX else { return false }
+            return number(from: token.normalized) != nil
+        }
+        .min { $0.box.minX < $1.box.minX }
+    let fillPrice = fillPriceToken.flatMap { number(from: $0.normalized) }
+
+    let symbol = normalizedSymbol(from: symbolToken!)
     stopOrders.append(DesktopStopOrder(
         orderId: stopOrders.count + 1,
         symbol: symbol,
-        action: action,
+        action: orderAction,
         quantity: quantity,
         orderType: "STP",
-        stopPrice: stopPrice
+        stopPrice: stopPrice,
+        status: statusToken.normalized,
+        fillPrice: fillPrice
     ))
 }
 
-guard recognizedRows == openOrderCount else {
-    fail("IBKR Desktop shows \(openOrderCount) open orders, but only \(recognizedRows) visible rows were recognized; expand the Orders Table and try again")
+if ordersView.0 == "OPEN" && recognizedRows != ordersView.1 {
+    fail("IBKR Desktop shows \(ordersView.1) open orders, but only \(recognizedRows) visible rows were recognized; expand the Orders Table and try again")
 }
 
 let encoder = JSONEncoder()

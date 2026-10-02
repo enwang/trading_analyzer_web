@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict'
 
-import { buildStopSyncDatabaseUpdate, matchOpenStopsToTrades } from '../lib/ibkr/open-stop-orders.ts'
+import {
+  buildInitialStopSyncDatabaseUpdate,
+  buildStopSyncDatabaseUpdate,
+  matchFilledStopsToClosedTrades,
+  matchOpenStopsToTrades,
+} from '../lib/ibkr/open-stop-orders.ts'
 
 const trade = (id, shares, side = 'long', symbol = 'TEAM') => ({
   id,
@@ -113,6 +118,48 @@ const stop = (orderId, quantity, stopPrice, action = 'SELL', symbol = 'TEAM') =>
     [stop(8, 75, 214.5, 'BUY', 'MU')],
   )
   assert.equal(result.updates[0].stopPrice, 214.5)
+}
+
+{
+  const closed = (id, entryPrice, exitPrice) => ({
+    ...trade(id, 200, 'long', 'BE'),
+    entry_price: entryPrice,
+    exit_time: '2026-10-01T14:45:00.000Z',
+    exit_price: exitPrice,
+  })
+  const filledStop = (orderId, stopPrice, fillPrice) => ({
+    ...stop(orderId, 200, stopPrice, 'SELL', 'BE'),
+    status: 'FILLED',
+    fillPrice,
+  })
+  const result = matchFilledStopsToClosedTrades(
+    [closed('be-first', 277.4, 273.89), closed('be-second', 276.6, 274.31)],
+    [filledStop(11, 273.9, 273.89), filledStop(12, 274.3, 274.31)],
+  )
+  assert.deepEqual(result.updates.map(update => [update.tradeId, update.stopPrice]), [
+    ['be-first', 273.9],
+    ['be-second', 274.3],
+  ])
+  assert.equal(result.skipped.length, 0)
+  assert.deepEqual(buildInitialStopSyncDatabaseUpdate(closed('risk', 277.4, 273.89), 273.9), {
+    stop_loss: 273.9,
+    stop_loss_locked: true,
+    initial_risk_amount: 700,
+  })
+}
+
+{
+  const closedTrade = {
+    ...trade('manual-sl', 100, 'long', 'MRNA'),
+    exit_time: '2026-10-01T15:00:00.000Z',
+    exit_price: 190.76,
+    stop_loss: 188,
+  }
+  const result = matchFilledStopsToClosedTrades(
+    [closedTrade],
+    [{ ...stop(13, 100, 190.75, 'SELL', 'MRNA'), status: 'FILLED', fillPrice: 190.76 }],
+  )
+  assert.equal(result.updates.length, 0)
 }
 
 console.log('Open stop order regression checks passed.')

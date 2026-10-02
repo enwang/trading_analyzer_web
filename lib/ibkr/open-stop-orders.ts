@@ -5,6 +5,8 @@ export type ActiveStopOrder = {
   quantity: number
   orderType: string
   stopPrice: number
+  status?: string
+  fillPrice?: number | null
 }
 
 export type OpenTradeForStopSync = {
@@ -38,6 +40,13 @@ export type StopSyncDatabaseUpdate = {
   initial_risk_amount?: number
 }
 
+export type ClosedTradeForStopSync = OpenTradeForStopSync & {
+  exit_time: string | null
+  exit_price: number | null
+}
+
+export type InitialStopLossUpdate = StopLossUpdate
+
 const EPSILON = 0.000001
 
 function sameNumber(a: number, b: number) {
@@ -63,6 +72,30 @@ export function buildStopSyncDatabaseUpdate(
 
   payload.stop_loss = stopPrice
   payload.stop_loss_locked = true
+
+  if (trade.initial_risk_amount == null && trade.entry_price != null && trade.shares != null) {
+    const riskPerShare = trade.side === 'long'
+      ? trade.entry_price - stopPrice
+      : trade.side === 'short'
+        ? stopPrice - trade.entry_price
+        : null
+    const initialRisk = riskPerShare == null ? null : riskPerShare * Math.abs(trade.shares)
+    if (initialRisk != null && Number.isFinite(initialRisk) && initialRisk > 0) {
+      payload.initial_risk_amount = initialRisk
+    }
+  }
+
+  return payload
+}
+
+export function buildInitialStopSyncDatabaseUpdate(
+  trade: ClosedTradeForStopSync,
+  stopPrice: number,
+): Omit<StopSyncDatabaseUpdate, 'current_stop_loss'> {
+  const payload: Omit<StopSyncDatabaseUpdate, 'current_stop_loss'> = {
+    stop_loss: stopPrice,
+    stop_loss_locked: true,
+  }
 
   if (trade.initial_risk_amount == null && trade.entry_price != null && trade.shares != null) {
     const riskPerShare = trade.side === 'long'
@@ -181,6 +214,45 @@ export function matchOpenStopsToTrades(
         })
       }
     }
+  }
+
+  return { updates, skipped }
+}
+
+/** Match filled stop orders to same-day closed trades without overwriting Initial SL. */
+export function matchFilledStopsToClosedTrades(
+  trades: ClosedTradeForStopSync[],
+  orders: ActiveStopOrder[],
+): { updates: InitialStopLossUpdate[]; skipped: SkippedStopMatch[] } {
+  const updates: InitialStopLossUpdate[] = []
+  const skipped: SkippedStopMatch[] = []
+  const unmatchedTrades = new Set(trades.filter(trade => trade.stop_loss == null))
+  const filledStops = orders.filter(order => order.status?.trim().toUpperCase() === 'FILLED')
+
+  for (const order of filledStops) {
+    const symbol = normalizeSymbol(order.symbol)
+    const candidates = [...unmatchedTrades].filter(trade => (
+      normalizeSymbol(trade.symbol) === symbol
+      && closingAction(trade.side) === order.action.trim().toUpperCase()
+      && sameNumber(Math.abs(trade.shares ?? 0), Math.abs(order.quantity))
+    ))
+    const priceMatches = order.fillPrice == null
+      ? []
+      : candidates.filter(trade => (
+          trade.exit_price != null && Math.abs(trade.exit_price - order.fillPrice!) <= 0.05
+        ))
+    const matches = priceMatches.length > 0 ? priceMatches : candidates
+
+    if (matches.length !== 1) {
+      if (candidates.length > 0) {
+        skipped.push({ symbol, reason: 'Filled stop could not be uniquely matched by quantity and exit price' })
+      }
+      continue
+    }
+
+    const trade = matches[0]
+    updates.push(updateFor(trade, order))
+    unmatchedTrades.delete(trade)
   }
 
   return { updates, skipped }
