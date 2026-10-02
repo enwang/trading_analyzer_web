@@ -10,6 +10,7 @@ import {
   List,
   LineChart,
   Moon,
+  NotebookPen,
   Sun,
   Upload,
   LayoutDashboard,
@@ -21,6 +22,7 @@ const nav = [
   { href: '/overview', label: 'Overview', icon: LayoutDashboard },
   { href: '/trades', label: 'Trades', icon: List },
   { href: '/analysis', label: 'Analysis', icon: BarChart2 },
+  { href: '/notes', label: 'Notes', icon: NotebookPen },
   { href: '/report', label: 'Report', icon: FileBarChart2 },
   { href: '/import', label: 'Import', icon: Upload },
 ]
