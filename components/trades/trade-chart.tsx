@@ -15,7 +15,11 @@ import type {
 } from 'lightweight-charts'
 import type { ExecutionLeg } from '@/types/trade'
 import { buildSwingDataSnapshot, swingMarketDateKey, tradeSwingAnchorDateKeys } from '@/lib/market/swing-data'
-import { calculateIntradayRvol, calculateTradeChartLogicalRange } from '@/lib/market/chart-utils'
+import {
+  calculateIntradayRvol,
+  calculateTradeChartLogicalRange,
+  macdPeriodsForTimeframe,
+} from '@/lib/market/chart-utils'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -206,15 +210,15 @@ function emaValues(values: number[], period: number) {
   return result
 }
 
-function calcMACD(candles: Candle[]) {
+function calcMACD(candles: Candle[], fastPeriod: number, slowPeriod: number, signalPeriod: number) {
   const closes = candles.map((candle) => candle.close)
-  const fast = emaValues(closes, 12)
-  const slow = emaValues(closes, 26)
+  const fast = emaValues(closes, fastPeriod)
+  const slow = emaValues(closes, slowPeriod)
   const macdValues = candles.map((_, index) => (
     fast[index] != null && slow[index] != null ? fast[index]! - slow[index]! : null
   ))
   const validMacd = macdValues.filter((value): value is number => value != null)
-  const validSignal = emaValues(validMacd, 9)
+  const validSignal = emaValues(validMacd, signalPeriod)
   let signalIndex = 0
 
   return candles.flatMap((candle, index) => {
@@ -317,6 +321,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
   const [meta,      setMeta]      = useState<ChartMeta | null>(null)
   const [userTimeZone, setUserTimeZone] = useState('UTC')
   const intradayIndicatorsAvailable = timeframe === '5' || timeframe === '60'
+  const macdPeriods = macdPeriodsForTimeframe(timeframe)
 
   useEffect(() => {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -534,9 +539,9 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
       }
     }
 
-    // --- MACD 12 / 26 / 9 ---
+    // --- MACD: Pine uses 8 / 21 / 5 intraday and 12 / 26 / 9 on day+ ---
     if (macdOn) {
-      const macd = calcMACD(candles)
+      const macd = calcMACD(candles, macdPeriods.fast, macdPeriods.slow, macdPeriods.signal)
       if (macd.length) {
         const histogram = chart.addHistogramSeries({
           priceScaleId: 'macd',
@@ -548,14 +553,16 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
           visible: false,
           scaleMargins: { top: 0.76, bottom: 0.11 },
         })
-        histogram.setData(macd.map((point) => ({
-          time: ts(point.time),
-          value: point.histogram,
-          color: point.histogram >= 0 ? 'rgba(8,153,129,0.7)' : 'rgba(242,54,69,0.7)',
-        })))
+        histogram.setData(macd.map((point, index) => {
+          const previous = index > 0 ? macd[index - 1].histogram : point.histogram
+          const color = point.histogram >= 0
+            ? previous < point.histogram ? '#26a69a' : '#b2dfdb'
+            : previous < point.histogram ? '#ffcdd2' : '#ff5252'
+          return { time: ts(point.time), value: point.histogram, color }
+        }))
         const macdLine = chart.addLineSeries({
           priceScaleId: 'macd',
-          color: '#3b82f6',
+          color: '#2962ff',
           lineWidth: 1,
           priceLineVisible: false,
           lastValueVisible: false,
@@ -563,7 +570,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
         macdLine.setData(macd.map((point) => ({ time: ts(point.time), value: point.macd })))
         const signalLine = chart.addLineSeries({
           priceScaleId: 'macd',
-          color: '#f59e0b',
+          color: '#ff6d00',
           lineWidth: 1,
           priceLineVisible: false,
           lastValueVisible: false,
@@ -1060,6 +1067,9 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
     entryTime,
     exitTime,
     intradayIndicatorsAvailable,
+    macdPeriods.fast,
+    macdPeriods.slow,
+    macdPeriods.signal,
     userTimeZone,
   ])
 
@@ -1316,7 +1326,9 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
                 {macdOn && (
                   <>
                     <div className="absolute left-0 right-0 top-[74%] border-t border-[#e6e9ef]" />
-                    <span className="absolute left-2 top-[75%]">MACD 12 26 9</span>
+                    <span className="absolute left-2 top-[75%]">
+                      MACD {macdPeriods.fast} {macdPeriods.slow} {macdPeriods.signal}
+                    </span>
                   </>
                 )}
                 {intradayIndicatorsAvailable && rvolOn && (

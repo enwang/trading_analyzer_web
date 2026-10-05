@@ -3,6 +3,7 @@ import {
   deduplicateDailyCandles,
   calculateIntradayRvol,
   calculateTradeChartLogicalRange,
+  macdPeriodsForTimeframe,
   nextUtcDayStartSec,
   synthesizeDailyCandle,
 } from '../lib/market/chart-utils.ts'
@@ -11,6 +12,28 @@ import { buildSwingDataSnapshot, tradeSwingAnchorDateKeys } from '../lib/market/
 function fail(message) {
   console.error(`chart-regression: FAIL - ${message}`)
   process.exit(1)
+}
+
+// ── Test: MACD automatically selects Pine day/intraday periods ────────────
+
+{
+  const intraday = macdPeriodsForTimeframe('5')
+  assert(
+    intraday.fast === 8 && intraday.slow === 21 && intraday.signal === 5,
+    'expected intraday MACD 8/21/5',
+  )
+
+  const hourly = macdPeriodsForTimeframe('60')
+  assert(
+    hourly.fast === 8 && hourly.slow === 21 && hourly.signal === 5,
+    'expected hourly MACD 8/21/5',
+  )
+
+  const daily = macdPeriodsForTimeframe('1D')
+  assert(
+    daily.fast === 12 && daily.slow === 26 && daily.signal === 9,
+    'expected daily MACD 12/26/9',
+  )
 }
 
 // ── Test: 5-minute trade viewport stays readable and trade-aware ──────────

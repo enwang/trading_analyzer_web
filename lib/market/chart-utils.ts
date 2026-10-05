@@ -102,6 +102,18 @@ export interface LogicalRange {
   to: number
 }
 
+export interface MacdPeriods {
+  fast: number
+  slow: number
+  signal: number
+}
+
+export function macdPeriodsForTimeframe(timeframe: string): MacdPeriods {
+  return timeframe === '5' || timeframe === '60'
+    ? { fast: 8, slow: 21, signal: 5 }
+    : { fast: 12, slow: 26, signal: 9 }
+}
+
 function nearestCandleIndex(candles: Candle[], targetTime: number): number {
   if (candles.length === 0) return -1
   let low = 0
