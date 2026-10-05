@@ -796,13 +796,6 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
     }
   }, [data.closedTrades, timeZone, dateFrom, dateTo, selectedMonthKey])
 
-  const recapReturns = selectedMonthKey
-    ? data.monthlyRecap.returns.filter((row) => row.monthKey === selectedMonthKey)
-    : data.monthlyRecap.returns
-  const recapStats = selectedMonthKey
-    ? data.monthlyRecap.stats.filter((row) => row.monthKey === selectedMonthKey)
-    : data.monthlyRecap.stats
-
   if (!data.closedTrades.length) {
     return <div className="text-muted-foreground text-sm">No closed trades to analyze yet.</div>
   }
@@ -868,8 +861,8 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
 
         <MonthlyRecap
           year={data.monthlyRecap.year}
-          returns={recapReturns}
-          stats={recapStats}
+          returns={data.monthlyRecap.returns}
+          stats={data.monthlyRecap.stats}
           yearly={data.monthlyRecap.yearly}
           selectedMonthKey={selectedMonthKey}
           onSelectMonth={handleSelectMonth}

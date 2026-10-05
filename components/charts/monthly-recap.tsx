@@ -119,24 +119,22 @@ export function MonthlyRecap({ year, returns, stats, yearly, selectedMonthKey, o
                 </tr>
               </thead>
               <tbody>
-                {!selectedMonthKey && (
-                  <tr className="border-t bg-muted/30 font-semibold">
-                    <td className="px-3 py-2">{yearly.year}</td>
-                    <td className="px-3 py-2 text-right font-mono text-emerald-600">{fmtPct(yearly.avgGainPct)}</td>
-                    <td className="px-3 py-2 text-right font-mono text-emerald-600">{fmtMoney(yearly.avgWin)}</td>
-                    <td className="px-3 py-2 text-right font-mono text-red-600">{fmtPct(yearly.avgLossPct)}</td>
-                    <td className="px-3 py-2 text-right font-mono text-red-600">{fmtMoney(yearly.avgLoss)}</td>
-                    <td className="px-3 py-2 text-right font-mono">{fmtPct(yearly.winPct)}</td>
-                    <td className="px-3 py-2 text-right font-mono">{fmtPct(yearly.lossPct)}</td>
-                    <td className="px-3 py-2 text-right font-mono">{yearly.wins}</td>
-                    <td className="px-3 py-2 text-right font-mono">{yearly.losses}</td>
-                    <td className="px-3 py-2 text-right font-mono">{yearly.trades}</td>
-                    <td className="px-3 py-2 text-right font-mono text-emerald-600">{fmtPct(yearly.largestGainPct)}</td>
-                    <td className="px-3 py-2 text-right font-mono text-red-600">{fmtPct(yearly.largestLossPct)}</td>
-                    <td className="px-3 py-2 text-right font-mono">{fmtDays(yearly.avgDaysGain)}</td>
-                    <td className="px-3 py-2 text-right font-mono">{fmtDays(yearly.avgDaysLoss)}</td>
-                  </tr>
-                )}
+                <tr className="border-t bg-muted/30 font-semibold">
+                  <td className="px-3 py-2">{yearly.year}</td>
+                  <td className="px-3 py-2 text-right font-mono text-emerald-600">{fmtPct(yearly.avgGainPct)}</td>
+                  <td className="px-3 py-2 text-right font-mono text-emerald-600">{fmtMoney(yearly.avgWin)}</td>
+                  <td className="px-3 py-2 text-right font-mono text-red-600">{fmtPct(yearly.avgLossPct)}</td>
+                  <td className="px-3 py-2 text-right font-mono text-red-600">{fmtMoney(yearly.avgLoss)}</td>
+                  <td className="px-3 py-2 text-right font-mono">{fmtPct(yearly.winPct)}</td>
+                  <td className="px-3 py-2 text-right font-mono">{fmtPct(yearly.lossPct)}</td>
+                  <td className="px-3 py-2 text-right font-mono">{yearly.wins}</td>
+                  <td className="px-3 py-2 text-right font-mono">{yearly.losses}</td>
+                  <td className="px-3 py-2 text-right font-mono">{yearly.trades}</td>
+                  <td className="px-3 py-2 text-right font-mono text-emerald-600">{fmtPct(yearly.largestGainPct)}</td>
+                  <td className="px-3 py-2 text-right font-mono text-red-600">{fmtPct(yearly.largestLossPct)}</td>
+                  <td className="px-3 py-2 text-right font-mono">{fmtDays(yearly.avgDaysGain)}</td>
+                  <td className="px-3 py-2 text-right font-mono">{fmtDays(yearly.avgDaysLoss)}</td>
+                </tr>
                 {stats.map((row) => (
                   <tr key={row.monthKey} className={`border-t ${selectedMonthKey === row.monthKey ? 'bg-muted/50' : ''}`}>
                     <td className="px-3 py-2 font-medium">
