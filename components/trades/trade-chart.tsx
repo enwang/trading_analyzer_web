@@ -316,6 +316,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
   const [dailyCandles, setDailyCandles] = useState<Candle[]>([])
   const [meta,      setMeta]      = useState<ChartMeta | null>(null)
   const [userTimeZone, setUserTimeZone] = useState('UTC')
+  const intradayIndicatorsAvailable = timeframe === '5' || timeframe === '60'
 
   useEffect(() => {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -482,7 +483,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
       value: (candle.volume ?? 0) * candle.close,
     }))
     const dollarVolumeMa20 = calcDollarVolumeSMA(candles, 20)
-    const rvol = calculateIntradayRvol(candles)
+    const rvol = intradayIndicatorsAvailable ? calculateIntradayRvol(candles) : []
     const dollarVolumeByTime = new Map(dollarVolume.map((point) => [point.time, point.value]))
     const dollarVolumeMaByTime = new Map(dollarVolumeMa20.map((point) => [point.time, point.value]))
     const rvolByTime = new Map(rvol.map((point) => [point.time, point.value]))
@@ -572,7 +573,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
     }
 
     // --- Relative volume by matching intraday slot over the prior 5 sessions ---
-    if (rvolOn) {
+    if (intradayIndicatorsAvailable && rvolOn) {
       if (rvol.length) {
         const rvolSeries = chart.addHistogramSeries({
           priceScaleId: 'rvol',
@@ -729,7 +730,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
     }
 
     // --- Session VWAP ---
-    if (vwapOn) {
+    if (intradayIndicatorsAvailable && vwapOn) {
       const data = calcSessionVWAP(candles)
       if (data.length) {
         const s = chart.addLineSeries({
@@ -1058,6 +1059,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
     executionLegs,
     entryTime,
     exitTime,
+    intradayIndicatorsAvailable,
     userTimeZone,
   ])
 
@@ -1066,7 +1068,9 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
   // ---------------------------------------------------------------------------
   const latestDollarVolume = getLatestDollarVolume(candles)
   const latestDollarVolumeMa = candles ? calcDollarVolumeSMA(candles, 20).at(-1)?.value : null
-  const latestRvol = candles ? calculateIntradayRvol(candles).at(-1)?.value : null
+  const latestRvol = candles && intradayIndicatorsAvailable
+    ? calculateIntradayRvol(candles).at(-1)?.value
+    : null
 
   return (
     <div className="rounded-xl border border-[#d9dce3] bg-[#f4f5f8] p-2.5">
@@ -1202,18 +1206,20 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
           >
             Swing Data
           </Button>
-          <Button
-            size="xs"
-            className={`h-7 text-[11px] ${
-              vwapOn
-                ? 'border-[#787b86] bg-[#f4f4f5] text-[#5d606b] hover:bg-[#e7e8ea]'
-                : 'text-[#5d606b]'
-            }`}
-            variant="outline"
-            onClick={() => setVwapOn(v => !v)}
-          >
-            VWAP
-          </Button>
+          {intradayIndicatorsAvailable && (
+            <Button
+              size="xs"
+              className={`h-7 text-[11px] ${
+                vwapOn
+                  ? 'border-[#787b86] bg-[#f4f4f5] text-[#5d606b] hover:bg-[#e7e8ea]'
+                  : 'text-[#5d606b]'
+              }`}
+              variant="outline"
+              onClick={() => setVwapOn(v => !v)}
+            >
+              VWAP
+            </Button>
+          )}
           <Button
             size="xs"
             className={`h-7 text-[11px] ${
@@ -1250,18 +1256,20 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
           >
             MACD
           </Button>
-          <Button
-            size="xs"
-            className={`h-7 text-[11px] ${
-              rvolOn
-                ? 'border-[#16a34a] bg-[#f0fdf4] text-[#15803d] hover:bg-[#dcfce7]'
-                : 'text-[#15803d]'
-            }`}
-            variant="outline"
-            onClick={() => setRvolOn(v => !v)}
-          >
-            RVOL 5D
-          </Button>
+          {intradayIndicatorsAvailable && (
+            <Button
+              size="xs"
+              className={`h-7 text-[11px] ${
+                rvolOn
+                  ? 'border-[#16a34a] bg-[#f0fdf4] text-[#15803d] hover:bg-[#dcfce7]'
+                  : 'text-[#15803d]'
+              }`}
+              variant="outline"
+              onClick={() => setRvolOn(v => !v)}
+            >
+              RVOL 5D
+            </Button>
+          )}
           {loading && (
             <span className="ml-2 text-[11px] text-[#7b8291]">Loading…</span>
           )}
@@ -1311,7 +1319,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
                     <span className="absolute left-2 top-[75%]">MACD 12 26 9</span>
                   </>
                 )}
-                {rvolOn && (
+                {intradayIndicatorsAvailable && rvolOn && (
                   <>
                     <div className="absolute left-0 right-0 top-[90%] border-t border-[#e6e9ef]" />
                     <div className="absolute left-2 top-[91%] flex items-center gap-1.5">
