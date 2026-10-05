@@ -413,16 +413,16 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
         fontSize:    12,
       },
       grid: {
-        vertLines: { color: '#f0f0f0' },
-        horzLines: { color: '#f0f0f0' },
+        vertLines: { visible: false },
+        horzLines: { visible: false },
       },
       crosshair: { mode: CrosshairMode.Normal },
       rightPriceScale: {
-        borderColor: '#e5e7eb',
+        borderVisible: false,
         scaleMargins: { top: 0.04, bottom: 0.43 },
       },
       timeScale: {
-        borderColor:    '#e5e7eb',
+        borderVisible:  false,
         timeVisible:    true,
         secondsVisible: false,
         rightOffset:    5,
