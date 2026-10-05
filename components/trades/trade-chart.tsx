@@ -508,7 +508,8 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
         lastValueVisible: false,
       })
       chart.priceScale('volume').applyOptions({
-        visible: false,
+        visible: true,
+        borderVisible: false,
         scaleMargins: { top: 0.61, bottom: 0.28 },
       })
       vol.setData(
@@ -584,12 +585,14 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
       if (rvol.length) {
         const rvolSeries = chart.addHistogramSeries({
           priceScaleId: 'rvol',
+          priceFormat: { type: 'price', precision: 1, minMove: 0.1 },
           priceLineVisible: false,
           lastValueVisible: false,
           base: 0,
         })
         chart.priceScale('rvol').applyOptions({
-          visible: false,
+          visible: true,
+          borderVisible: false,
           scaleMargins: { top: 0.92, bottom: 0.01 },
         })
         const candleByTime = new Map(candles.map((candle) => [candle.time, candle]))
@@ -1349,11 +1352,6 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
                   </>
                 )}
           </div>
-          <div
-            className="pointer-events-none absolute bottom-0 right-0 top-[59%] z-[3] w-[72px] bg-white"
-            aria-hidden="true"
-          />
-
           {/* OHLC crosshair overlay — updated directly via DOM to avoid re-renders */}
           <div
             ref={ohlcOverlayRef}
