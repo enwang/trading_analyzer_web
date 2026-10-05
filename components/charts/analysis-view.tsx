@@ -18,7 +18,7 @@ import {
   Legend,
   ReferenceLine,
 } from 'recharts'
-import { Plus, Settings2 } from 'lucide-react'
+import { Plus, Settings2, X } from 'lucide-react'
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Card, CardContent } from '@/components/ui/card'
@@ -687,25 +687,40 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
   const [expandedDay, setExpandedDay] = useState<string | null>(null)
   const [range, setRange] = useState<DateRangeKey>('All')
+  const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null)
   const searchParams = useSearchParams()
   const today = new Date().toLocaleDateString('en-CA')
   const startDate = getStartDate(range)
   const dateFrom = startDate ?? ''
   const dateTo = today
   const initialTab = searchParams.get('tab') ?? 'summary'
+  const selectedMonthLabel = useMemo(() => {
+    if (!selectedMonthKey) return null
+    const row = data.monthlyRecap.returns.find((item) => item.monthKey === selectedMonthKey)
+      ?? data.monthlyRecap.stats.find((item) => item.monthKey === selectedMonthKey)
+    return row?.monthLabel ?? selectedMonthKey
+  }, [data.monthlyRecap.returns, data.monthlyRecap.stats, selectedMonthKey])
+
+  const handleSelectMonth = (monthKey: string) => {
+    setSelectedMonthKey(monthKey)
+    setRange('All')
+    setExpandedDay(null)
+    document.getElementById('dashboard-scroll-container')?.scrollTo({ top: 0, behavior: 'smooth' })
+  }
 
   // Trades filtered by the summary-tab date range (Days/Trades tabs remain unfiltered)
   // Uses normalized trades (same as overview) so metrics are consistent
   const summaryTrades = useMemo(() => {
-    if (!dateFrom && !dateTo) return data.summaryClosedTrades
+    if (!selectedMonthKey && !dateFrom && !dateTo) return data.summaryClosedTrades
     return data.summaryClosedTrades.filter((t) => {
       const exitDate = t.exitTime ? dateKeyInTimeZone(t.exitTime, timeZone) : null
       if (!exitDate) return true
+      if (selectedMonthKey) return exitDate.startsWith(selectedMonthKey)
       if (dateFrom && exitDate < dateFrom) return false
       if (dateTo && exitDate > dateTo) return false
       return true
     })
-  }, [data.summaryClosedTrades, dateFrom, dateTo, timeZone])
+  }, [data.summaryClosedTrades, dateFrom, dateTo, selectedMonthKey, timeZone])
 
   // Recompute summary stats and trend series from the (possibly filtered) trades
   const filteredSummaryData = useMemo(() => {
@@ -761,10 +776,11 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
   }, [summaryTrades, timeZone])
 
   const computed = useMemo(() => {
-    const filtered = dateFrom
+    const filtered = selectedMonthKey || dateFrom
       ? data.closedTrades.filter(t => {
           const exitDate = t.exitTime ? dateKeyInTimeZone(t.exitTime, timeZone) : null
           if (!exitDate) return true
+          if (selectedMonthKey) return exitDate.startsWith(selectedMonthKey)
           return exitDate >= dateFrom && exitDate <= dateTo
         })
       : data.closedTrades
@@ -778,7 +794,14 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
       dayRows: [...dayRows].reverse(),
       trades: [...sorted].reverse(),
     }
-  }, [data.closedTrades, timeZone, dateFrom, dateTo])
+  }, [data.closedTrades, timeZone, dateFrom, dateTo, selectedMonthKey])
+
+  const recapReturns = selectedMonthKey
+    ? data.monthlyRecap.returns.filter((row) => row.monthKey === selectedMonthKey)
+    : data.monthlyRecap.returns
+  const recapStats = selectedMonthKey
+    ? data.monthlyRecap.stats.filter((row) => row.monthKey === selectedMonthKey)
+    : data.monthlyRecap.stats
 
   if (!data.closedTrades.length) {
     return <div className="text-muted-foreground text-sm">No closed trades to analyze yet.</div>
@@ -793,12 +816,28 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
           <TabsTrigger value="trades" className="max-w-fit px-4">Trades</TabsTrigger>
         </TabsList>
         <div className="flex gap-1 shrink-0">
+          {selectedMonthLabel && (
+            <div className="flex items-center gap-1 rounded bg-foreground py-1 pl-3 pr-1 text-xs font-medium text-background">
+              <span>{selectedMonthLabel}</span>
+              <button
+                type="button"
+                className="rounded p-0.5 hover:bg-background/20"
+                aria-label="Clear month filter"
+                onClick={() => setSelectedMonthKey(null)}
+              >
+                <X className="size-3.5" />
+              </button>
+            </div>
+          )}
           {DATE_RANGES.map((r) => (
             <button
               key={r}
-              onClick={() => setRange(r)}
+              onClick={() => {
+                setSelectedMonthKey(null)
+                setRange(r)
+              }}
               className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
-                range === r
+                !selectedMonthKey && range === r
                   ? 'bg-foreground text-background'
                   : 'text-muted-foreground hover:bg-muted hover:text-foreground'
               }`}
@@ -829,9 +868,11 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
 
         <MonthlyRecap
           year={data.monthlyRecap.year}
-          returns={data.monthlyRecap.returns}
-          stats={data.monthlyRecap.stats}
+          returns={recapReturns}
+          stats={recapStats}
           yearly={data.monthlyRecap.yearly}
+          selectedMonthKey={selectedMonthKey}
+          onSelectMonth={handleSelectMonth}
         />
       </TabsContent>
 

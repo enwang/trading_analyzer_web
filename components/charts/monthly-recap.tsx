@@ -33,9 +33,11 @@ interface Props {
   returns: MonthlyReturnRow[]
   stats: MonthlyStatsRow[]
   yearly: YearlyAveragesRow
+  selectedMonthKey?: string | null
+  onSelectMonth?: (monthKey: string) => void
 }
 
-export function MonthlyRecap({ year, returns, stats, yearly }: Props) {
+export function MonthlyRecap({ year, returns, stats, yearly, selectedMonthKey, onSelectMonth }: Props) {
   return (
     <div className="space-y-4">
       <Card>
@@ -57,8 +59,16 @@ export function MonthlyRecap({ year, returns, stats, yearly }: Props) {
               </thead>
               <tbody>
                 {returns.map((row) => (
-                  <tr key={row.monthKey} className="border-t">
-                    <td className="px-3 py-2 font-medium">{row.monthLabel}</td>
+                  <tr key={row.monthKey} className={`border-t ${selectedMonthKey === row.monthKey ? 'bg-muted/50' : ''}`}>
+                    <td className="px-3 py-2 font-medium">
+                      <button
+                        type="button"
+                        className="underline-offset-4 hover:underline"
+                        onClick={() => onSelectMonth?.(row.monthKey)}
+                      >
+                        {row.monthLabel}
+                      </button>
+                    </td>
                     <td className="px-3 py-2 text-right font-mono">{fmtMoney(row.startingNav)}</td>
                     <td className="px-3 py-2 text-right font-mono">{fmtMoney(row.endingNav)}</td>
                     <td className="px-3 py-2 text-right font-mono">{row.depositsWithdrawals != null ? fmtMoney(row.depositsWithdrawals) : '—'}</td>
@@ -109,25 +119,35 @@ export function MonthlyRecap({ year, returns, stats, yearly }: Props) {
                 </tr>
               </thead>
               <tbody>
-                <tr className="border-t bg-muted/30 font-semibold">
-                  <td className="px-3 py-2">{yearly.year}</td>
-                  <td className="px-3 py-2 text-right font-mono text-emerald-600">{fmtPct(yearly.avgGainPct)}</td>
-                  <td className="px-3 py-2 text-right font-mono text-emerald-600">{fmtMoney(yearly.avgWin)}</td>
-                  <td className="px-3 py-2 text-right font-mono text-red-600">{fmtPct(yearly.avgLossPct)}</td>
-                  <td className="px-3 py-2 text-right font-mono text-red-600">{fmtMoney(yearly.avgLoss)}</td>
-                  <td className="px-3 py-2 text-right font-mono">{fmtPct(yearly.winPct)}</td>
-                  <td className="px-3 py-2 text-right font-mono">{fmtPct(yearly.lossPct)}</td>
-                  <td className="px-3 py-2 text-right font-mono">{yearly.wins}</td>
-                  <td className="px-3 py-2 text-right font-mono">{yearly.losses}</td>
-                  <td className="px-3 py-2 text-right font-mono">{yearly.trades}</td>
-                  <td className="px-3 py-2 text-right font-mono text-emerald-600">{fmtPct(yearly.largestGainPct)}</td>
-                  <td className="px-3 py-2 text-right font-mono text-red-600">{fmtPct(yearly.largestLossPct)}</td>
-                  <td className="px-3 py-2 text-right font-mono">{fmtDays(yearly.avgDaysGain)}</td>
-                  <td className="px-3 py-2 text-right font-mono">{fmtDays(yearly.avgDaysLoss)}</td>
-                </tr>
+                {!selectedMonthKey && (
+                  <tr className="border-t bg-muted/30 font-semibold">
+                    <td className="px-3 py-2">{yearly.year}</td>
+                    <td className="px-3 py-2 text-right font-mono text-emerald-600">{fmtPct(yearly.avgGainPct)}</td>
+                    <td className="px-3 py-2 text-right font-mono text-emerald-600">{fmtMoney(yearly.avgWin)}</td>
+                    <td className="px-3 py-2 text-right font-mono text-red-600">{fmtPct(yearly.avgLossPct)}</td>
+                    <td className="px-3 py-2 text-right font-mono text-red-600">{fmtMoney(yearly.avgLoss)}</td>
+                    <td className="px-3 py-2 text-right font-mono">{fmtPct(yearly.winPct)}</td>
+                    <td className="px-3 py-2 text-right font-mono">{fmtPct(yearly.lossPct)}</td>
+                    <td className="px-3 py-2 text-right font-mono">{yearly.wins}</td>
+                    <td className="px-3 py-2 text-right font-mono">{yearly.losses}</td>
+                    <td className="px-3 py-2 text-right font-mono">{yearly.trades}</td>
+                    <td className="px-3 py-2 text-right font-mono text-emerald-600">{fmtPct(yearly.largestGainPct)}</td>
+                    <td className="px-3 py-2 text-right font-mono text-red-600">{fmtPct(yearly.largestLossPct)}</td>
+                    <td className="px-3 py-2 text-right font-mono">{fmtDays(yearly.avgDaysGain)}</td>
+                    <td className="px-3 py-2 text-right font-mono">{fmtDays(yearly.avgDaysLoss)}</td>
+                  </tr>
+                )}
                 {stats.map((row) => (
-                  <tr key={row.monthKey} className="border-t">
-                    <td className="px-3 py-2 font-medium">{row.monthLabel}</td>
+                  <tr key={row.monthKey} className={`border-t ${selectedMonthKey === row.monthKey ? 'bg-muted/50' : ''}`}>
+                    <td className="px-3 py-2 font-medium">
+                      <button
+                        type="button"
+                        className="underline-offset-4 hover:underline"
+                        onClick={() => onSelectMonth?.(row.monthKey)}
+                      >
+                        {row.monthLabel}
+                      </button>
+                    </td>
                     <td className="px-3 py-2 text-right font-mono text-emerald-600">{fmtPct(row.avgGainPct)}</td>
                     <td className="px-3 py-2 text-right font-mono text-emerald-600">{fmtMoney(row.avgWin)}</td>
                     <td className="px-3 py-2 text-right font-mono text-red-600">{fmtPct(row.avgLossPct)}</td>
