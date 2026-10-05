@@ -8,6 +8,12 @@ export interface Candle {
 }
 
 const MARKET_TIME_ZONE = 'America/New_York'
+const MARKET_CLOCK_FORMATTER = new Intl.DateTimeFormat('en-US', {
+  timeZone: MARKET_TIME_ZONE,
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+})
 
 export function nextUtcDayStartSec(ms: number): number {
   const day = 86_400_000
@@ -31,6 +37,64 @@ export function dateKeyInMarketTimeZone(ms: number): string {
   }
 
   return `${year}-${month}-${day}`
+}
+
+function regularSessionMinute(ms: number): number | null {
+  const parts = MARKET_CLOCK_FORMATTER.formatToParts(new Date(ms))
+  const hour = Number(parts.find((part) => part.type === 'hour')?.value)
+  const minute = Number(parts.find((part) => part.type === 'minute')?.value)
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null
+
+  const minuteOfDay = hour * 60 + minute
+  const marketOpen = 9 * 60 + 30
+  const marketClose = 16 * 60
+  return minuteOfDay >= marketOpen && minuteOfDay < marketClose
+    ? minuteOfDay - marketOpen
+    : null
+}
+
+/**
+ * Match the TradingView Swing Data intraday RVOL calculation: cumulative RTH
+ * volume versus the average cumulative volume at the same minute over the
+ * previous five regular sessions.
+ */
+export function calculateIntradayRvol(candles: Candle[], lookbackDays = 5) {
+  const cumulativeByDate = new Map<string, Map<number, number>>()
+  const completedDates: string[] = []
+  let currentDate: string | null = null
+  let cumulativeVolume = 0
+  let lastRvol: number | null = null
+
+  return candles.flatMap((candle) => {
+    const date = dateKeyInMarketTimeZone(candle.time * 1000)
+    const minute = regularSessionMinute(candle.time * 1000)
+
+    if (minute != null) {
+      if (date !== currentDate) {
+        if (currentDate != null) completedDates.push(currentDate)
+        currentDate = date
+        cumulativeVolume = 0
+        cumulativeByDate.set(date, new Map())
+      }
+
+      cumulativeVolume += candle.volume ?? 0
+      const history = completedDates
+        .slice(-lookbackDays)
+        .flatMap((priorDate) => {
+          const value = cumulativeByDate.get(priorDate)?.get(minute)
+          return value != null && value > 0 ? [value] : []
+        })
+
+      if (history.length > 0) {
+        const average = history.reduce((sum, value) => sum + value, 0) / history.length
+        lastRvol = average > 0 ? cumulativeVolume / average : null
+      }
+
+      cumulativeByDate.get(date)!.set(minute, cumulativeVolume)
+    }
+
+    return lastRvol == null ? [] : [{ time: candle.time, value: lastRvol }]
+  })
 }
 
 export function synthesizeDailyCandle(candles: Candle[]): Candle | null {

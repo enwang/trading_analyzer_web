@@ -1,14 +1,34 @@
 import {
   dateKeyInMarketTimeZone,
   deduplicateDailyCandles,
+  calculateIntradayRvol,
   nextUtcDayStartSec,
   synthesizeDailyCandle,
 } from '../lib/market/chart-utils.ts'
-import { buildSwingDataSnapshot } from '../lib/market/swing-data.ts'
+import { buildSwingDataSnapshot, tradeSwingAnchorDateKeys } from '../lib/market/swing-data.ts'
 
 function fail(message) {
   console.error(`chart-regression: FAIL - ${message}`)
   process.exit(1)
+}
+
+// ── Test: intraday RVOL uses cumulative RTH volume at the same minute ─────
+
+{
+  const sessionDates = ['2026-09-14', '2026-09-15', '2026-09-16', '2026-09-17', '2026-09-18', '2026-09-21']
+  const candles = sessionDates.flatMap((date, dayIndex) => [
+    makeCandle(`${date}T13:30:00Z`, 0, 100 + dayIndex),
+    makeCandle(`${date}T13:35:00Z`, 0, 100 + dayIndex),
+  ].map((candle, barIndex) => ({
+    ...candle,
+    volume: dayIndex < 5 ? (barIndex === 0 ? 100 : 200) : (barIndex === 0 ? 200 : 100),
+  })))
+
+  const result = calculateIntradayRvol(candles)
+  const finalSession = result.slice(-2)
+  assert(finalSession.length === 2, 'expected RVOL values for the sixth session')
+  assert(finalSession[0].value === 2, `expected opening RVOL 2.0, got ${finalSession[0].value}`)
+  assert(finalSession[1].value === 1, `expected cumulative RVOL 1.0, got ${finalSession[1].value}`)
 }
 
 function assert(condition, message) {
@@ -172,6 +192,19 @@ function makeCandle(isoDate, offsetSec = 0, close = 100) {
   const liveSnapshot = buildSwingDataSnapshot(intradayCandles, dailyCandles.slice(0, -1), '2026-09-22')
   assert(liveSnapshot != null, 'expected current session to synthesize a missing daily candle')
   assert(liveSnapshot.levels.some((level) => level.key === 'sma200'), 'expected live 200D SMA level')
+
+  const closedTradeDates = tradeSwingAnchorDateKeys(
+    '2026-09-22T14:00:00Z',
+    '2026-09-24T18:00:00Z',
+    '2026-09-25',
+  )
+  assert(closedTradeDates.join(',') === '2026-09-22,2026-09-24', 'expected entry and exit Swing Data dates')
+  const sameDayDates = tradeSwingAnchorDateKeys(
+    '2026-09-22T14:00:00Z',
+    '2026-09-22T19:00:00Z',
+    '2026-09-25',
+  )
+  assert(sameDayDates.length === 1, 'expected same-day entry and exit to share one Swing Data date')
 }
 
 console.log('chart-regression: PASS')

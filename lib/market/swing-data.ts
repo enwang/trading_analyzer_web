@@ -40,6 +40,24 @@ export function swingMarketDateKey(time: number) {
   return MARKET_DATE_FORMATTER.format(new Date(time * 1000))
 }
 
+export function tradeSwingAnchorDateKeys(
+  entryTime: string | null,
+  exitTime: string | null,
+  latestSessionDate: string | null,
+) {
+  const dates: string[] = []
+  const addTime = (value: string | null) => {
+    if (!value) return
+    const milliseconds = Date.parse(value)
+    if (Number.isFinite(milliseconds)) dates.push(swingMarketDateKey(milliseconds / 1000))
+  }
+
+  addTime(entryTime)
+  if (exitTime) addTime(exitTime)
+  else if (latestSessionDate) dates.push(latestSessionDate)
+  return [...new Set(dates)]
+}
+
 function marketTimeSlot(time: number) {
   return MARKET_TIME_FORMATTER.format(new Date(time * 1000))
 }
@@ -130,17 +148,17 @@ export function buildSwingDataSnapshot(
 
   add(values.sma10 == null ? null : { key: 'sma10', label: '10D SMA', value: values.sma10, color: '#ff9999', lineStyle: 'solid', lineWidth: 1 })
   add(values.sma20 == null ? null : { key: 'sma20', label: '20D SMA', value: values.sma20, color: '#ffb74d', lineStyle: 'solid', lineWidth: 1 })
-  add(values.sma50 == null ? null : { key: 'sma50', label: '50D SMA', value: values.sma50, color: '#66b2ff', lineStyle: 'solid', lineWidth: 2 })
-  add(values.sma150 == null ? null : { key: 'sma150', label: '150D SMA', value: values.sma150, color: '#be96ff', lineStyle: 'solid', lineWidth: 2 })
-  add(values.sma200 == null ? null : { key: 'sma200', label: '200D SMA', value: values.sma200, color: '#800080', lineStyle: 'solid', lineWidth: 2 })
+  add(values.sma50 == null ? null : { key: 'sma50', label: '50D SMA', value: values.sma50, color: '#90caf9', lineStyle: 'solid', lineWidth: 1 })
+  add(values.sma150 == null ? null : { key: 'sma150', label: '150D SMA', value: values.sma150, color: '#b39ddb', lineStyle: 'solid', lineWidth: 1 })
+  add(values.sma200 == null ? null : { key: 'sma200', label: '200D SMA', value: values.sma200, color: '#ce93d8', lineStyle: 'solid', lineWidth: 1 })
 
   const emaSkipGap = close * 0.003
   add(values.ema10 == null || values.sma10 != null && Math.abs(values.ema10 - values.sma10) <= emaSkipGap
-    ? null : { key: 'ema10', label: '10D EMA', value: values.ema10, color: '#d32f2f', lineStyle: 'solid', lineWidth: 1 })
+    ? null : { key: 'ema10', label: '10D EMA', value: values.ema10, color: '#f23645', lineStyle: 'solid', lineWidth: 1 })
   add(values.ema20 == null || values.sma20 != null && Math.abs(values.ema20 - values.sma20) <= emaSkipGap
-    ? null : { key: 'ema20', label: '20D EMA', value: values.ema20, color: '#ef6c00', lineStyle: 'solid', lineWidth: 1 })
+    ? null : { key: 'ema20', label: '20D EMA', value: values.ema20, color: '#ff9800', lineStyle: 'solid', lineWidth: 1 })
   add(values.ema50 == null || values.sma50 != null && Math.abs(values.ema50 - values.sma50) <= emaSkipGap
-    ? null : { key: 'ema50', label: '50D EMA', value: values.ema50, color: '#1565c0', lineStyle: 'solid', lineWidth: 1 })
+    ? null : { key: 'ema50', label: '50D EMA', value: values.ema50, color: '#2962ff', lineStyle: 'solid', lineWidth: 1 })
 
   add(previousDay ? { key: 'pd-high', label: `PD High (${previousDay.high.toFixed(2)})`, value: previousDay.high, color: '#008000', lineStyle: 'dashed', lineWidth: 1 } : null)
   add(previousDay ? { key: 'pd-low', label: `PD Low (${previousDay.low.toFixed(2)})`, value: previousDay.low, color: '#800000', lineStyle: 'dashed', lineWidth: 1 } : null)

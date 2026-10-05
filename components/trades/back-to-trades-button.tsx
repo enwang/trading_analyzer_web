@@ -17,7 +17,11 @@ export function BackToTradesButton({ href }: { href: string }) {
       type="button"
       onClick={() => {
         const lastTradesUrl = window.sessionStorage.getItem(TRADES_LAST_URL_STORAGE_KEY)
-        router.push(lastTradesUrl || href, { scroll: false })
+        if (lastTradesUrl && window.history.length > 1) {
+          router.back()
+          return
+        }
+        router.push(href, { scroll: false })
       }}
     >
       <ArrowLeft className="size-4" />
