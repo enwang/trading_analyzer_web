@@ -2,6 +2,7 @@ import {
   dateKeyInMarketTimeZone,
   deduplicateDailyCandles,
   calculateIntradayRvol,
+  calculateTradeChartLogicalRange,
   nextUtcDayStartSec,
   synthesizeDailyCandle,
 } from '../lib/market/chart-utils.ts'
@@ -10,6 +11,25 @@ import { buildSwingDataSnapshot, tradeSwingAnchorDateKeys } from '../lib/market/
 function fail(message) {
   console.error(`chart-regression: FAIL - ${message}`)
   process.exit(1)
+}
+
+// ── Test: 5-minute trade viewport stays readable and trade-aware ──────────
+
+{
+  const start = Date.parse('2026-09-21T13:30:00Z') / 1000
+  const candles = Array.from({ length: 400 }, (_, index) => ({
+    ...makeCandle('2026-09-21T13:30:00Z', index * 300),
+    time: start + index * 300,
+  }))
+
+  const openRange = calculateTradeChartLogicalRange(candles, candles[180].time, null)
+  assert(openRange?.from === 148 && openRange.to === 258, 'expected open trade viewport around entry')
+
+  const compactRange = calculateTradeChartLogicalRange(candles, candles[180].time, candles[220].time)
+  assert(compactRange?.from === 145 && compactRange.to === 255, 'expected compact closed trade to show entry and exit')
+
+  const longRange = calculateTradeChartLogicalRange(candles, candles[40].time, candles[260].time)
+  assert(longRange?.from === 182 && longRange.to === 292, 'expected long closed trade to focus on exit')
 }
 
 // ── Test: intraday RVOL uses cumulative RTH volume at the same minute ─────

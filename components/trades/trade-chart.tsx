@@ -15,7 +15,7 @@ import type {
 } from 'lightweight-charts'
 import type { ExecutionLeg } from '@/types/trade'
 import { buildSwingDataSnapshot, swingMarketDateKey, tradeSwingAnchorDateKeys } from '@/lib/market/swing-data'
-import { calculateIntradayRvol } from '@/lib/market/chart-utils'
+import { calculateIntradayRvol, calculateTradeChartLogicalRange } from '@/lib/market/chart-utils'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -968,7 +968,12 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
     chart.subscribeCrosshairMove(handleCrosshair)
 
     // --- Visible range ---
-    if (meta.visibleRange) {
+    const logicalRange = timeframe === '5'
+      ? calculateTradeChartLogicalRange(candles, meta.entryTimeSec, meta.exitTimeSec)
+      : null
+    if (logicalRange) {
+      chart.timeScale().setVisibleLogicalRange(logicalRange)
+    } else if (meta.visibleRange) {
       try {
         chart.timeScale().setVisibleRange({
           from: ts(meta.visibleRange.from),

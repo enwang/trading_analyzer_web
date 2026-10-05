@@ -97,6 +97,80 @@ export function calculateIntradayRvol(candles: Candle[], lookbackDays = 5) {
   })
 }
 
+export interface LogicalRange {
+  from: number
+  to: number
+}
+
+function nearestCandleIndex(candles: Candle[], targetTime: number): number {
+  if (candles.length === 0) return -1
+  let low = 0
+  let high = candles.length - 1
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2)
+    if (candles[middle].time < targetTime) low = middle + 1
+    else high = middle
+  }
+
+  if (low === 0) return 0
+  const previous = low - 1
+  return Math.abs(candles[low].time - targetTime) < Math.abs(candles[previous].time - targetTime)
+    ? low
+    : previous
+}
+
+/**
+ * TradingView-like initial 5-minute viewport. Keep roughly 110 bars on screen,
+ * show both ends of a compact closed trade, and avoid crushing long holds into
+ * an unreadable intraday chart by focusing on the exit.
+ */
+export function calculateTradeChartLogicalRange(
+  candles: Candle[],
+  entryTimeSec: number | null,
+  exitTimeSec: number | null,
+): LogicalRange | null {
+  if (candles.length === 0 || entryTimeSec == null) return null
+
+  const targetBars = 110
+  const entryIndex = nearestCandleIndex(candles, entryTimeSec)
+  const maxIndex = candles.length - 1
+  let from: number
+  let to: number
+
+  if (exitTimeSec == null) {
+    // Leave more space to the right so price action after entry remains visible.
+    from = entryIndex - 32
+    to = entryIndex + 78
+  } else {
+    const exitIndex = nearestCandleIndex(candles, exitTimeSec)
+    const firstIndex = Math.min(entryIndex, exitIndex)
+    const lastIndex = Math.max(entryIndex, exitIndex)
+    const tradeBars = lastIndex - firstIndex
+
+    if (tradeBars <= 130) {
+      const padding = Math.max(14, Math.ceil((targetBars - tradeBars) / 2))
+      from = firstIndex - padding
+      to = lastIndex + padding
+    } else {
+      // For long holds, preserve readable 5-minute candles around the exit.
+      from = exitIndex - 78
+      to = exitIndex + 32
+    }
+  }
+
+  if (from < 0) {
+    to += -from
+    from = 0
+  }
+  const maxTo = maxIndex + 8
+  if (to > maxTo) {
+    from = Math.max(0, from - (to - maxTo))
+    to = maxTo
+  }
+
+  return { from, to }
+}
+
 export function synthesizeDailyCandle(candles: Candle[]): Candle | null {
   if (candles.length === 0) return null
 
