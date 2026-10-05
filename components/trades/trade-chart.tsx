@@ -292,6 +292,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
   const dollarVolumeMaValueRef = useRef<HTMLSpanElement>(null)
   const rvolValueRef = useRef<HTMLSpanElement>(null)
   const arrowsOverlayRef = useRef<HTMLDivElement>(null)
+  const indicatorAxisRef = useRef<HTMLDivElement>(null)
 
   const [timeframe, setTimeframe] = useState<Timeframe>(() => getDefaultTimeframe(entryTime, exitTime))
   const [style,     setStyle]     = useState<ChartStyle>(() => {
@@ -508,8 +509,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
         lastValueVisible: false,
       })
       chart.priceScale('volume').applyOptions({
-        visible: true,
-        borderVisible: false,
+        visible: false,
         scaleMargins: { top: 0.61, bottom: 0.28 },
       })
       vol.setData(
@@ -591,8 +591,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
           base: 0,
         })
         chart.priceScale('rvol').applyOptions({
-          visible: true,
-          borderVisible: false,
+          visible: false,
           scaleMargins: { top: 0.92, bottom: 0.01 },
         })
         const candleByTime = new Map(candles.map((candle) => [candle.time, candle]))
@@ -792,10 +791,77 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
 
     main.setMarkers([])
 
+    const formatAxisCompact = (value: number) => {
+      if (value >= 1_000_000_000) return `${Number((value / 1_000_000_000).toFixed(1))}B`
+      if (value >= 1_000_000) return `${Number((value / 1_000_000).toFixed(1))}M`
+      if (value >= 1_000) return `${Number((value / 1_000).toFixed(1))}K`
+      return String(Math.round(value))
+    }
+
+    const niceStep = (value: number) => {
+      if (!(value > 0)) return 1
+      const magnitude = 10 ** Math.floor(Math.log10(value))
+      const normalized = value / magnitude
+      if (normalized <= 1) return magnitude
+      if (normalized <= 2) return 2 * magnitude
+      if (normalized <= 5) return 5 * magnitude
+      return 10 * magnitude
+    }
+
+    const renderIndicatorAxes = () => {
+      const axis = indicatorAxisRef.current
+      if (!axis) return
+      axis.innerHTML = ''
+
+      const visibleRange = chart.timeScale().getVisibleRange()
+      const from = visibleRange ? Number(visibleRange.from) : Number.NEGATIVE_INFINITY
+      const to = visibleRange ? Number(visibleRange.to) : Number.POSITIVE_INFINITY
+      const addLabel = (text: string, yPercent: number) => {
+        const label = document.createElement('span')
+        label.textContent = text
+        label.style.position = 'absolute'
+        label.style.right = '8px'
+        label.style.top = `${yPercent}%`
+        label.style.transform = 'translateY(-50%)'
+        label.style.color = '#4b5563'
+        label.style.fontSize = '10px'
+        label.style.fontVariantNumeric = 'tabular-nums'
+        label.style.whiteSpace = 'nowrap'
+        axis.appendChild(label)
+      }
+
+      if (volumeOn) {
+        const visibleDollarVolume = dollarVolume
+          .filter((point) => point.time >= from && point.time <= to)
+          .map((point) => point.value)
+        const maxValue = Math.max(0, ...visibleDollarVolume)
+        const step = niceStep(maxValue / 3)
+        const topValue = Math.max(step, Math.ceil(maxValue / step) * step)
+        for (let value = 0; value <= topValue; value += step) {
+          const y = 72.5 - (value / topValue) * 11.5
+          addLabel(formatAxisCompact(value), y)
+        }
+      }
+
+      if (intradayIndicatorsAvailable && rvolOn) {
+        const visibleRvol = rvol
+          .filter((point) => point.time >= from && point.time <= to)
+          .map((point) => point.value)
+        const maxValue = Math.max(0, ...visibleRvol)
+        const topValue = Math.max(2, Math.ceil(maxValue))
+        const step = topValue <= 4 ? 1 : niceStep(topValue / 3)
+        for (let value = 0; value <= topValue; value += step) {
+          const y = 98 - (value / topValue) * 6.5
+          addLabel(value.toFixed(1), y)
+        }
+      }
+    }
+
     const renderArrows = () => {
       const overlay = arrowsOverlayRef.current
       if (!overlay) return
       overlay.innerHTML = ''
+      renderIndicatorAxes()
 
       if (timeframe === '5' || timeframe === '60') {
         let previousSession = marketDateKey(candles[0].time)
@@ -1352,6 +1418,15 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
                   </>
                 )}
           </div>
+          <div
+            className="pointer-events-none absolute bottom-0 right-0 top-[59%] z-[3] w-[72px] bg-white"
+            aria-hidden="true"
+          />
+          <div
+            ref={indicatorAxisRef}
+            className="pointer-events-none absolute inset-0 z-[6]"
+            aria-hidden="true"
+          />
           {/* OHLC crosshair overlay — updated directly via DOM to avoid re-renders */}
           <div
             ref={ohlcOverlayRef}
