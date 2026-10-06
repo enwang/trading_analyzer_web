@@ -172,6 +172,25 @@ const stop = (orderId, quantity, stopPrice, action = 'SELL', symbol = 'TEAM') =>
 }
 
 {
+  const nbisTrade = trade('nbis', 200, 'long', 'NBIS')
+  const reconciled = reconcileStopOrderSymbols(
+    [stop(16, 200, 233.7, 'SELL', 'NBIS|')],
+    [nbisTrade],
+  )
+  assert.equal(reconciled[0].symbol, 'NBIS')
+  assert.equal(matchOpenStopsToTrades([nbisTrade], reconciled).updates.length, 1)
+}
+
+{
+  const qcomTrade = trade('cyrillic-qcom', 400, 'long', 'QCOM')
+  const reconciled = reconcileStopOrderSymbols(
+    [stop(17, 400, 180.4, 'SELL', 'ОCOM')],
+    [qcomTrade],
+  )
+  assert.equal(reconciled[0].symbol, 'QCOM')
+}
+
+{
   const ambiguous = reconcileStopOrderSymbols(
     [stop(15, 100, 180, 'SELL', 'OCOM')],
     [trade('qcom', 100, 'long', 'QCOM'), trade('ocom', 100, 'long', 'OCON')],
@@ -191,6 +210,20 @@ const stop = (orderId, quantity, stopPrice, action = 'SELL', symbol = 'TEAM') =>
     [{ ...stop(13, 100, 190.75, 'SELL', 'MRNA'), status: 'FILLED', fillPrice: 190.76 }],
   )
   assert.equal(result.updates.length, 0)
+}
+
+{
+  const closedTrade = {
+    ...trade('wrong-fill', 100, 'long', 'AMD'),
+    exit_time: '2026-10-05T18:00:00.000Z',
+    exit_price: 225,
+  }
+  const result = matchFilledStopsToClosedTrades(
+    [closedTrade],
+    [{ ...stop(18, 100, 220, 'SELL', 'AMD'), status: 'FILLED', fillPrice: 210 }],
+  )
+  assert.equal(result.updates.length, 0)
+  assert.equal(result.skipped.length, 1)
 }
 
 console.log('Open stop order regression checks passed.')

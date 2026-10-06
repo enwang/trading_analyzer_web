@@ -202,9 +202,11 @@ async function syncStops(userId) {
     initialSlInitialized += 1
   }
 
-  const warning = scan?.view === 'ALL' && scan.recognizedRows < scan.expectedRows
-    ? `IBKR All Orders has ${scan.expectedRows} rows, but only ${scan.recognizedRows} visible rows were readable. Select Open Orders and Sync Now again to update every Current SL.`
-    : undefined
+  const warning = scan?.view === 'ALL' && scan.pageCount > 1
+    ? `IBKR All Orders spans ${scan.pageCount} pages. Only the current page was read (${scan.recognizedRows}/${scan.expectedRows} orders); select Open Orders and Sync Now again to update every Current SL.`
+    : scan?.recognizedRows < scan?.expectedRows
+      ? `IBKR shows ${scan.expectedRows} orders, but only ${scan.recognizedRows} visible rows were read.`
+      : undefined
   const result = {
     source: 'IBKR Desktop',
     openStopOrders: activeOrders.length,
@@ -213,6 +215,12 @@ async function syncStops(userId) {
     unchanged,
     initialSlInitialized,
     skipped: [...matched.skipped, ...filledMatched.skipped],
+    scan: scan == null ? undefined : {
+      view: scan.view,
+      expectedRows: scan.expectedRows,
+      recognizedRows: scan.recognizedRows,
+      pageCount: scan.pageCount ?? 1,
+    },
     warning,
   }
   console.log(JSON.stringify({ event: 'stop-sync', userId, ...result }))

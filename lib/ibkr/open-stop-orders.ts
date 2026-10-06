@@ -54,7 +54,16 @@ function sameNumber(a: number, b: number) {
 }
 
 function normalizeSymbol(symbol: string) {
-  return symbol.trim().toUpperCase()
+  const lookalikes: Record<string, string> = {
+    'А': 'A', 'В': 'B', 'Е': 'E', 'К': 'K', 'М': 'M', 'Н': 'H',
+    'О': 'O', 'Р': 'P', 'С': 'C', 'Т': 'T', 'Х': 'X', 'У': 'Y',
+  }
+
+  return symbol
+    .trim()
+    .toUpperCase()
+    .replace(/[•|\s]/g, '')
+    .replace(/[АВЕКМНОРСТХУ]/g, character => lookalikes[character])
 }
 
 function oneCharacterApart(left: string, right: string) {
@@ -82,7 +91,9 @@ export function reconcileStopOrderSymbols<T extends ActiveStopOrder>(
 
   return orders.map(order => {
     const orderSymbol = normalizeSymbol(order.symbol)
-    if (knownSymbols.has(orderSymbol)) return order
+    if (knownSymbols.has(orderSymbol)) {
+      return orderSymbol === order.symbol ? order : { ...order, symbol: orderSymbol }
+    }
 
     const candidates = [...new Set(trades
       .filter(trade => (
@@ -272,12 +283,13 @@ export function matchFilledStopsToClosedTrades(
       && closingAction(trade.side) === order.action.trim().toUpperCase()
       && sameNumber(Math.abs(trade.shares ?? 0), Math.abs(order.quantity))
     ))
-    const priceMatches = order.fillPrice == null
+    const hasUsableFillPrice = order.fillPrice != null && order.fillPrice > 0
+    const priceMatches = !hasUsableFillPrice
       ? []
       : candidates.filter(trade => (
           trade.exit_price != null && Math.abs(trade.exit_price - order.fillPrice!) <= 0.05
         ))
-    const matches = priceMatches.length > 0 ? priceMatches : candidates
+    const matches = hasUsableFillPrice ? priceMatches : candidates
 
     if (matches.length !== 1) {
       if (candidates.length > 0) {
