@@ -5,6 +5,7 @@ import {
   buildStopSyncDatabaseUpdate,
   matchFilledStopsToClosedTrades,
   matchOpenStopsToTrades,
+  reconcileStopOrderSymbols,
 } from '../lib/ibkr/open-stop-orders.ts'
 
 const trade = (id, shares, side = 'long', symbol = 'TEAM') => ({
@@ -101,6 +102,12 @@ const stop = (orderId, quantity, stopPrice, action = 'SELL', symbol = 'TEAM') =>
 {
   const result = matchOpenStopsToTrades([trade('long', 100)], [stop(7, 100, 175, 'BUY')])
   assert.equal(result.updates.length, 0)
+  assert.deepEqual(result.skipped, [{ symbol: 'TEAM', reason: 'No matching SELL stop order was read' }])
+}
+
+{
+  const result = matchOpenStopsToTrades([trade('missing', 100, 'long', 'AMD')], [])
+  assert.deepEqual(result.skipped, [{ symbol: 'AMD', reason: 'No matching SELL stop order was read' }])
 }
 
 {
@@ -146,6 +153,30 @@ const stop = (orderId, quantity, stopPrice, action = 'SELL', symbol = 'TEAM') =>
     stop_loss_locked: true,
     initial_risk_amount: 700,
   })
+}
+
+{
+  const qcomTrade = {
+    ...trade('qcom', 400, 'long', 'QCOM'),
+    exit_time: '2026-10-05T19:45:04.000Z',
+    exit_price: 180.389,
+  }
+  const ocrOrder = {
+    ...stop(14, 400, 180.4, 'SELL', 'OCOM'),
+    status: 'FILLED',
+    fillPrice: 180.39,
+  }
+  const reconciled = reconcileStopOrderSymbols([ocrOrder], [qcomTrade])
+  assert.equal(reconciled[0].symbol, 'QCOM')
+  assert.equal(matchFilledStopsToClosedTrades([qcomTrade], reconciled).updates.length, 1)
+}
+
+{
+  const ambiguous = reconcileStopOrderSymbols(
+    [stop(15, 100, 180, 'SELL', 'OCOM')],
+    [trade('qcom', 100, 'long', 'QCOM'), trade('ocom', 100, 'long', 'OCON')],
+  )
+  assert.equal(ambiguous[0].symbol, 'OCOM')
 }
 
 {

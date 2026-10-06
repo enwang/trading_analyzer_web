@@ -24,6 +24,13 @@ struct DesktopStopOrder: Codable {
     let fillPrice: Double?
 }
 
+struct DesktopOrderScan: Codable {
+    let orders: [DesktopStopOrder]
+    let view: String
+    let expectedRows: Int
+    let recognizedRows: Int
+}
+
 func fail(_ message: String) -> Never {
     FileHandle.standardError.write(Data((message + "\n").utf8))
     exit(1)
@@ -115,10 +122,16 @@ guard capture.terminationStatus == 0,
     fail("Could not capture the IBKR Desktop window; allow Screen Recording access and try again")
 }
 
+let knownSymbolWords = ProcessInfo.processInfo.environment["IBKR_KNOWN_SYMBOLS"]?
+    .split(separator: ",")
+    .map(String.init) ?? []
+let knownSymbols = Set(knownSymbolWords)
 let request = VNRecognizeTextRequest()
 request.recognitionLevel = .accurate
 request.usesLanguageCorrection = false
 request.minimumTextHeight = 0.006
+request.recognitionLanguages = ["en-US"]
+request.customWords = knownSymbolWords
 do {
     try VNImageRequestHandler(cgImage: image).perform([request])
 } catch {
@@ -126,7 +139,10 @@ do {
 }
 
 let tokens = (request.results ?? []).compactMap { observation -> TextToken? in
-    guard let candidate = observation.topCandidates(1).first else { return nil }
+    let candidates = observation.topCandidates(5)
+    guard let candidate = candidates.first(where: { candidate in
+        knownSymbols.contains(normalizedSymbol(from: TextToken(text: candidate.string, box: observation.boundingBox)))
+    }) ?? candidates.first else { return nil }
     return TextToken(text: candidate.string, box: observation.boundingBox)
 }
 
@@ -248,7 +264,13 @@ if ordersView.0 == "OPEN" && recognizedRows != ordersView.1 {
 
 let encoder = JSONEncoder()
 encoder.outputFormatting = [.sortedKeys]
-guard let output = try? encoder.encode(stopOrders) else {
+let scan = DesktopOrderScan(
+    orders: stopOrders,
+    view: ordersView.0,
+    expectedRows: ordersView.1,
+    recognizedRows: recognizedRows
+)
+guard let output = try? encoder.encode(scan) else {
     fail("Could not encode IBKR Desktop stop orders")
 }
 FileHandle.standardOutput.write(output)

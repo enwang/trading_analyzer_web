@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
 const label = 'com.welsnake.trading-analyzer.ibkr-stop-bridge'
@@ -12,6 +12,15 @@ const helperContents = join(helperApp, 'Contents')
 const helperDir = join(helperContents, 'MacOS')
 const helperPath = join(helperDir, 'ibkr-desktop-orders')
 const uid = process.getuid?.()
+
+function compatibleMacOsSdk() {
+  for (const sdk of ['macosx15.5', 'macosx15.4', 'macosx']) {
+    try {
+      return execFileSync('/usr/bin/xcrun', ['--sdk', sdk, '--show-sdk-path'], { encoding: 'utf8' }).trim()
+    } catch {}
+  }
+  throw new Error('Could not locate a compatible macOS SDK')
+}
 
 function xml(value) {
   return value
@@ -74,13 +83,23 @@ writeFileSync(join(helperContents, 'Info.plist'), `<?xml version="1.0" encoding=
 </dict>
 </plist>
 `)
+const moduleCache = join(tmpdir(), 'trading-analyzer-swift-module-cache')
+mkdirSync(moduleCache, { recursive: true })
 execFileSync('/usr/bin/xcrun', [
   'swiftc',
+  '-sdk',
+  compatibleMacOsSdk(),
   '-O',
   join(projectDir, 'scripts', 'ibkr-desktop-orders.swift'),
   '-o',
   helperPath,
-])
+], {
+  env: {
+    ...process.env,
+    CLANG_MODULE_CACHE_PATH: moduleCache,
+    SWIFT_MODULE_CACHE_PATH: moduleCache,
+  },
+})
 try {
   execFileSync('launchctl', ['bootout', `gui/${uid}`, plistPath], { stdio: 'ignore' })
 } catch {}

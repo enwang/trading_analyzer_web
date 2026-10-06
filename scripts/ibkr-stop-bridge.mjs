@@ -11,6 +11,7 @@ import {
   buildStopSyncDatabaseUpdate,
   matchFilledStopsToClosedTrades,
   matchOpenStopsToTrades,
+  reconcileStopOrderSymbols,
 } from '../lib/ibkr/open-stop-orders.ts'
 
 const BRIDGE_PORT = Number(process.env.IBKR_STOP_BRIDGE_PORT || 4317)
@@ -74,15 +75,22 @@ function readJson(request) {
   })
 }
 
-async function fetchOpenStopOrders() {
+async function fetchOpenStopOrders(knownSymbols) {
   try {
     const { stdout } = await execFileAsync(DESKTOP_ORDERS_HELPER, [], {
       timeout: 15_000,
       maxBuffer: 1_000_000,
+      env: {
+        ...process.env,
+        IBKR_KNOWN_SYMBOLS: [...new Set(knownSymbols)].join(','),
+      },
     })
-    const orders = JSON.parse(stdout)
-    if (!Array.isArray(orders)) throw new Error('Desktop order reader returned invalid data')
-    return orders
+    const result = JSON.parse(stdout)
+    if (Array.isArray(result)) return { orders: result, scan: null }
+    if (!result || !Array.isArray(result.orders)) {
+      throw new Error('Desktop order reader returned invalid data')
+    }
+    return { orders: result.orders, scan: result }
   } catch (error) {
     const stderr = error?.stderr?.trim()
     throw new Error(stderr || error?.message || 'Could not read IBKR Desktop open orders')
@@ -115,7 +123,6 @@ async function syncStops(userId) {
     throw new Error('A valid user ID is required')
   }
 
-  const orders = await fetchOpenStopOrders()
   const { url, serviceRoleKey } = requireEnvironment()
   const supabase = createClient(url, serviceRoleKey, { auth: { persistSession: false } })
   const { data: trades, error } = await supabase
@@ -126,7 +133,28 @@ async function syncStops(userId) {
 
   if (error) throw new Error(`Could not load open trades: ${error.message}`)
 
-  const activeOrders = orders.filter(order => ['SUBMITTED', 'PRESUBMITTED'].includes(order.status?.toUpperCase() ?? 'SUBMITTED'))
+  const recentCutoff = new Date(Date.now() - 96 * 60 * 60 * 1000).toISOString()
+  const { data: recentClosedTrades, error: closedError } = await supabase
+    .from('trades')
+    .select('id, symbol, side, shares, entry_time, entry_price, exit_time, exit_price, stop_loss, current_stop_loss, initial_risk_amount')
+    .eq('user_id', userId)
+    .not('exit_time', 'is', null)
+    .is('stop_loss', null)
+    .gte('exit_time', recentCutoff)
+  if (closedError) throw new Error(`Could not load recent closed trades: ${closedError.message}`)
+
+  const sameDayClosedTrades = (recentClosedTrades ?? []).filter(trade => (
+    trade.entry_time != null
+    && trade.exit_time != null
+    && marketDateKey(trade.entry_time) === marketDateKey(trade.exit_time)
+  ))
+  const knownSymbols = [...(trades ?? []), ...sameDayClosedTrades].map(trade => trade.symbol)
+  const { orders, scan } = await fetchOpenStopOrders(knownSymbols)
+
+  const activeOrders = reconcileStopOrderSymbols(
+    orders.filter(order => ['SUBMITTED', 'PRESUBMITTED'].includes(order.status?.toUpperCase() ?? 'SUBMITTED')),
+    trades ?? [],
+  )
   const matched = matchOpenStopsToTrades(trades ?? [], activeOrders)
   let updated = 0
   let unchanged = 0
@@ -156,22 +184,8 @@ async function syncStops(userId) {
     if (initializesInitialSl) initialSlInitialized += 1
   }
 
-  const recentCutoff = new Date(Date.now() - 96 * 60 * 60 * 1000).toISOString()
-  const { data: recentClosedTrades, error: closedError } = await supabase
-    .from('trades')
-    .select('id, symbol, side, shares, entry_time, entry_price, exit_time, exit_price, stop_loss, current_stop_loss, initial_risk_amount')
-    .eq('user_id', userId)
-    .not('exit_time', 'is', null)
-    .is('stop_loss', null)
-    .gte('exit_time', recentCutoff)
-  if (closedError) throw new Error(`Could not load recent closed trades: ${closedError.message}`)
-
-  const sameDayClosedTrades = (recentClosedTrades ?? []).filter(trade => (
-    trade.entry_time != null
-    && trade.exit_time != null
-    && marketDateKey(trade.entry_time) === marketDateKey(trade.exit_time)
-  ))
-  const filledMatched = matchFilledStopsToClosedTrades(sameDayClosedTrades, orders)
+  const closedTradeOrders = reconcileStopOrderSymbols(orders, sameDayClosedTrades)
+  const filledMatched = matchFilledStopsToClosedTrades(sameDayClosedTrades, closedTradeOrders)
   for (const update of filledMatched.updates) {
     const trade = sameDayClosedTrades.find(candidate => candidate.id === update.tradeId)
     if (!trade) continue
@@ -188,7 +202,10 @@ async function syncStops(userId) {
     initialSlInitialized += 1
   }
 
-  return {
+  const warning = scan?.view === 'ALL' && scan.recognizedRows < scan.expectedRows
+    ? `IBKR All Orders has ${scan.expectedRows} rows, but only ${scan.recognizedRows} visible rows were readable. Select Open Orders and Sync Now again to update every Current SL.`
+    : undefined
+  const result = {
     source: 'IBKR Desktop',
     openStopOrders: activeOrders.length,
     filledStopOrders: orders.filter(order => order.status?.toUpperCase() === 'FILLED').length,
@@ -196,7 +213,10 @@ async function syncStops(userId) {
     unchanged,
     initialSlInitialized,
     skipped: [...matched.skipped, ...filledMatched.skipped],
+    warning,
   }
+  console.log(JSON.stringify({ event: 'stop-sync', userId, ...result }))
+  return result
 }
 
 const server = http.createServer(async (request, response) => {

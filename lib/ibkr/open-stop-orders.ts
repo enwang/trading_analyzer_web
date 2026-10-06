@@ -57,10 +57,43 @@ function normalizeSymbol(symbol: string) {
   return symbol.trim().toUpperCase()
 }
 
+function oneCharacterApart(left: string, right: string) {
+  if (left.length !== right.length) return false
+  let differences = 0
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) differences += 1
+    if (differences > 1) return false
+  }
+  return differences === 1
+}
+
 function closingAction(side: string | null) {
   if (side === 'long') return 'SELL'
   if (side === 'short') return 'BUY'
   return null
+}
+
+/** Repair a one-character OCR error only when trade direction and quantity identify one symbol. */
+export function reconcileStopOrderSymbols<T extends ActiveStopOrder>(
+  orders: T[],
+  trades: OpenTradeForStopSync[],
+): T[] {
+  const knownSymbols = new Set(trades.map(trade => normalizeSymbol(trade.symbol)))
+
+  return orders.map(order => {
+    const orderSymbol = normalizeSymbol(order.symbol)
+    if (knownSymbols.has(orderSymbol)) return order
+
+    const candidates = [...new Set(trades
+      .filter(trade => (
+        closingAction(trade.side) === order.action.trim().toUpperCase()
+        && sameNumber(Math.abs(trade.shares ?? 0), Math.abs(order.quantity))
+        && oneCharacterApart(orderSymbol, normalizeSymbol(trade.symbol))
+      ))
+      .map(trade => normalizeSymbol(trade.symbol)))]
+
+    return candidates.length === 1 ? { ...order, symbol: candidates[0] } : order
+  })
 }
 
 export function buildStopSyncDatabaseUpdate(
@@ -148,7 +181,10 @@ export function matchOpenStopsToTrades(
         normalizeSymbol(order.symbol) === symbol
         && order.action.trim().toUpperCase() === action
       ))
-      if (sideOrders.length === 0) continue
+      if (sideOrders.length === 0) {
+        skipped.push({ symbol, reason: `No matching ${action} stop order was read` })
+        continue
+      }
 
       if (sideTrades.length === 1 && allSameStop(sideOrders)) {
         updates.push(updateFor(sideTrades[0], sideOrders[0]))

@@ -8,6 +8,7 @@ export type LocalStopSyncResult = {
   unchanged: number
   initialSlInitialized: number
   skipped: Array<{ symbol: string; reason: string }>
+  warning?: string
   message?: string
 }
 
@@ -41,6 +42,7 @@ export async function syncLocalOpenStopOrders(userId: string): Promise<LocalStop
       unchanged: body.unchanged ?? 0,
       initialSlInitialized: body.initialSlInitialized ?? 0,
       skipped: body.skipped ?? [],
+      warning: body.warning,
     }
   } catch (error) {
     const message = error instanceof Error && error.name === 'AbortError'
@@ -55,9 +57,13 @@ export async function syncLocalOpenStopOrders(userId: string): Promise<LocalStop
 export function formatLocalStopSync(result: LocalStopSyncResult) {
   if (!result.available) return `Open stops not synced: ${result.message}`
 
-  const skipped = result.skipped.length > 0 ? `, ${result.skipped.length} ambiguous ticker(s) skipped` : ''
+  const skippedSymbols = [...new Set(result.skipped.map(item => item.symbol))]
+  const skipped = skippedSymbols.length > 0
+    ? `, skipped ${skippedSymbols.join(', ')}`
+    : ''
   const initialized = result.initialSlInitialized > 0
     ? `, ${result.initialSlInitialized} Initial SL initialized`
     : ''
-  return `${result.updated} Current SL updated${initialized}${skipped}`
+  const warning = result.warning ? `. ${result.warning}` : ''
+  return `${result.updated} Current SL updated${initialized}${skipped}${warning}`
 }
