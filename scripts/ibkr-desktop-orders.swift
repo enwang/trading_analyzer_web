@@ -48,6 +48,7 @@ func action(from token: TextToken) -> String? {
 
 func normalizedSymbol(from token: TextToken) -> String {
     var value = token.normalized.replacingOccurrences(of: "•", with: "")
+        .replacingOccurrences(of: "|", with: "")
         .trimmingCharacters(in: .whitespaces)
     let lookalikes = [
         "А": "A", "В": "B", "Е": "E", "К": "K", "М": "M", "Н": "H",
