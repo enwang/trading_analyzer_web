@@ -1,5 +1,6 @@
 import fs from 'fs'
 import { parseFlexCsv, parseFlexStatement } from '../lib/ibkr/flex.ts'
+import { preservedPriceScaleForKnownSplit, scalePreservedPrice } from '../lib/ibkr/stock-splits.ts'
 
 function fail(message) {
   console.error(`parser-regression: FAIL - ${message}`)
@@ -448,6 +449,69 @@ if (!crwdMixedLegs.some((leg) => leg.action === 'SELL' && leg.shares === 24 && l
 }
 if (!crwdMixedLegs.some((leg) => leg.action === 'SELL' && leg.shares === 134 && leg.price === 207)) {
   fail(`expected mixed-scale CRWD post-split sell leg to stay 134 @ 207, got ${JSON.stringify(crwdMixedLegs)}`)
+}
+
+const ethaReverseSplitCsv = `Open/CloseIndicator,Symbol,Quantity,Date/Time,Open Date/Time,Buy/Sell,T. Price,Basis
+O,ETHA,300,2026-09-15 15:00:00,,BUY,20,
+O,XYZ,10,2026-09-15 15:10:00,,BUY,20,
+C,XYZ,10,2026-09-16 15:10:00,2026-09-15 15:10:00,SELL,21,200
+`
+const ethaReverseSplitTrades = parseFlexCsv(ethaReverseSplitCsv)
+const ethaReverseSplit = ethaReverseSplitTrades.find((t) => t.symbol === 'ETHA' && t.outcome === 'open')
+if (!ethaReverseSplit) {
+  fail('missing ETHA open trade after reverse split')
+}
+if (Math.abs((ethaReverseSplit.shares ?? 0) - 100) > 1e-9) {
+  fail(`expected reverse-split ETHA shares = 100, got ${ethaReverseSplit.shares}`)
+}
+if (Math.abs((ethaReverseSplit.entry_price ?? 0) - 60) > 1e-9) {
+  fail(`expected reverse-split ETHA entry price = 60, got ${ethaReverseSplit.entry_price}`)
+}
+
+const ethaPostSplitSaleCsv = `ClientAccountID,Open/CloseIndicator,Symbol,Quantity,Date/Time,Open Date/Time,Buy/Sell,T. Price,Basis
+U123,O,ETHA,300,2026-09-15 15:00:00,,BUY,20,
+U123,C,ETHA,20,2026-10-06 10:00:00,2026-09-15 15:00:00,SELL,61,1200
+ClientAccountID,CurrencyPrimary,AssetCategory,Symbol,Position,CostBasisPrice
+U123,USD,STK,ETHA,80,60
+`
+const ethaPostSplitSaleTrades = parseFlexCsv(ethaPostSplitSaleCsv)
+const ethaPostSplitSale = ethaPostSplitSaleTrades.find((t) => t.symbol === 'ETHA' && t.outcome === 'open')
+if (!ethaPostSplitSale) {
+  fail('missing ETHA open trade after post-split partial sale')
+}
+if ((ethaPostSplitSale.shares ?? 0) !== 80 || (ethaPostSplitSale.entry_price ?? 0) !== 60) {
+  fail(`expected post-split ETHA position = 80 @ 60, got ${ethaPostSplitSale.shares} @ ${ethaPostSplitSale.entry_price}`)
+}
+if (Math.abs((ethaPostSplitSale.pnl ?? 0) - 20) > 1e-9) {
+  fail(`expected post-split ETHA realized pnl = 20, got ${ethaPostSplitSale.pnl}`)
+}
+const ethaPostSplitLegs = ethaPostSplitSale.execution_legs ?? []
+if (!ethaPostSplitLegs.some((leg) => leg.action === 'BUY' && leg.shares === 100 && leg.price === 60)) {
+  fail(`expected ETHA buy leg adjusted to 100 @ 60, got ${JSON.stringify(ethaPostSplitLegs)}`)
+}
+if (!ethaPostSplitLegs.some((leg) => leg.action === 'SELL' && leg.shares === 20 && leg.price === 61)) {
+  fail(`expected ETHA post-split sell leg to stay 20 @ 61, got ${JSON.stringify(ethaPostSplitLegs)}`)
+}
+
+const ethaPreservedPriceScale = preservedPriceScaleForKnownSplit({
+  symbol: 'ETHA',
+  entryTime: '2026-09-15T19:00:00.000Z',
+  existingEntryPrice: 20,
+  incomingEntryPrice: 60,
+})
+if (ethaPreservedPriceScale !== 3) {
+  fail(`expected ETHA preserved price scale = 3, got ${ethaPreservedPriceScale}`)
+}
+if (scalePreservedPrice(19, ethaPreservedPriceScale) !== 57) {
+  fail('expected ETHA preserved stop price 19 to adjust to 57')
+}
+if (preservedPriceScaleForKnownSplit({
+  symbol: 'ETHA',
+  entryTime: '2026-09-15T19:00:00.000Z',
+  existingEntryPrice: 60,
+  incomingEntryPrice: 60,
+}) !== 1) {
+  fail('expected an already adjusted ETHA trade not to be adjusted again')
 }
 
 console.log('parser-regression: PASS')

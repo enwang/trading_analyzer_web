@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { fetchFlexAll } from '@/lib/ibkr/flex'
+import { preservedPriceScaleForKnownSplit, scalePreservedPrice } from '@/lib/ibkr/stock-splits'
 import { createTradeSnapshot, pruneOldSnapshots } from '@/lib/trade-snapshots'
 import { filterOutHidden, loadHiddenTradeKeys } from '@/lib/hidden-trades'
 import { usesStopLossFirstSizing } from '@/lib/market/stop-loss'
@@ -143,11 +144,11 @@ export async function GET(request: Request) {
           // Fetch ALL existing trades (open and closed) to preserve manual fields
           const { data: existingRows } = await supabase
             .from('trades')
-            .select('symbol, entry_time, exit_time, side, stop_loss, current_stop_loss, stop_loss_locked, r_multiple, setup_tag, notes, needs_review, execution_legs, pnl, initial_risk_amount')
+            .select('symbol, entry_time, exit_time, side, entry_price, stop_loss, current_stop_loss, stop_loss_locked, r_multiple, setup_tag, notes, needs_review, execution_legs, pnl, initial_risk_amount')
             .eq('user_id', s.user_id)
             .in('symbol', touchedSymbols)
 
-          type ExistingRow = { symbol: string; entry_time: string | null; exit_time: string | null; side: string | null; stop_loss: number | null; current_stop_loss: number | null; stop_loss_locked: boolean | null; r_multiple: number | null; setup_tag: string | null; notes: string | null; needs_review: boolean | null; execution_legs: unknown | null; pnl: number | null; initial_risk_amount: number | null }
+          type ExistingRow = { symbol: string; entry_time: string | null; exit_time: string | null; side: string | null; entry_price: number | null; stop_loss: number | null; current_stop_loss: number | null; stop_loss_locked: boolean | null; r_multiple: number | null; setup_tag: string | null; notes: string | null; needs_review: boolean | null; execution_legs: unknown | null; pnl: number | null; initial_risk_amount: number | null }
           const openRowsBySymbol = new Map<string, ExistingRow[]>()
           for (const existing of existingRows ?? []) {
             if (existing.exit_time != null) continue
@@ -175,12 +176,18 @@ export async function GET(request: Request) {
             const existing = exactExisting ?? null
             if (row.exit_time != null) row.current_stop_loss = null
             if (!existing) continue
+            const preservedPriceScale = preservedPriceScaleForKnownSplit({
+              symbol: row.symbol,
+              entryTime: row.entry_time,
+              existingEntryPrice: existing.entry_price,
+              incomingEntryPrice: typeof row.entry_price === 'number' ? row.entry_price : null,
+            })
             if (row.setup_tag === 'untagged' && existing.setup_tag) row.setup_tag = existing.setup_tag
             if (!row.notes && existing.notes) row.notes = existing.notes
             if (!row.needs_review && existing.needs_review) row.needs_review = existing.needs_review
-            if (row.stop_loss == null && existing.stop_loss != null) row.stop_loss = existing.stop_loss
+            if (row.stop_loss == null && existing.stop_loss != null) row.stop_loss = scalePreservedPrice(existing.stop_loss, preservedPriceScale)
             if (row.exit_time == null && row.current_stop_loss == null && existing.current_stop_loss != null) {
-              row.current_stop_loss = existing.current_stop_loss
+              row.current_stop_loss = scalePreservedPrice(existing.current_stop_loss, preservedPriceScale)
             }
             if (existing.stop_loss_locked) row.stop_loss_locked = true
             if (row.r_multiple == null && existing.r_multiple != null) row.r_multiple = existing.r_multiple
@@ -218,29 +225,42 @@ export async function GET(request: Request) {
           // New stop-loss-first trades must also match the open row's entry_time;
           // otherwise an older open position for the same symbol can leak a stale risk.
           for (const row of rows) {
+            const rowRecord = row as Record<string, unknown>
             const openSymbolRows = openRowsBySymbol.get(row.symbol) ?? []
             const candidateOpenRows = usesStopLossFirstSizing(row.entry_time)
               ? openSymbolRows.filter(r => normalizeTs(r.entry_time) === normalizeTs(row.entry_time))
               : openSymbolRows
             if (row.exit_time != null && candidateOpenRows.length !== 1) continue
-            const rowWithStopLoss = (row as Record<string, unknown>).stop_loss == null
+            const rowWithStopLoss = rowRecord.stop_loss == null
               ? candidateOpenRows.find(r => r.stop_loss != null)
               : null
             if (rowWithStopLoss != null) {
-              (row as Record<string, unknown>).stop_loss = rowWithStopLoss.stop_loss
+              const preservedPriceScale = preservedPriceScaleForKnownSplit({
+                symbol: row.symbol,
+                entryTime: row.entry_time,
+                existingEntryPrice: rowWithStopLoss.entry_price,
+                incomingEntryPrice: typeof row.entry_price === 'number' ? row.entry_price : null,
+              })
+              rowRecord.stop_loss = scalePreservedPrice(rowWithStopLoss.stop_loss, preservedPriceScale)
               if (rowWithStopLoss.stop_loss_locked) {
-                (row as Record<string, unknown>).stop_loss_locked = true
+                rowRecord.stop_loss_locked = true
               }
-              if ((row as Record<string, unknown>).initial_risk_amount == null && rowWithStopLoss.initial_risk_amount != null) {
-                (row as Record<string, unknown>).initial_risk_amount = rowWithStopLoss.initial_risk_amount
+              if (rowRecord.initial_risk_amount == null && rowWithStopLoss.initial_risk_amount != null) {
+                rowRecord.initial_risk_amount = rowWithStopLoss.initial_risk_amount
               }
             }
             if (row.exit_time == null) {
-              const rowWithCurrentStopLoss = (row as Record<string, unknown>).current_stop_loss == null
+              const rowWithCurrentStopLoss = rowRecord.current_stop_loss == null
                 ? candidateOpenRows.find(r => r.current_stop_loss != null)
                 : null
               if (rowWithCurrentStopLoss != null) {
-                (row as Record<string, unknown>).current_stop_loss = rowWithCurrentStopLoss.current_stop_loss
+                const preservedPriceScale = preservedPriceScaleForKnownSplit({
+                  symbol: row.symbol,
+                  entryTime: row.entry_time,
+                  existingEntryPrice: rowWithCurrentStopLoss.entry_price,
+                  incomingEntryPrice: typeof row.entry_price === 'number' ? row.entry_price : null,
+                })
+                rowRecord.current_stop_loss = scalePreservedPrice(rowWithCurrentStopLoss.current_stop_loss, preservedPriceScale)
               }
             }
           }

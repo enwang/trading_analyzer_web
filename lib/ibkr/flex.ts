@@ -7,6 +7,7 @@
  */
 
 import Papa from 'papaparse'
+import { KNOWN_STOCK_SPLITS } from './stock-splits.ts'
 import { fromZonedTime } from 'date-fns-tz'
 
 // ---------------------------------------------------------------------------
@@ -277,12 +278,6 @@ type OpenPositionSnapshot = {
   shares: number
   avgPrice: number | null
 }
-
-const KNOWN_STOCK_SPLITS = [
-  // Parser default: store split-affected trades in post-split share/price scale.
-  // Add future stock splits here as { symbol, exDate, factor }.
-  { symbol: 'CRWD', exDate: '2026-07-02T04:00:00.000Z', factor: 4 },
-]
 
 function classifySection(header: string): FlexSectionKind {
   const h = header.toLowerCase()
@@ -842,7 +837,6 @@ function parseTradesCsv(csvStr: string, openPositionSnapshots: OpenPositionSnaps
         closeLegsByEntry,
         openPriceMapByEntry,
         trades,
-        openPositionSnapshots,
         appliedKnownSplitKeys,
         exitTime,
       )
@@ -910,16 +904,15 @@ function parseTradesCsv(csvStr: string, openPositionSnapshots: OpenPositionSnaps
     t.execution_legs = legs.length > 0 ? legs : null
   }
 
-  reconcileOpenLotsWithPositionSnapshots(openLotsBySymbol, openLegsByEntry, openPositionSnapshots)
   reconcileOpenLotsWithKnownSplits(
     openLotsBySymbol,
     openLegsByEntry,
     closeLegsByEntry,
     openPriceMapByEntry,
     merged,
-    openPositionSnapshots,
     appliedKnownSplitKeys,
   )
+  reconcileOpenLotsWithPositionSnapshots(openLotsBySymbol, openLegsByEntry, openPositionSnapshots)
   appendOpenPositions(merged, openLotsBySymbol, openLegsByEntry, closeLegsByEntry)
 
   const normalized: NormalizedTrade[] = []
@@ -1116,15 +1109,12 @@ function reconcileOpenLotsWithKnownSplits(
   closeLegsByEntry: Map<string, { time: string; action: 'BUY' | 'SELL'; shares: number; price: number }[]>,
   openPriceMapByEntry: Map<string, { totalShares: number; totalCost: number }>,
   trades: NormalizedTrade[],
-  snapshots: OpenPositionSnapshot[],
   appliedSplitKeys: Set<string>,
   upToTime: string | null = null,
 ): void {
-  const snapshotSymbols = new Set(snapshots.map((snapshot) => snapshot.symbol))
   const upToMs = upToTime ? new Date(upToTime).getTime() : Number.POSITIVE_INFINITY
 
   for (const split of KNOWN_STOCK_SPLITS) {
-    if (snapshotSymbols.has(split.symbol)) continue
     const splitKey = `${split.symbol}|${split.exDate}`
     if (appliedSplitKeys.has(splitKey)) continue
     const lots = openLotsBySymbol.get(split.symbol) ?? []
