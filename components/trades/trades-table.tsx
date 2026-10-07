@@ -1318,7 +1318,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
                       setDraggingColumn(null)
                     }}
                     onDragEnd={() => setDraggingColumn(null)}
-                    className={`${rightAligned ? 'text-right' : ''} ${draggingColumn === col ? 'opacity-60' : ''}`}
+                    className={`${rightAligned ? 'text-right' : ''} ${col === 'symbol' ? 'w-px' : ''} ${draggingColumn === col ? 'opacity-60' : ''}`}
                   >
                     {safeHeaderContent}
                   </TableHead>
@@ -1372,8 +1372,8 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
                   })()}`
                   if (col === 'symbol') {
                     return (
-                      <TableCell key={col} className="font-medium">
-                        <div className="group/sym flex items-center gap-2">
+                      <TableCell key={col} className="w-px font-medium">
+                        <div className="group/sym inline-flex items-center gap-1.5">
                           <Link
                             href={detailsHref}
                             prefetch={false}
@@ -1392,7 +1392,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
                           )}
                           <button
                             onClick={() => deleteTrade(t.id)}
-                            className="invisible ml-auto text-muted-foreground hover:text-destructive group-hover/sym:visible"
+                            className="invisible ml-0.5 text-muted-foreground hover:text-destructive group-hover/sym:visible"
                             title="Delete trade"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
