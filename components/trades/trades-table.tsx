@@ -1318,7 +1318,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
                       setDraggingColumn(null)
                     }}
                     onDragEnd={() => setDraggingColumn(null)}
-                    className={`${rightAligned ? 'text-right' : ''} ${col === 'symbol' ? 'w-px' : ''} ${draggingColumn === col ? 'opacity-60' : ''}`}
+                    className={`${rightAligned ? 'text-right' : ''} ${col === 'symbol' ? 'w-px px-1' : ''} ${draggingColumn === col ? 'opacity-60' : ''}`}
                   >
                     {safeHeaderContent}
                   </TableHead>
@@ -1372,32 +1372,28 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
                   })()}`
                   if (col === 'symbol') {
                     return (
-                      <TableCell key={col} className="w-px font-medium">
-                        <div className="group/sym inline-flex items-center gap-1.5">
-                          <Link
-                            href={detailsHref}
-                            prefetch={false}
-                            scroll={false}
-                            className="underline-offset-4 hover:underline"
-                            onClick={() => {
-                              const container = getDashboardScrollContainer()
-                              window.sessionStorage.setItem(TRADES_LAST_URL_STORAGE_KEY, currentListUrl)
-                              window.sessionStorage.setItem(TRADES_LAST_SCROLL_STORAGE_KEY, String(container?.scrollTop ?? 0))
-                            }}
-                          >
-                            {t.symbol}
-                          </Link>
-                          {isMarkedForReview && (
-                            <Badge className="border border-amber-200 bg-amber-100 text-amber-800">Revisit</Badge>
-                          )}
-                          <button
-                            onClick={() => deleteTrade(t.id)}
-                            className="invisible ml-0.5 text-muted-foreground hover:text-destructive group-hover/sym:visible"
-                            title="Delete trade"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
+                      <TableCell key={col} className="group/sym relative w-px px-1 font-medium">
+                        <Link
+                          href={detailsHref}
+                          prefetch={false}
+                          scroll={false}
+                          className="underline-offset-4 hover:underline"
+                          onClick={() => {
+                            const container = getDashboardScrollContainer()
+                            window.sessionStorage.setItem(TRADES_LAST_URL_STORAGE_KEY, currentListUrl)
+                            window.sessionStorage.setItem(TRADES_LAST_SCROLL_STORAGE_KEY, String(container?.scrollTop ?? 0))
+                          }}
+                        >
+                          {t.symbol}
+                        </Link>
+                        <button
+                          onClick={() => deleteTrade(t.id)}
+                          className="invisible absolute left-full top-1/2 z-10 -ml-1 -translate-y-1/2 rounded bg-background p-0.5 text-muted-foreground shadow-sm hover:text-destructive group-hover/sym:visible"
+                          title="Delete trade"
+                          aria-label={`Delete ${t.symbol} trade`}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
                       </TableCell>
                     )
                   }
