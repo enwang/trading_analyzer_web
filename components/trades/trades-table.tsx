@@ -35,6 +35,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { riskSharesForTrade } from '@/lib/trades'
+import { formatShares } from '@/lib/format'
 import {
   initialRiskFromStopLoss,
   riskAmountForTrade,
@@ -1404,7 +1405,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
                   if (col === 'entryTime') return <TableCell key={col}><LocalTime date={t.entryTime} dateOnly className="font-mono text-xs text-muted-foreground" /></TableCell>
                   if (col === 'exitTime') return <TableCell key={col}><LocalTime date={t.exitTime} dateOnly className="font-mono text-xs text-muted-foreground" /></TableCell>
                   if (col === 'holdDays') return <TableCell key={col} className="text-right">{fmtHoldDuration(effectiveHoldTimeMin(t), t.holdDays)}</TableCell>
-                  if (col === 'shares') return <TableCell key={col} className="text-right">{displayShares(t) ?? '—'}</TableCell>
+                  if (col === 'shares') return <TableCell key={col} className="text-right">{formatShares(displayShares(t))}</TableCell>
                   if (col === 'entryPrice') return <TableCell key={col} className="text-right">{fmtPrice(t.entryPrice)}</TableCell>
                   if (col === 'pnl') {
                     const isOpen = t.exitTime == null || t.outcome === 'open'
@@ -1457,7 +1458,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
                   if (col === 'initialRiskPct') return <TableCell key={col} className="text-right">{initialRiskPct(t, effectiveInitialStopLoss) != null ? `${initialRiskPct(t, effectiveInitialStopLoss)?.toFixed(2)}%` : '—'}</TableCell>
                   if (col === 'currentPrice') return <TableCell key={col} className="text-right">{currentPrice(t) != null ? fmtPrice(currentPrice(t) as number) : '—'}</TableCell>
                   if (col === 'currentAmount') return <TableCell key={col} className="text-right">{currentAmount(t) != null ? fmtMoney(currentAmount(t) as number) : '—'}</TableCell>
-                  if (col === 'currentRemainShares') return <TableCell key={col} className="text-right">{currentRemainShares(t) != null ? currentRemainShares(t) : '—'}</TableCell>
+                  if (col === 'currentRemainShares') return <TableCell key={col} className="text-right">{formatShares(currentRemainShares(t))}</TableCell>
                   if (col === 'stopLoss') {
                     return (
                       <TableCell key={col} className="text-right">

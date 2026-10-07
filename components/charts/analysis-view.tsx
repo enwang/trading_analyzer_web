@@ -43,6 +43,7 @@ import {
 } from '@/components/ui/select'
 import { DEFAULT_INITIAL_RISK_AMOUNT } from '@/lib/market/stop-loss'
 import { computeCoreStats } from '@/lib/metrics'
+import { formatShares } from '@/lib/format'
 
 type ClosedTrade = {
   id: string
@@ -902,7 +903,7 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
                         <TableCell className={`text-right font-medium ${row.pnl >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                           {fmtMoney(row.pnl)}
                         </TableCell>
-                        <TableCell className="text-right">{row.volume.toFixed(0)}</TableCell>
+                        <TableCell className="text-right">{formatShares(row.volume)}</TableCell>
                       </TableRow>
                       {isExpanded && dayTrades.map((t) => (
                         <TableRow key={t.id} className="bg-muted/30">
@@ -915,7 +916,7 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
                               {t.symbol}
                             </Link>
                           </TableCell>
-                          <TableCell className="text-right">{Math.abs(t.shares).toFixed(0)}</TableCell>
+                          <TableCell className="text-right">{formatShares(Math.abs(t.shares))}</TableCell>
                           <TableCell className="text-right">
                             {`${(t.pnl / 2000).toFixed(2)}R`}
                           </TableCell>
@@ -958,7 +959,7 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
                     </TableCell>
                     <TableCell>{formatDateCell(t.entryTime, timeZone)}</TableCell>
                     <TableCell>{formatDateCell(t.exitTime, timeZone)}</TableCell>
-                    <TableCell className="text-right">{Math.abs(t.shares).toFixed(0)}</TableCell>
+                    <TableCell className="text-right">{formatShares(Math.abs(t.shares))}</TableCell>
                     <TableCell className={`text-right ${t.pnl >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                       {`${(t.pnl / 2000).toFixed(2)}R`}
                     </TableCell>

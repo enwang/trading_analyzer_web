@@ -12,6 +12,7 @@ import {
   usesStopLossFirstSizing,
 } from '@/lib/market/stop-loss'
 import { riskSharesForTrade } from '@/lib/trades'
+import { formatShares } from '@/lib/format'
 import type { ExecutionLeg } from '@/types/trade'
 
 type Side = 'long' | 'short' | null
@@ -329,7 +330,7 @@ export function TradeSummaryCard({
           valueClassName={pnlPct != null ? (pnlPct >= 0 ? 'text-emerald-600' : 'text-red-600') : ''}
         />
         <Row label="Side" value={side ?? '—'} />
-        <Row label="Shares" value={shares ?? '—'} />
+        <Row label="Shares" value={formatShares(shares)} />
         <Row label="Entry Price" value={fmtMoney(entryPrice)} />
         <Row label="Exit Price" value={fmtMoney(exitPrice)} />
 

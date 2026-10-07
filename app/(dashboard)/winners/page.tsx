@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { getAuthenticatedUserId } from '@/lib/auth/user'
 import { rowToTrade } from '@/types/trade'
 import { LocalTime } from '@/components/ui/local-time'
+import { formatShares } from '@/lib/format'
 import {
   Table,
   TableBody,
@@ -75,7 +76,7 @@ export default async function WinnersPage() {
                 <TableCell>
                   <LocalTime date={t.exitTime} className="text-muted-foreground text-xs font-mono" />
                 </TableCell>
-                <TableCell className="text-right">{t.shares ?? '—'}</TableCell>
+                <TableCell className="text-right">{formatShares(t.shares)}</TableCell>
                 <TableCell className="text-right">
                   {t.entryPrice != null ? `$${t.entryPrice.toFixed(2)}` : '—'}
                 </TableCell>

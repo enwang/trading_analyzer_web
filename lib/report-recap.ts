@@ -9,6 +9,7 @@ import {
   type TradePattern,
 } from '@/lib/report-metrics'
 import { countMergedExecutionLegsByAction } from '@/lib/execution-legs'
+import { formatShares } from '@/lib/format'
 import { runLlmText } from '@/lib/ai/llm-analysis'
 import { getCachedAnalysis, setCachedAnalysis, simpleHash } from '@/lib/rag/analysis-cache'
 import type {
@@ -349,7 +350,7 @@ function toSpotlightTrade(trade: Trade, summary: ReturnType<typeof computeSummar
     scoreLabel: trade.source === 'ibkr' ? 'Imported' : 'CSV',
     stats: [
       { label: 'Side', value: trade.side ?? '—' },
-      { label: 'Quantity', value: trade.shares?.toLocaleString('en-US') ?? '—' },
+      { label: 'Quantity', value: formatShares(trade.shares) },
       { label: 'Entry Price', value: trade.entryPrice != null ? fmtCurrency(trade.entryPrice, 2) : '—' },
       { label: 'Exit Price', value: trade.exitPrice != null ? fmtCurrency(trade.exitPrice, 2) : '—' },
       { label: 'Hold Time', value: trade.holdTimeMin != null ? `${Math.round(trade.holdTimeMin)} min` : '—' },

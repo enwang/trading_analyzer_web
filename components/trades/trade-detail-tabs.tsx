@@ -16,6 +16,7 @@ import {
   usesStopLossFirstSizing,
 } from '@/lib/market/stop-loss'
 import { riskSharesForTrade } from '@/lib/trades'
+import { formatShares } from '@/lib/format'
 import type { ExecutionLeg } from '@/types/trade'
 
 type Side = 'long' | 'short' | null
@@ -401,7 +402,7 @@ export function TradeDetailTabs(props: Props) {
                   </div>
                   <div className="mt-1 flex items-center justify-between">
                     <span className="text-xs text-muted-foreground">Shares</span>
-                    <span className="text-xs font-medium">{riskShares != null ? Math.abs(riskShares).toLocaleString('en-US') : '—'}</span>
+                    <span className="text-xs font-medium">{formatShares(riskShares == null ? null : Math.abs(riskShares))}</span>
                   </div>
                 </div>
               )}
@@ -482,12 +483,13 @@ export function TradeDetailTabs(props: Props) {
                 {mergedLegs.map((leg, i) => {
                   const gross = perFillGrossPnl(leg, side, entryPrice)
                   const qty = signedQty(leg.action, leg.shares)
+                  const quantity = formatShares(Math.abs(qty))
                   return (
                     <div key={`${leg.time}-${leg.action}-${i}`} className="grid grid-cols-[1fr_auto_auto_auto_auto] items-center border-t px-2 py-1.5 text-[11px]">
                       <LocalTime date={leg.time} className="font-mono text-muted-foreground" />
                       <span className={`px-2 font-medium ${leg.action === 'BUY' ? 'text-emerald-700' : 'text-red-700'}`}>{leg.action}</span>
                       <span className="px-2 text-right">${leg.price.toFixed(2)}</span>
-                      <span className="px-2 text-right">{qty > 0 ? `+${qty}` : `${qty}`}</span>
+                      <span className="px-2 text-right">{qty > 0 ? `+${quantity}` : `-${quantity}`}</span>
                       <span className={`text-right ${gross != null && gross > 0 ? 'text-emerald-700' : gross != null && gross < 0 ? 'text-red-700' : ''}`}>
                         {gross != null ? `${gross >= 0 ? '+' : ''}$${gross.toFixed(2)}` : '—'}
                       </span>
