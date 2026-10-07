@@ -110,6 +110,20 @@ export function OverviewContent({
     [filteredTrades]
   )
 
+  const avgWinLossPct = useMemo(() => {
+    const average = (values: number[]) => (
+      values.length > 0 ? values.reduce((sum, value) => sum + value, 0) / values.length : 0
+    )
+    const winPcts = closedFiltered
+      .filter(t => t.outcome === 'win' && t.pnlPct != null)
+      .map(t => Math.abs(t.pnlPct!))
+    const lossPcts = closedFiltered
+      .filter(t => t.outcome === 'loss' && t.pnlPct != null)
+      .map(t => Math.abs(t.pnlPct!))
+
+    return { win: average(winPcts), loss: average(lossPcts) }
+  }, [closedFiltered])
+
   // Open trades are always current — not date-filtered
   const openTrades = useMemo(() =>
     trades.filter(t => t.exitTime == null || t.outcome === 'open').map(t => ({
@@ -148,7 +162,7 @@ export function OverviewContent({
     { id: 'open-pnl', type: 'open-pnl', trades: openTrades },
     { id: 'open-risk', type: 'open-risk', trades: openTradesForRisk, accountEquity: latestNav },
     { id: 'win-rate', type: 'kpi', label: 'Win Rate', value: fmtPct(stats.winRate), sub: stats.nBreakevens > 0 ? `${stats.nWins}W / ${stats.nLosses}L / ${stats.nBreakevens}B` : `${stats.nWins}W / ${stats.nLosses}L` },
-    { id: 'avg-win-loss', type: 'kpi', label: 'Avg Win/Loss', value: fmtPf(stats.payoffRatio) },
+    { id: 'avg-win-loss', type: 'kpi', label: 'Avg Win/Loss Ratio', value: fmtPf(stats.payoffRatio) },
     { id: 'profit-factor', type: 'kpi', label: 'Profit Factor', value: fmtPf(stats.profitFactor) },
     { id: 'expectancy', type: 'kpi', label: 'Avg net trade P&L', value: fmt(stats.expectancy), trend: stats.expectancy >= 0 ? 'up' : 'down' },
     {
@@ -169,12 +183,25 @@ export function OverviewContent({
         </div>
       ),
     },
-    { id: 'avg-win', type: 'kpi', label: 'Avg Win', value: fmt(stats.avgWin), trend: 'up' },
-    { id: 'avg-loss', type: 'kpi', label: 'Avg Loss', value: fmt(stats.avgLoss), trend: 'down' },
+    {
+      id: 'avg-win-loss-values',
+      type: 'kpi',
+      label: 'Avg Win / Loss',
+      value: (
+        <div className="flex min-w-0 flex-col gap-0.5 text-base sm:text-lg lg:text-xl">
+          <span className="flex items-baseline justify-between gap-3 whitespace-nowrap text-emerald-600">
+            <span>{fmt(stats.avgWin)}</span>
+            <span>{fmtPct(avgWinLossPct.win)}</span>
+          </span>
+          <span className="flex items-baseline justify-between gap-3 whitespace-nowrap text-red-600">
+            <span>{fmt(stats.avgLoss)}</span>
+            <span>{fmtPct(avgWinLossPct.loss)}</span>
+          </span>
+        </div>
+      ),
+    },
     { id: 'largest-win', type: 'kpi', label: 'Largest Win', value: fmt(stats.largestWin), trend: 'up', href: largestWinTrade ? `/trades/${largestWinTrade.id}?from=overview` : undefined, hoverTitle: largestWinTrade ? `${largestWinTrade.symbol} trade` : undefined, hoverItems: largestWinTrade ? [fmtHoverDate(largestWinTrade.exitTime), fmtSigned(largestWinTrade.pnl ?? 0)] : undefined },
     { id: 'largest-loss', type: 'kpi', label: 'Largest Loss', value: fmt(stats.largestLoss), trend: 'down', href: largestLossTrade ? `/trades/${largestLossTrade.id}?from=overview` : undefined, hoverTitle: largestLossTrade ? `${largestLossTrade.symbol} trade` : undefined, hoverItems: largestLossTrade ? [fmtHoverDate(largestLossTrade.exitTime), fmtSigned(largestLossTrade.pnl ?? 0)] : undefined },
-    { id: 'consec-wins', type: 'kpi', label: 'Consec Wins', value: String(stats.maxConsecWins), sub: 'max streak' },
-    { id: 'consec-losses', type: 'kpi', label: 'Consec Losses', value: String(stats.maxConsecLosses), sub: 'max streak' },
   ]
 
   return (
