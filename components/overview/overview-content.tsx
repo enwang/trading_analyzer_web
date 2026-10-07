@@ -162,7 +162,7 @@ export function OverviewContent({
     { id: 'open-pnl', type: 'open-pnl', trades: openTrades },
     { id: 'open-risk', type: 'open-risk', trades: openTradesForRisk, accountEquity: latestNav },
     { id: 'win-rate', type: 'kpi', label: 'Win Rate', value: fmtPct(stats.winRate), sub: stats.nBreakevens > 0 ? `${stats.nWins}W / ${stats.nLosses}L / ${stats.nBreakevens}B` : `${stats.nWins}W / ${stats.nLosses}L` },
-    { id: 'avg-win-loss', type: 'kpi', label: 'Avg Win/Loss Ratio', value: fmtPf(stats.payoffRatio) },
+    { id: 'avg-win-loss', type: 'kpi', label: 'Avg Win/Loss Rate', value: fmtPf(stats.payoffRatio) },
     { id: 'profit-factor', type: 'kpi', label: 'Profit Factor', value: fmtPf(stats.profitFactor) },
     { id: 'expectancy', type: 'kpi', label: 'Avg net trade P&L', value: fmt(stats.expectancy), trend: stats.expectancy >= 0 ? 'up' : 'down' },
     {
@@ -186,7 +186,12 @@ export function OverviewContent({
     {
       id: 'avg-win-loss-values',
       type: 'kpi',
-      label: 'Avg Win / Loss',
+      label: (
+        <div className="flex items-start justify-between gap-3">
+          <span>Avg win / loss</span>
+          <span className="text-right">Avg win / loss ratio</span>
+        </div>
+      ),
       value: (
         <div className="flex min-w-0 flex-col gap-0.5 text-base sm:text-lg lg:text-xl">
           <span className="flex items-baseline justify-between gap-3 whitespace-nowrap text-emerald-600">

@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 
 interface KpiCardProps {
-  label: string
+  label: React.ReactNode
   value: React.ReactNode
   sub?: string
   trend?: 'up' | 'down' | 'neutral'
@@ -41,7 +41,7 @@ export function KpiCard({ label, value, sub, trend, href, hoverTitle, hoverItems
           {hoverItems && hoverItems.length > 0 && (
             <div className={`${hoverTitle ? 'mt-0.5' : ''} space-y-0.5 leading-tight`}>
               {hoverItems.map((item, i) => (
-                <div key={`${label}-${i}`}>{item}</div>
+                <div key={i}>{item}</div>
               ))}
             </div>
           )}
