@@ -540,7 +540,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
       }
     }
 
-    // --- MACD: Pine uses 8 / 21 / 5 intraday and 12 / 26 / 9 on day+ ---
+    // --- MACD: TradingView setup uses 6 / 20 / 9 intraday and 12 / 26 / 9 on day+ ---
     if (macdOn) {
       const macd = calcMACD(candles, macdPeriods.fast, macdPeriods.slow, macdPeriods.signal)
       if (macd.length) {

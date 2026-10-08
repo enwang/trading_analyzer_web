@@ -110,7 +110,7 @@ export interface MacdPeriods {
 
 export function macdPeriodsForTimeframe(timeframe: string): MacdPeriods {
   return timeframe === '5' || timeframe === '60'
-    ? { fast: 8, slow: 21, signal: 5 }
+    ? { fast: 6, slow: 20, signal: 9 }
     : { fast: 12, slow: 26, signal: 9 }
 }
 

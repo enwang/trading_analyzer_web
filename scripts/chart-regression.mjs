@@ -19,14 +19,14 @@ function fail(message) {
 {
   const intraday = macdPeriodsForTimeframe('5')
   assert(
-    intraday.fast === 8 && intraday.slow === 21 && intraday.signal === 5,
-    'expected intraday MACD 8/21/5',
+    intraday.fast === 6 && intraday.slow === 20 && intraday.signal === 9,
+    'expected intraday MACD 6/20/9',
   )
 
   const hourly = macdPeriodsForTimeframe('60')
   assert(
-    hourly.fast === 8 && hourly.slow === 21 && hourly.signal === 5,
-    'expected hourly MACD 8/21/5',
+    hourly.fast === 6 && hourly.slow === 20 && hourly.signal === 9,
+    'expected hourly MACD 6/20/9',
   )
 
   const daily = macdPeriodsForTimeframe('1D')
