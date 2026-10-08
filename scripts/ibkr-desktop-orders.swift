@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import CoreGraphics
 import Foundation
 import ImageIO
@@ -45,7 +46,10 @@ func fail(_ message: String) -> Never {
 }
 
 func number(from value: String) -> Double? {
-    Double(value.replacingOccurrences(of: ",", with: ""))
+    Double(value
+        .replacingOccurrences(of: ",", with: "")
+        .replacingOccurrences(of: "...", with: "")
+        .replacingOccurrences(of: "…", with: ""))
 }
 
 func action(from token: TextToken) -> String? {
@@ -146,8 +150,12 @@ func parseOrderPage(tokens: [TextToken], debugLabel: String) -> ParsedOrderPage 
         fail("Select Open Orders or All Orders in the IBKR Desktop Orders Table before using Sync Now")
     }
 
-    let quantityPattern = try! NSRegularExpression(pattern: #"^\d[\d,]*\s*/\s*\d[\d,]*$"#)
-    let filledQuantityPattern = try! NSRegularExpression(pattern: #"^\d[\d,]*$"#)
+    let quantityPattern = try! NSRegularExpression(
+        pattern: #"^\d[\d,]*(?:\.\d+)?\s*/\s*\d[\d,]*(?:\.\d+)?(?:\.{3}|…)?$"#
+    )
+    let filledQuantityPattern = try! NSRegularExpression(
+        pattern: #"^\d[\d,]*(?:\.\d+)?(?:\.{3}|…)?$"#
+    )
     let symbolPattern = try! NSRegularExpression(pattern: #"^[A-Z][A-Z0-9.\-]{0,9}$"#)
     let actionTokens = tableTokens.filter { action(from: $0) != nil }
     var stopOrders: [DesktopStopOrder] = []
@@ -241,6 +249,69 @@ func totalPageCount(tokens: [TextToken]) -> Int {
     return 1
 }
 
+func attribute(_ name: CFString, of element: AXUIElement) -> CFTypeRef? {
+    var value: CFTypeRef?
+    return AXUIElementCopyAttributeValue(element, name, &value) == .success ? value : nil
+}
+
+func paginationField(in root: AXUIElement) -> AXUIElement? {
+    var pending = [root]
+    while let element = pending.popLast() {
+        let role = attribute(kAXRoleAttribute as CFString, of: element) as? String
+        let identifier = attribute(kAXIdentifierAttribute as CFString, of: element) as? String
+        if role == kAXTextFieldRole && identifier == "QApplication.mainWindow.TextField_QMLTYPE_49" {
+            return element
+        }
+        if let children = attribute(kAXChildrenAttribute as CFString, of: element) as? [AXUIElement] {
+            pending.append(contentsOf: children)
+        }
+    }
+    return nil
+}
+
+func pageNumber(from field: AXUIElement) -> Int? {
+    guard let value = attribute(kAXValueAttribute as CFString, of: field) else { return nil }
+    if let number = value as? NSNumber { return number.intValue }
+    if let string = value as? String { return Int(string) }
+    return nil
+}
+
+func setPage(_ page: Int, field: AXUIElement) -> Bool {
+    guard AXUIElementSetAttributeValue(
+        field,
+        kAXFocusedAttribute as CFString,
+        kCFBooleanTrue
+    ) == .success,
+    AXUIElementSetAttributeValue(
+        field,
+        kAXValueAttribute as CFString,
+        String(page) as CFString
+    ) == .success else {
+        return false
+    }
+    Thread.sleep(forTimeInterval: 0.12)
+    let source = CGEventSource(stateID: .combinedSessionState)
+    guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 36, keyDown: true),
+          let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 36, keyDown: false) else {
+        return false
+    }
+    keyDown.post(tap: .cghidEventTap)
+    Thread.sleep(forTimeInterval: 0.05)
+    keyUp.post(tap: .cghidEventTap)
+    return true
+}
+
+func pageFingerprint(_ tokens: [TextToken]) -> String {
+    tokens
+        .filter { $0.box.midX < 0.63 && $0.box.midY > 0.25 && $0.box.midY < 0.83 }
+        .sorted {
+            if abs($0.box.midY - $1.box.midY) > 0.005 { return $0.box.midY > $1.box.midY }
+            return $0.box.midX < $1.box.midX
+        }
+        .map(\.normalized)
+        .joined(separator: "|")
+}
+
 let workspace = NSWorkspace.shared
 let previousApplication = workspace.frontmostApplication
 let ibkrApplication = workspace.runningApplications.first { $0.localizedName == "IBKR Desktop" }
@@ -289,18 +360,87 @@ let knownSymbolWords = ProcessInfo.processInfo.environment["IBKR_KNOWN_SYMBOLS"]
     .split(separator: ",")
     .map(String.init) ?? []
 let knownSymbols = Set(knownSymbolWords)
-let firstTokens = captureTokens(
+let initialTokens = captureTokens(
     windowNumber: windowNumber,
     knownSymbolWords: knownSymbolWords,
     knownSymbols: knownSymbols
 )
-let firstPage = parseOrderPage(tokens: firstTokens, debugLabel: "initial page")
-let totalPages = totalPageCount(tokens: firstTokens)
-let recognizedRows = firstPage.recognizedRows
-if totalPages == 1 && recognizedRows != firstPage.expectedRows {
-    fail("IBKR Desktop shows \(firstPage.expectedRows) orders, but only \(recognizedRows) rows were recognized; no stop losses were changed")
+let totalPages = totalPageCount(tokens: initialTokens)
+var currentTokens = initialTokens
+var originalPage = 1
+var pageField: AXUIElement?
+
+if totalPages > 1 {
+    guard AXIsProcessTrusted() else {
+        fail("Multi-page IBKR order sync needs Accessibility access for Trading Analyzer IBKR Reader; no stop losses were changed")
+    }
+    let applicationElement = AXUIElementCreateApplication(ibkrApplication.processIdentifier)
+    guard let foundPageField = paginationField(in: applicationElement) else {
+        fail("Could not find the IBKR Desktop page selector; no stop losses were changed")
+    }
+    pageField = foundPageField
+    originalPage = pageNumber(from: foundPageField) ?? 1
+    if originalPage != 1 {
+        guard setPage(1, field: foundPageField) else {
+            fail("Could not return IBKR Desktop to orders page 1; no stop losses were changed")
+        }
+        Thread.sleep(forTimeInterval: 0.55)
+        currentTokens = captureTokens(
+            windowNumber: windowNumber,
+            knownSymbolWords: knownSymbolWords,
+            knownSymbols: knownSymbols
+        )
+    }
 }
-let stopOrders = firstPage.orders
+
+let firstPage = parseOrderPage(tokens: currentTokens, debugLabel: "page 1")
+var pages = [firstPage]
+var previousFingerprint = pageFingerprint(currentTokens)
+
+if totalPages > 1 {
+    for pageNumber in 2...totalPages {
+        guard let pageField,
+              setPage(pageNumber, field: pageField) else {
+            fail("Could not navigate to IBKR Desktop orders page \(pageNumber); no stop losses were changed")
+        }
+        Thread.sleep(forTimeInterval: 0.7)
+        currentTokens = captureTokens(
+            windowNumber: windowNumber,
+            knownSymbolWords: knownSymbolWords,
+            knownSymbols: knownSymbols
+        )
+        let page = parseOrderPage(tokens: currentTokens, debugLabel: "page \(pageNumber)")
+        let fingerprint = pageFingerprint(currentTokens)
+        guard fingerprint != previousFingerprint else {
+            fail("IBKR Desktop did not advance to orders page \(pageNumber); no stop losses were changed")
+        }
+        pages.append(page)
+        previousFingerprint = fingerprint
+    }
+
+    if let pageField, originalPage != totalPages {
+        if setPage(originalPage, field: pageField) {
+            Thread.sleep(forTimeInterval: 0.35)
+        }
+    }
+}
+
+let recognizedRows = pages.reduce(0) { $0 + $1.recognizedRows }
+guard recognizedRows > 0 else {
+    fail("No IBKR Desktop order rows were recognized; no stop losses were changed")
+}
+let stopOrders = pages.flatMap(\.orders).enumerated().map { index, order in
+    DesktopStopOrder(
+        orderId: index + 1,
+        symbol: order.symbol,
+        action: order.action,
+        quantity: order.quantity,
+        orderType: order.orderType,
+        stopPrice: order.stopPrice,
+        status: order.status,
+        fillPrice: order.fillPrice
+    )
+}
 
 let encoder = JSONEncoder()
 encoder.outputFormatting = [.sortedKeys]

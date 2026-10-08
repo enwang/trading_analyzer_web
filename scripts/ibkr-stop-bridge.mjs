@@ -78,7 +78,7 @@ function readJson(request) {
 async function fetchOpenStopOrders(knownSymbols) {
   try {
     const { stdout } = await execFileAsync(DESKTOP_ORDERS_HELPER, [], {
-      timeout: 15_000,
+      timeout: 30_000,
       maxBuffer: 1_000_000,
       env: {
         ...process.env,
@@ -202,10 +202,8 @@ async function syncStops(userId) {
     initialSlInitialized += 1
   }
 
-  const warning = scan?.view === 'ALL' && scan.pageCount > 1
-    ? `IBKR All Orders spans ${scan.pageCount} pages. Only the current page was read (${scan.recognizedRows}/${scan.expectedRows} orders); select Open Orders and Sync Now again to update every Current SL.`
-    : scan?.recognizedRows < scan?.expectedRows
-      ? `IBKR shows ${scan.expectedRows} orders, but only ${scan.recognizedRows} visible rows were read.`
+  const warning = scan?.recognizedRows < scan?.expectedRows
+      ? `IBKR scanned ${scan.pageCount ?? 1} order page(s), but only ${scan.recognizedRows}/${scan.expectedRows} rows were readable.`
       : undefined
   const result = {
     source: 'IBKR Desktop',
