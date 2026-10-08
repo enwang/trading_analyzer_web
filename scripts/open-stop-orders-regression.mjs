@@ -226,4 +226,35 @@ const stop = (orderId, quantity, stopPrice, action = 'SELL', symbol = 'TEAM') =>
   assert.equal(result.skipped.length, 1)
 }
 
+{
+  const manuallyClosedTrade = {
+    ...trade('intc-manual-close', 600, 'long', 'INTC'),
+    entry_price: 113.87,
+    exit_time: '2026-10-07T20:28:55.000Z',
+    exit_price: 113.07,
+  }
+  const result = matchFilledStopsToClosedTrades(
+    [manuallyClosedTrade],
+    [{ ...stop(19, 600, 111.1, 'SELL', 'INTC'), status: 'CANCELLED', fillPrice: 0 }],
+  )
+  assert.deepEqual(result.updates, [{
+    tradeId: 'intc-manual-close',
+    symbol: 'INTC',
+    stopPrice: 111.1,
+    orderId: 19,
+  }])
+  assert.deepEqual(buildInitialStopSyncDatabaseUpdate(manuallyClosedTrade, 111.1), {
+    stop_loss: 111.1,
+    stop_loss_locked: true,
+    initial_risk_amount: 1662,
+  })
+}
+
+{
+  const movedAboveEntry = trade('profit-stop', 100, 'long', 'GEV')
+  assert.deepEqual(buildStopSyncDatabaseUpdate(movedAboveEntry, 181), {
+    current_stop_loss: 181,
+  })
+}
+
 console.log('Open stop order regression checks passed.')

@@ -114,16 +114,21 @@ export function buildStopSyncDatabaseUpdate(
   const payload: StopSyncDatabaseUpdate = { current_stop_loss: stopPrice }
   if (trade.stop_loss != null) return payload
 
+  const riskPerShare = trade.side === 'long'
+    ? (trade.entry_price ?? 0) - stopPrice
+    : trade.side === 'short'
+      ? stopPrice - (trade.entry_price ?? 0)
+      : null
+
+  // A stop already moved beyond breakeven is a valid Current SL, but it is not
+  // evidence of the trade's original downside risk.
+  if (trade.entry_price == null || riskPerShare == null || riskPerShare <= 0) return payload
+
   payload.stop_loss = stopPrice
   payload.stop_loss_locked = true
 
   if (trade.initial_risk_amount == null && trade.entry_price != null && trade.shares != null) {
-    const riskPerShare = trade.side === 'long'
-      ? trade.entry_price - stopPrice
-      : trade.side === 'short'
-        ? stopPrice - trade.entry_price
-        : null
-    const initialRisk = riskPerShare == null ? null : riskPerShare * Math.abs(trade.shares)
+    const initialRisk = Math.round(riskPerShare * Math.abs(trade.shares) * 100) / 100
     if (initialRisk != null && Number.isFinite(initialRisk) && initialRisk > 0) {
       payload.initial_risk_amount = initialRisk
     }
@@ -147,7 +152,9 @@ export function buildInitialStopSyncDatabaseUpdate(
       : trade.side === 'short'
         ? stopPrice - trade.entry_price
         : null
-    const initialRisk = riskPerShare == null ? null : riskPerShare * Math.abs(trade.shares)
+    const initialRisk = riskPerShare == null
+      ? null
+      : Math.round(riskPerShare * Math.abs(trade.shares) * 100) / 100
     if (initialRisk != null && Number.isFinite(initialRisk) && initialRisk > 0) {
       payload.initial_risk_amount = initialRisk
     }
@@ -266,7 +273,7 @@ export function matchOpenStopsToTrades(
   return { updates, skipped }
 }
 
-/** Match filled stop orders to same-day closed trades without overwriting Initial SL. */
+/** Match filled or uniquely cancelled stops to same-day closed trades without overwriting Initial SL. */
 export function matchFilledStopsToClosedTrades(
   trades: ClosedTradeForStopSync[],
   orders: ActiveStopOrder[],
@@ -301,6 +308,23 @@ export function matchFilledStopsToClosedTrades(
     const trade = matches[0]
     updates.push(updateFor(trade, order))
     unmatchedTrades.delete(trade)
+  }
+
+  const cancelledStops = orders.filter(order => order.status?.trim().toUpperCase() === 'CANCELLED')
+  for (const trade of [...unmatchedTrades]) {
+    const symbol = normalizeSymbol(trade.symbol)
+    const candidates = cancelledStops.filter(order => (
+      normalizeSymbol(order.symbol) === symbol
+      && closingAction(trade.side) === order.action.trim().toUpperCase()
+      && sameNumber(Math.abs(trade.shares ?? 0), Math.abs(order.quantity))
+    ))
+
+    if (candidates.length === 1) {
+      updates.push(updateFor(trade, candidates[0]))
+      unmatchedTrades.delete(trade)
+    } else if (candidates.length > 1) {
+      skipped.push({ symbol, reason: 'Several cancelled stops could apply to this closed trade' })
+    }
   }
 
   return { updates, skipped }
