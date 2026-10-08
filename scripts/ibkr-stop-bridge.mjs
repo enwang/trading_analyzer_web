@@ -1,6 +1,7 @@
 import http from 'node:http'
 import { execFile } from 'node:child_process'
-import { homedir } from 'node:os'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 
@@ -15,11 +16,10 @@ import {
 } from '../lib/ibkr/open-stop-orders.ts'
 
 const BRIDGE_PORT = Number(process.env.IBKR_STOP_BRIDGE_PORT || 4317)
+const DESKTOP_ORDERS_APP = join(homedir(), 'Applications', 'Trading Analyzer IBKR Reader.app')
 const DESKTOP_ORDERS_HELPER = process.env.IBKR_DESKTOP_ORDERS_HELPER
   || join(
-    homedir(),
-    'Applications',
-    'Trading Analyzer IBKR Reader.app',
+    DESKTOP_ORDERS_APP,
     'Contents',
     'MacOS',
     'ibkr-desktop-orders',
@@ -76,16 +76,34 @@ function readJson(request) {
 }
 
 async function fetchOpenStopOrders(knownSymbols) {
+  const symbolList = [...new Set(knownSymbols)].join(',')
+  let workingDirectory
   try {
-    const { stdout } = await execFileAsync(DESKTOP_ORDERS_HELPER, [], {
-      timeout: 30_000,
-      maxBuffer: 1_000_000,
-      env: {
-        ...process.env,
-        IBKR_KNOWN_SYMBOLS: [...new Set(knownSymbols)].join(','),
-      },
-    })
+    let stdout
+    if (process.platform === 'darwin' && !process.env.IBKR_DESKTOP_ORDERS_HELPER) {
+      workingDirectory = await mkdtemp(join(tmpdir(), 'trading-analyzer-ibkr-reader-'))
+      const outputPath = join(workingDirectory, 'result.json')
+      await execFileAsync('/usr/bin/open', [
+        '-W',
+        '-n',
+        DESKTOP_ORDERS_APP,
+        '--args',
+        '--output',
+        outputPath,
+        '--known-symbols',
+        symbolList,
+      ], { timeout: 30_000, maxBuffer: 1_000_000 })
+      stdout = await readFile(outputPath, 'utf8')
+    } else {
+      const result = await execFileAsync(DESKTOP_ORDERS_HELPER, [], {
+        timeout: 30_000,
+        maxBuffer: 1_000_000,
+        env: { ...process.env, IBKR_KNOWN_SYMBOLS: symbolList },
+      })
+      stdout = result.stdout
+    }
     const result = JSON.parse(stdout)
+    if (typeof result?.error === 'string') throw new Error(result.error)
     if (Array.isArray(result)) return { orders: result, scan: null }
     if (!result || !Array.isArray(result.orders)) {
       throw new Error('Desktop order reader returned invalid data')
@@ -94,6 +112,8 @@ async function fetchOpenStopOrders(knownSymbols) {
   } catch (error) {
     const stderr = error?.stderr?.trim()
     throw new Error(stderr || error?.message || 'Could not read IBKR Desktop open orders')
+  } finally {
+    if (workingDirectory) await rm(workingDirectory, { recursive: true, force: true })
   }
 }
 

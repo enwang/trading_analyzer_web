@@ -100,6 +100,13 @@ execFileSync('/usr/bin/xcrun', [
     SWIFT_MODULE_CACHE_PATH: moduleCache,
   },
 })
+execFileSync('/usr/bin/codesign', [
+  '--force',
+  '--deep',
+  '--sign',
+  '-',
+  helperApp,
+])
 try {
   execFileSync('launchctl', ['bootout', `gui/${uid}`, plistPath], { stdio: 'ignore' })
 } catch {}

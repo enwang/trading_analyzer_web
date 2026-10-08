@@ -40,7 +40,21 @@ struct ParsedOrderPage {
     let recognizedRows: Int
 }
 
+func argumentValue(_ name: String) -> String? {
+    guard let index = CommandLine.arguments.firstIndex(of: name),
+          CommandLine.arguments.indices.contains(index + 1) else { return nil }
+    return CommandLine.arguments[index + 1]
+}
+
+let outputPath = argumentValue("--output")
+
 func fail(_ message: String) -> Never {
+    if let outputPath {
+        let payload = try? JSONSerialization.data(withJSONObject: ["error": message])
+        if let payload {
+            try? payload.write(to: URL(fileURLWithPath: outputPath), options: .atomic)
+        }
+    }
     FileHandle.standardError.write(Data((message + "\n").utf8))
     exit(1)
 }
@@ -356,7 +370,8 @@ guard let desktopWindow,
     fail("IBKR Desktop is not open or has no readable main window")
 }
 
-let knownSymbolWords = ProcessInfo.processInfo.environment["IBKR_KNOWN_SYMBOLS"]?
+let knownSymbolWords = (argumentValue("--known-symbols")
+    ?? ProcessInfo.processInfo.environment["IBKR_KNOWN_SYMBOLS"])?
     .split(separator: ",")
     .map(String.init) ?? []
 let knownSymbols = Set(knownSymbolWords)
@@ -365,6 +380,7 @@ let initialTokens = captureTokens(
     knownSymbolWords: knownSymbolWords,
     knownSymbols: knownSymbols
 )
+let applicationElement = AXUIElementCreateApplication(ibkrApplication.processIdentifier)
 let totalPages = totalPageCount(tokens: initialTokens)
 var currentTokens = initialTokens
 var originalPage = 1
@@ -374,7 +390,6 @@ if totalPages > 1 {
     guard AXIsProcessTrusted() else {
         fail("Multi-page IBKR order sync needs Accessibility access for Trading Analyzer IBKR Reader; no stop losses were changed")
     }
-    let applicationElement = AXUIElementCreateApplication(ibkrApplication.processIdentifier)
     guard let foundPageField = paginationField(in: applicationElement) else {
         fail("Could not find the IBKR Desktop page selector; no stop losses were changed")
     }
@@ -454,5 +469,13 @@ let scan = DesktopOrderScan(
 guard let output = try? encoder.encode(scan) else {
     fail("Could not encode IBKR Desktop stop orders")
 }
-FileHandle.standardOutput.write(output)
-FileHandle.standardOutput.write(Data("\n".utf8))
+if let outputPath {
+    do {
+        try output.write(to: URL(fileURLWithPath: outputPath), options: .atomic)
+    } catch {
+        fail("Could not write IBKR Desktop stop-order output: \(error.localizedDescription)")
+    }
+} else {
+    FileHandle.standardOutput.write(output)
+    FileHandle.standardOutput.write(Data("\n".utf8))
+}
