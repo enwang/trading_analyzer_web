@@ -65,5 +65,5 @@ export function formatLocalStopSync(result: LocalStopSyncResult) {
     ? `, ${result.initialSlInitialized} Initial SL initialized`
     : ''
   const warning = result.warning ? `. ${result.warning}` : ''
-  return `${result.updated} Current SL updated${initialized}${skipped}${warning}`
+  return `Open stops synced: ${result.updated} Current SL updated, ${result.unchanged} already current${initialized}${skipped}${warning}`
 }
