@@ -493,6 +493,24 @@ if (!ethaPostSplitLegs.some((leg) => leg.action === 'SELL' && leg.shares === 20 
   fail(`expected ETHA post-split sell leg to stay 20 @ 61, got ${JSON.stringify(ethaPostSplitLegs)}`)
 }
 
+const ethaFractionalCloseCsv = `ClientAccountID,Open/CloseIndicator,Symbol,Quantity,Date/Time,Open Date/Time,Buy/Sell,T. Price,Basis
+U123,O,ETHA,5000,2026-09-15 15:00:19,,BUY,18.105782,
+U123,C,ETHA,1000,2026-09-18 15:16:12,2026-09-15 15:00:19,SELL,19.89,18105.782
+U123,C,ETHA,0.3333,2026-10-08 11:19:05,2026-09-15 15:00:19,SELL,56.4,18.105782
+U123,C,ETHA,13,2026-10-08 11:19:05,2026-09-15 15:00:19,SELL,56.4,235.375166
+U123,C,ETHA,435,2026-10-08 11:19:05,2026-09-15 15:00:19,SELL,56.4006,7876.01517
+U123,C,ETHA,100,2026-10-08 11:19:05,2026-09-15 15:00:19,SELL,56.4,1810.5782
+U123,C,ETHA,30,2026-10-08 11:19:05,2026-09-15 15:00:19,SELL,56.4013,543.17346
+U123,C,ETHA,755,2026-10-08 11:19:05,2026-09-15 15:00:19,SELL,56.4,13669.86541
+`
+const ethaFractionalCloseTrades = parseFlexCsv(ethaFractionalCloseCsv)
+const ethaFractionalRemainder = ethaFractionalCloseTrades.find((trade) => (
+  trade.symbol === 'ETHA' && trade.outcome === 'open'
+))
+if (ethaFractionalRemainder) {
+  fail(`expected sub-0.0001 ETHA split remainder to close, got ${ethaFractionalRemainder.shares}`)
+}
+
 const ethaPreservedPriceScale = preservedPriceScaleForKnownSplit({
   symbol: 'ETHA',
   entryTime: '2026-09-15T19:00:00.000Z',

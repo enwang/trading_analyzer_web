@@ -24,6 +24,7 @@ const POLL_INTERVAL_MS = 3_000
 // Only include trades opened on or after this date
 const QUERY_START = new Date('2026-01-01T00:00:00Z')
 const STOP_LOSS_FIRST_SIZING_START_DATE = '2026-08-31'
+const SHARE_QUANTITY_EPSILON = 0.0001
 
 // ---------------------------------------------------------------------------
 // Normalized trade row (ready to upsert into Supabase)
@@ -538,7 +539,7 @@ function parseTradesCsv(csvStr: string, openPositionSnapshots: OpenPositionSnaps
     netQuantityBySymbol.set(sym, (netQuantityBySymbol.get(sym) ?? 0) + quantity)
   }
   for (const [sym, netQuantity] of netQuantityBySymbol) {
-    if (Math.abs(netQuantity) > 1e-9) activeOpenSymbols.add(sym)
+    if (Math.abs(netQuantity) > SHARE_QUANTITY_EPSILON) activeOpenSymbols.add(sym)
   }
 
   const ADD_ON_SPLIT_MIN_GAP_MS = 5 * 60_000
@@ -734,7 +735,9 @@ function parseTradesCsv(csvStr: string, openPositionSnapshots: OpenPositionSnaps
   ): { entryTime: string; shares: number } | null {
     if (!exitTime || requestedShares == null || requestedShares <= 0) return null
     const lots = openLotsBySymbol.get(sym) ?? []
-    const candidates = lots.filter(l => l.entryIso <= exitTime && l.remainingShares > 0)
+    const candidates = lots.filter(l => (
+      l.entryIso <= exitTime && l.remainingShares > SHARE_QUANTITY_EPSILON
+    ))
     if (!candidates.length) return null
 
     const useNewestLotFirst = exitTime.slice(0, 10) >= STOP_LOSS_FIRST_SIZING_START_DATE || activeOpenSymbols.has(sym)
@@ -754,7 +757,8 @@ function parseTradesCsv(csvStr: string, openPositionSnapshots: OpenPositionSnaps
 
     const matched = Math.min(requestedShares, chosen.remainingShares)
     if (matched <= 0) return null
-    chosen.remainingShares = Math.max(0, chosen.remainingShares - matched)
+    const remainingShares = Math.max(0, chosen.remainingShares - matched)
+    chosen.remainingShares = remainingShares <= SHARE_QUANTITY_EPSILON ? 0 : remainingShares
     return { entryTime: chosen.entryIso, shares: matched }
   }
 
@@ -1171,7 +1175,7 @@ function appendOpenPositions(
     const closedSharesByOpenLot = new Map<string, number>()
     for (const [sym, lots] of openLotsBySymbol) {
       for (const lot of lots) {
-        if (lot.remainingShares > 0) {
+        if (lot.remainingShares > SHARE_QUANTITY_EPSILON) {
           openKeys.add(`${sym}|${lot.entryIso}`)
         }
       }
@@ -1191,7 +1195,7 @@ function appendOpenPositions(
 
     for (const [sym, lots] of openLotsBySymbol) {
       for (const lot of lots) {
-        if (lot.remainingShares <= 0) continue
+        if (lot.remainingShares <= SHARE_QUANTITY_EPSILON) continue
         const lotKey = `${sym}|${lot.entryIso}`
         const realizedPnl = realizedByOpenLot.get(lotKey) ?? 0
         const inferredOriginalShares = lot.remainingShares + (closedSharesByOpenLot.get(lotKey) ?? 0)
