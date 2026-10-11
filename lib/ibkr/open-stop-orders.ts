@@ -47,6 +47,11 @@ export type ClosedTradeForStopSync = OpenTradeForStopSync & {
 
 export type InitialStopLossUpdate = StopLossUpdate
 
+export type StopOrderSnapshot = {
+  capturedAt: string
+  orders: ActiveStopOrder[]
+}
+
 const EPSILON = 0.000001
 
 function sameNumber(a: number, b: number) {
@@ -325,6 +330,55 @@ export function matchFilledStopsToClosedTrades(
     } else if (candidates.length > 1) {
       skipped.push({ symbol, reason: 'Several cancelled stops could apply to this closed trade' })
     }
+  }
+
+  return { updates, skipped }
+}
+
+/** Recover the first observed stop while a trade was open. */
+export function matchCachedStopsToClosedTrades(
+  trades: ClosedTradeForStopSync[],
+  snapshots: StopOrderSnapshot[],
+): { updates: InitialStopLossUpdate[]; skipped: SkippedStopMatch[] } {
+  const updates: InitialStopLossUpdate[] = []
+  const skipped: SkippedStopMatch[] = []
+  const matchedTradeIds = new Set<string>()
+  const orderedSnapshots = [...snapshots]
+    .filter(snapshot => Number.isFinite(Date.parse(snapshot.capturedAt)))
+    .sort((left, right) => Date.parse(left.capturedAt) - Date.parse(right.capturedAt))
+
+  for (const snapshot of orderedSnapshots) {
+    const capturedAt = Date.parse(snapshot.capturedAt)
+    const activeTrades = trades.filter(trade => (
+      trade.stop_loss == null
+      && !matchedTradeIds.has(trade.id)
+      && trade.entry_time != null
+      && trade.exit_time != null
+      && Date.parse(trade.entry_time) <= capturedAt
+      && capturedAt <= Date.parse(trade.exit_time)
+    ))
+    if (activeTrades.length === 0) continue
+
+    const activeOrders = snapshot.orders.filter(order => (
+      ['SUBMITTED', 'PRESUBMITTED'].includes(order.status?.trim().toUpperCase() ?? 'SUBMITTED')
+    ))
+    const matched = matchOpenStopsToTrades(
+      activeTrades,
+      reconcileStopOrderSymbols(activeOrders, activeTrades),
+    )
+
+    for (const update of matched.updates) {
+      if (matchedTradeIds.has(update.tradeId)) continue
+      updates.push(update)
+      matchedTradeIds.add(update.tradeId)
+    }
+  }
+
+  const unmatchedSymbols = [...new Set(trades
+    .filter(trade => trade.stop_loss == null && !matchedTradeIds.has(trade.id))
+    .map(trade => normalizeSymbol(trade.symbol)))]
+  for (const symbol of unmatchedSymbols) {
+    skipped.push({ symbol, reason: 'No unique cached stop was captured while this trade was open' })
   }
 
   return { updates, skipped }

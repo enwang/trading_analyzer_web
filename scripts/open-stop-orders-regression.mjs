@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   buildInitialStopSyncDatabaseUpdate,
   buildStopSyncDatabaseUpdate,
+  matchCachedStopsToClosedTrades,
   matchFilledStopsToClosedTrades,
   matchOpenStopsToTrades,
   reconcileStopOrderSymbols,
@@ -255,6 +256,28 @@ const stop = (orderId, quantity, stopPrice, action = 'SELL', symbol = 'TEAM') =>
   assert.deepEqual(buildStopSyncDatabaseUpdate(movedAboveEntry, 181), {
     current_stop_loss: 181,
   })
+}
+
+{
+  const closedTrade = {
+    ...trade('cached-close', 400, 'long', 'ARM'),
+    entry_price: 279.9,
+    entry_time: '2026-10-08T16:11:05.000Z',
+    exit_time: '2026-10-09T16:48:13.000Z',
+    exit_price: 278.58,
+  }
+  const result = matchCachedStopsToClosedTrades([closedTrade], [
+    {
+      capturedAt: '2026-10-08T16:20:00.000Z',
+      orders: [{ ...stop(21, 400, 278.6, 'SELL', 'ARM'), status: 'SUBMITTED' }],
+    },
+    {
+      capturedAt: '2026-10-08T16:40:00.000Z',
+      orders: [{ ...stop(22, 400, 279.4, 'SELL', 'ARM'), status: 'SUBMITTED' }],
+    },
+  ])
+  assert.equal(result.updates.length, 1)
+  assert.equal(result.updates[0].stopPrice, 278.6)
 }
 
 console.log('Open stop order regression checks passed.')

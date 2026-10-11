@@ -1,6 +1,6 @@
 import http from 'node:http'
 import { execFile } from 'node:child_process'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -10,6 +10,7 @@ import { createClient } from '@supabase/supabase-js'
 import {
   buildInitialStopSyncDatabaseUpdate,
   buildStopSyncDatabaseUpdate,
+  matchCachedStopsToClosedTrades,
   matchFilledStopsToClosedTrades,
   matchOpenStopsToTrades,
   reconcileStopOrderSymbols,
@@ -24,7 +25,32 @@ const DESKTOP_ORDERS_HELPER = process.env.IBKR_DESKTOP_ORDERS_HELPER
     'MacOS',
     'ibkr-desktop-orders',
   )
+const STOP_HISTORY_DIR = join(homedir(), 'Library', 'Application Support', 'Trading Analyzer')
+const STOP_HISTORY_PATH = join(STOP_HISTORY_DIR, 'ibkr-stop-order-history.json')
+const STOP_HISTORY_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
 const execFileAsync = promisify(execFile)
+
+async function readStopHistory() {
+  try {
+    const history = JSON.parse(await readFile(STOP_HISTORY_PATH, 'utf8'))
+    return Array.isArray(history?.snapshots) ? history.snapshots : []
+  } catch {
+    return []
+  }
+}
+
+async function saveStopHistory(snapshots, orders) {
+  const capturedAt = new Date().toISOString()
+  const cutoff = Date.now() - STOP_HISTORY_MAX_AGE_MS
+  const retained = snapshots.filter(snapshot => Date.parse(snapshot?.capturedAt) >= cutoff)
+  retained.push({ capturedAt, orders })
+
+  await mkdir(STOP_HISTORY_DIR, { recursive: true })
+  const temporaryPath = `${STOP_HISTORY_PATH}.${process.pid}.tmp`
+  await writeFile(temporaryPath, JSON.stringify({ version: 1, snapshots: retained }), { mode: 0o600 })
+  await rename(temporaryPath, STOP_HISTORY_PATH)
+  return retained
+}
 
 function isAllowedOrigin(origin) {
   if (origin === 'https://trading-analyzer-web.vercel.app') return true
@@ -153,7 +179,7 @@ async function syncStops(userId) {
 
   if (error) throw new Error(`Could not load open trades: ${error.message}`)
 
-  const recentCutoff = new Date(Date.now() - 96 * 60 * 60 * 1000).toISOString()
+  const recentCutoff = new Date(Date.now() - STOP_HISTORY_MAX_AGE_MS).toISOString()
   const { data: recentClosedTrades, error: closedError } = await supabase
     .from('trades')
     .select('id, symbol, side, shares, entry_time, entry_price, exit_time, exit_price, stop_loss, current_stop_loss, initial_risk_amount')
@@ -169,7 +195,19 @@ async function syncStops(userId) {
     && marketDateKey(trade.entry_time) === marketDateKey(trade.exit_time)
   ))
   const knownSymbols = [...(trades ?? []), ...sameDayClosedTrades].map(trade => trade.symbol)
-  const { orders, scan } = await fetchOpenStopOrders(knownSymbols)
+  let stopHistory = await readStopHistory()
+  let orders = []
+  let scan = null
+  let desktopError
+  try {
+    const desktopResult = await fetchOpenStopOrders(knownSymbols)
+    orders = desktopResult.orders
+    scan = desktopResult.scan
+    stopHistory = await saveStopHistory(stopHistory, orders)
+  } catch (error) {
+    desktopError = error instanceof Error ? error.message : String(error)
+    if (stopHistory.length === 0) throw error
+  }
 
   const activeOrders = reconcileStopOrderSymbols(
     orders.filter(order => ['SUBMITTED', 'PRESUBMITTED'].includes(order.status?.toUpperCase() ?? 'SUBMITTED')),
@@ -222,17 +260,44 @@ async function syncStops(userId) {
     initialSlInitialized += 1
   }
 
-  const warning = scan?.recognizedRows < scan?.expectedRows
+  const filledTradeIds = new Set(filledMatched.updates.map(update => update.tradeId))
+  const cachedClosedTrades = (recentClosedTrades ?? [])
+    .filter(trade => !filledTradeIds.has(trade.id))
+  const cachedMatched = matchCachedStopsToClosedTrades(
+    cachedClosedTrades,
+    stopHistory,
+  )
+  for (const update of cachedMatched.updates) {
+    const trade = cachedClosedTrades.find(candidate => candidate.id === update.tradeId)
+    if (!trade) continue
+    const updatePayload = buildInitialStopSyncDatabaseUpdate(trade, update.stopPrice)
+    const { error: updateError } = await supabase
+      .from('trades')
+      .update(updatePayload)
+      .eq('id', update.tradeId)
+      .eq('user_id', userId)
+      .not('exit_time', 'is', null)
+      .is('stop_loss', null)
+    if (updateError) throw new Error(`Could not initialize ${update.symbol} Initial SL: ${updateError.message}`)
+    updated += 1
+    initialSlInitialized += 1
+  }
+
+  const scanWarning = scan?.recognizedRows < scan?.expectedRows
       ? `IBKR scanned ${scan.pageCount ?? 1} order page(s), but only ${scan.recognizedRows}/${scan.expectedRows} rows were readable.`
       : undefined
+  const warning = [
+    desktopError ? `IBKR Desktop was unavailable; cached stop history was used (${desktopError}).` : null,
+    scanWarning,
+  ].filter(Boolean).join(' ') || undefined
   const result = {
-    source: 'IBKR Desktop',
+    source: desktopError ? 'cached IBKR Desktop history' : 'IBKR Desktop',
     openStopOrders: activeOrders.length,
     filledStopOrders: orders.filter(order => order.status?.toUpperCase() === 'FILLED').length,
     updated,
     unchanged,
     initialSlInitialized,
-    skipped: [...matched.skipped, ...filledMatched.skipped],
+    skipped: [...matched.skipped, ...filledMatched.skipped, ...cachedMatched.skipped],
     scan: scan == null ? undefined : {
       view: scan.view,
       expectedRows: scan.expectedRows,
