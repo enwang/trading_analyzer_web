@@ -4,6 +4,7 @@ const LOCAL_STOP_SYNC_URL = 'http://127.0.0.1:4317/sync-stops'
 
 export type LocalStopSyncResult = {
   available: boolean
+  liveOrdersAvailable?: boolean
   updated: number
   unchanged: number
   initialSlInitialized: number
@@ -14,7 +15,7 @@ export type LocalStopSyncResult = {
 
 export async function syncLocalOpenStopOrders(userId: string): Promise<LocalStopSyncResult> {
   const controller = new AbortController()
-  const timeout = window.setTimeout(() => controller.abort(), 12_000)
+  const timeout = window.setTimeout(() => controller.abort(), 30_000)
 
   try {
     const response = await fetch(LOCAL_STOP_SYNC_URL, {
@@ -38,6 +39,7 @@ export async function syncLocalOpenStopOrders(userId: string): Promise<LocalStop
 
     return {
       available: true,
+      liveOrdersAvailable: body.liveOrdersAvailable ?? !String(body.source ?? '').startsWith('cached '),
       updated: body.updated ?? 0,
       unchanged: body.unchanged ?? 0,
       initialSlInitialized: body.initialSlInitialized ?? 0,
@@ -47,7 +49,7 @@ export async function syncLocalOpenStopOrders(userId: string): Promise<LocalStop
   } catch (error) {
     const message = error instanceof Error && error.name === 'AbortError'
       ? 'Local IBKR stop sync timed out'
-      : 'Local IBKR Desktop bridge is not running'
+      : 'Local IBKR stop bridge is not running'
     return { available: false, updated: 0, unchanged: 0, initialSlInitialized: 0, skipped: [], message }
   } finally {
     window.clearTimeout(timeout)
@@ -56,6 +58,10 @@ export async function syncLocalOpenStopOrders(userId: string): Promise<LocalStop
 
 export function formatLocalStopSync(result: LocalStopSyncResult) {
   if (!result.available) return `Open stops not synced: ${result.message}`
+
+  if (result.liveOrdersAvailable === false) {
+    return `Latest open stops not synced; cached history only${result.initialSlInitialized > 0 ? ` (${result.initialSlInitialized} Initial SL recovered)` : ''}${result.warning ? `. ${result.warning}` : ''}`
+  }
 
   const skippedSymbols = [...new Set(result.skipped.map(item => item.symbol))]
   const skipped = skippedSymbols.length > 0

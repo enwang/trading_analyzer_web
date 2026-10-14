@@ -6,11 +6,9 @@ import { RefreshCw } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { formatLocalStopSync, syncLocalOpenStopOrders } from '@/lib/ibkr/local-stop-sync'
-import { createClient } from '@/lib/supabase/client'
 
 export function OverviewSyncButton() {
   const router = useRouter()
-  const supabase = createClient()
   const [syncing, setSyncing] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [stopMessage, setStopMessage] = useState<string | null>(null)
@@ -20,33 +18,10 @@ export function OverviewSyncButton() {
     setMessage(null)
     setStopMessage(null)
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-
-      if (!user) {
-        setMessage('Not authenticated')
-        return
-      }
-
-      const { data } = await supabase
-        .from('user_settings')
-        .select('ibkr_token, ibkr_query_id')
-        .eq('user_id', user.id)
-        .single()
-
-      const token = data?.ibkr_token?.trim()
-      const queryId = data?.ibkr_query_id?.trim()
-
-      if (!token || !queryId) {
-        setMessage('Save IBKR Flex credentials in Import first')
-        return
-      }
-
       const res = await fetch('/api/ibkr/fetch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token, queryId }),
+        body: JSON.stringify({}),
       })
       const json = await res.json()
       if (!res.ok) {
@@ -58,9 +33,9 @@ export function OverviewSyncButton() {
       setMessage(tradeMessage)
       setSyncing(false)
       router.refresh()
-      window.setTimeout(() => {
+      if (json.userId) window.setTimeout(() => {
         setStopMessage('Syncing open stops in background…')
-        void syncLocalOpenStopOrders(user.id).then(stopSync => {
+        void syncLocalOpenStopOrders(json.userId).then(stopSync => {
           setStopMessage(formatLocalStopSync(stopSync))
           if (stopSync.available && stopSync.updated > 0) router.refresh()
         })

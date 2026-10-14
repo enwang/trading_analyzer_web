@@ -112,16 +112,15 @@ export default function ImportPage() {
       if (!res.ok) {
         setSyncMsg(`Error: ${json.error ?? res.statusText}`)
       } else {
-        const { data: { user } } = await supabase.auth.getUser()
         const tradeMessage = `Synced ${json.upserted} trades (${json.skipped} skipped).`
         setSyncMsg(tradeMessage)
         setSyncing(false)
         setLastSync(new Date().toISOString().slice(0, 10))
         void loadSnapshots()
-        if (user) {
+        if (json.userId) {
           window.setTimeout(() => {
             setStopSyncMsg('Syncing open stops in background…')
-            void syncLocalOpenStopOrders(user.id).then(stopSync => {
+            void syncLocalOpenStopOrders(json.userId).then(stopSync => {
               setStopSyncMsg(formatLocalStopSync(stopSync))
             })
           }, 0)

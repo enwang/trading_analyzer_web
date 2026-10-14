@@ -4,7 +4,7 @@ import { preservedPriceScaleForKnownSplit, scalePreservedPrice } from '@/lib/ibk
 import { createTradeSnapshot, pruneOldSnapshots } from '@/lib/trade-snapshots'
 import { filterOutHidden, loadHiddenTradeKeys } from '@/lib/hidden-trades'
 import { usesStopLossFirstSizing } from '@/lib/market/stop-loss'
-import { NextRequest, NextResponse } from 'next/server'
+import { after, NextRequest, NextResponse } from 'next/server'
 
 type Leg = { action?: string; shares?: number; price?: number; time?: string }
 
@@ -71,23 +71,41 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const token: string = body.token?.trim()
-    const queryId: string = body.queryId?.trim()
+    let token = typeof body.token === 'string' ? body.token.trim() : ''
+    let queryId = typeof body.queryId === 'string' ? body.queryId.trim() : ''
+    if (body.token == null && body.queryId == null) {
+      const { data: settings, error: settingsError } = await supabase
+        .from('user_settings')
+        .select('ibkr_token, ibkr_query_id')
+        .eq('user_id', user.id)
+        .single()
+      if (settingsError && settingsError.code !== 'PGRST116') throw settingsError
+      token = settings?.ibkr_token?.trim() ?? ''
+      queryId = settings?.ibkr_query_id?.trim() ?? ''
+    }
 
     if (!token || !queryId) {
       return NextResponse.json(
-        { error: 'Missing token or queryId' },
+        { error: body.token == null && body.queryId == null
+          ? 'Save IBKR Flex credentials in Import first'
+          : 'Missing token or queryId' },
         { status: 400 }
       )
     }
 
-    const snapshot = await createTradeSnapshot(supabase, user.id, {
-      label: `Before IBKR sync ${new Date().toISOString()}`,
-      reason: 'ibkr-sync',
+    // Fetching the broker report does not mutate website trades. Both tasks can
+    // run together, but the backup must finish before any trade writes start.
+    const [snapshot, { trades, navDaily, navChange, cashTransactions }] = await Promise.all([
+      createTradeSnapshot(supabase, user.id, {
+        label: `Before IBKR sync ${new Date().toISOString()}`,
+        reason: 'ibkr-sync',
+      }),
+      fetchFlexAll(token, queryId),
+    ])
+    after(async () => {
+      try { await pruneOldSnapshots(supabase, user.id) }
+      catch { console.error('IBKR sync: old snapshot cleanup failed') }
     })
-    await pruneOldSnapshots(supabase, user.id)
-
-    const { trades, navDaily, navChange, cashTransactions } = await fetchFlexAll(token, queryId)
 
     if (navDaily.length > 0) {
       await supabase.from('account_nav_daily').upsert(
@@ -110,6 +128,7 @@ export async function POST(request: NextRequest) {
 
     if (!trades.length) {
       return NextResponse.json({
+        userId: user.id,
         upserted: 0,
         skipped: 0,
         navDaily: navDaily.length,
@@ -310,7 +329,7 @@ export async function POST(request: NextRequest) {
       { onConflict: 'user_id' }
     )
 
-    return NextResponse.json({ upserted, skipped, snapshotId: snapshot?.id ?? null })
+    return NextResponse.json({ userId: user.id, upserted, skipped, snapshotId: snapshot?.id ?? null })
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
     return NextResponse.json({ error: msg }, { status: 500 })
