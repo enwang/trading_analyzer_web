@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
   async function timed<T>(name: string, task: () => PromiseLike<T>): Promise<T> {
     const start = performance.now()
     try { return await task() }
-    finally { timings[name] = Math.round(performance.now() - start) }
+    finally { timings[name] = (timings[name] ?? 0) + Math.round(performance.now() - start) }
   }
   function respond(body: Record<string, unknown>, status = 200) {
     timings.total = Math.round(performance.now() - started)
@@ -109,11 +109,22 @@ export async function POST(request: NextRequest) {
 
     // Fetching the broker report does not mutate website trades. Both tasks can
     // run together, but the backup must finish before any trade writes start.
-    const [snapshot, { trades, navDaily, navChange, cashTransactions }] = await Promise.all([
-      timed('snapshot', () => createTradeSnapshot(supabase, user.id, {
-        label: `Before IBKR sync ${new Date().toISOString()}`,
-        reason: 'ibkr-sync',
-      })),
+    const [{ snapshot, existingRows }, { trades, navDaily, navChange, cashTransactions }] = await Promise.all([
+      timed('snapshot', async () => {
+        const { data, error } = await timed('existing', () => supabase
+          .from('trades')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: true }))
+        if (error) throw error
+        const existingRows = data ?? []
+        const snapshot = await timed('snapshot_write', () => createTradeSnapshot(supabase, user.id, {
+          label: `Before IBKR sync ${new Date().toISOString()}`,
+          reason: 'ibkr-sync',
+          trades: existingRows,
+        }))
+        return { snapshot, existingRows }
+      }),
       timed('broker', () => fetchFlexAll(token, queryId, (name, ms) => { timings[name] = ms })),
     ])
     after(async () => {
@@ -121,24 +132,23 @@ export async function POST(request: NextRequest) {
       catch { console.error('IBKR sync: old snapshot cleanup failed') }
     })
 
-    if (navDaily.length > 0) {
-      await timed('nav_daily', () => supabase.from('account_nav_daily').upsert(
-        navDaily.map((r) => ({ ...r, user_id: user.id })),
+    const touchedSymbols = [...new Set(trades.map(r => r.symbol))]
+    // Independent tables and the hidden-trade lookup run concurrently.
+    const [hiddenKeys] = await Promise.all([
+      timed('hidden', () => loadHiddenTradeKeys(supabase, user.id, touchedSymbols)),
+      navDaily.length > 0 ? timed('nav_daily', () => supabase.from('account_nav_daily').upsert(
+        navDaily.map(r => ({ ...r, user_id: user.id })),
         { onConflict: 'user_id,report_date' }
-      ))
-    }
-    if (navChange.length > 0) {
-      await timed('nav_change', () => supabase.from('account_nav_change').upsert(
-        navChange.map((r) => ({ ...r, user_id: user.id })),
+      ).throwOnError()) : Promise.resolve(),
+      navChange.length > 0 ? timed('nav_change', () => supabase.from('account_nav_change').upsert(
+        navChange.map(r => ({ ...r, user_id: user.id })),
         { onConflict: 'user_id,from_date,to_date' }
-      ))
-    }
-    if (cashTransactions.length > 0) {
-      await timed('cash', () => supabase.from('account_cash_transactions').upsert(
-        cashTransactions.map((r) => ({ ...r, user_id: user.id })),
+      ).throwOnError()) : Promise.resolve(),
+      cashTransactions.length > 0 ? timed('cash', () => supabase.from('account_cash_transactions').upsert(
+        cashTransactions.map(r => ({ ...r, user_id: user.id })),
         { onConflict: 'user_id,transaction_ts,amount' }
-      ))
-    }
+      ).throwOnError()) : Promise.resolve(),
+    ])
 
     if (!trades.length) {
       return respond({
@@ -152,21 +162,12 @@ export async function POST(request: NextRequest) {
     }
 
     let rows: UpsertRow[] = trades.map(t => ({ ...t, user_id: user.id, needs_review: false, stop_loss_locked: false }))
-    const touchedSymbols = [...new Set(rows.map(r => r.symbol))]
-
-    const hiddenKeys = await timed('hidden', () => loadHiddenTradeKeys(supabase, user.id, touchedSymbols))
     rows = filterOutHidden(rows, hiddenKeys)
 
     if (touchedSymbols.length > 0) {
       const normalizeTs = (t: string | null | undefined) => t ? t.slice(0, 19) : ''
 
-      // Fetch ALL existing trades (open and closed) to preserve manual fields
-      const { data: existingRows } = await timed('existing', () => supabase
-        .from('trades')
-        .select('symbol, entry_time, exit_time, entry_price, stop_loss, current_stop_loss, stop_loss_locked, initial_risk_amount, r_multiple, setup_tag, notes, needs_review, execution_legs')
-        .eq('user_id', user.id)
-        .in('symbol', touchedSymbols))
-
+      // Reuse the pre-write snapshot rows to preserve manual fields.
       type ExistingRow = { symbol: string; entry_time: string | null; exit_time: string | null; entry_price: number | null; stop_loss: number | null; current_stop_loss: number | null; stop_loss_locked: boolean | null; initial_risk_amount: number | null; r_multiple: number | null; setup_tag: string | null; notes: string | null; needs_review: boolean | null; execution_legs: unknown | null }
       const openRowsBySymbol = new Map<string, ExistingRow[]>()
       for (const existing of existingRows ?? []) {
@@ -323,15 +324,10 @@ export async function POST(request: NextRequest) {
       .from('trades')
       .upsert(rows, { onConflict: 'user_id,symbol,entry_time,exit_time', ignoreDuplicates: false })
       .select('id'))
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
-
+    if (error) return respond({ error: error.message }, 500)
     const upserted = data?.length ?? 0
     const skipped = trades.length - upserted
 
-    // Update last sync date
     await timed('settings_write', () => supabase.from('user_settings').upsert(
       {
         user_id: user.id,
@@ -341,11 +337,11 @@ export async function POST(request: NextRequest) {
         updated_at: new Date().toISOString(),
       },
       { onConflict: 'user_id' }
-    ))
+    ).throwOnError())
 
     return respond({ userId: user.id, upserted, skipped, snapshotId: snapshot?.id ?? null })
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
-    return NextResponse.json({ error: msg }, { status: 500 })
+    return respond({ error: msg }, 500)
   }
 }

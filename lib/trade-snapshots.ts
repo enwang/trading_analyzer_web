@@ -1,10 +1,13 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import type { TradeRow } from '@/types/trade'
 
 type SnapshotReason = 'manual' | 'ibkr-sync' | 'csv-upload' | 'cleanup' | 'restore'
 
 interface CreateTradeSnapshotOptions {
   label?: string
   reason?: SnapshotReason
+  /** Reuse rows already read for this user before any mutations. */
+  trades?: TradeRow[]
 }
 
 export async function createTradeSnapshot(
@@ -12,15 +15,17 @@ export async function createTradeSnapshot(
   userId: string,
   options: CreateTradeSnapshotOptions = {}
 ) {
-  const { data: trades, error: tradesError } = await supabase
-    .from('trades')
-    .select('*')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: true })
+  let rows = options.trades
+  if (rows === undefined) {
+    const { data: trades, error: tradesError } = await supabase
+      .from('trades')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true })
+    if (tradesError) throw tradesError
+    rows = trades ?? []
+  }
 
-  if (tradesError) throw tradesError
-
-  const rows = trades ?? []
   const now = new Date().toISOString()
   const label = options.label ?? `Trades snapshot ${now}`
   const reason = options.reason ?? 'manual'
