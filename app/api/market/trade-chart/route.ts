@@ -180,6 +180,57 @@ async function fetchDailyContext(symbol: string, period1: number, period2: numbe
   }
 }
 
+interface PolygonAggResponse {
+  results?: Array<{ t: number; o: number; h: number; l: number; c: number; v?: number }>
+}
+
+const ET_TIME_FORMATTER = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute: '2-digit',
+})
+
+function isRegularSessionBar(timeSec: number): boolean {
+  let hour = 0
+  let minute = 0
+  for (const part of ET_TIME_FORMATTER.formatToParts(new Date(timeSec * 1000))) {
+    if (part.type === 'hour') hour = Number(part.value) % 24
+    if (part.type === 'minute') minute = Number(part.value)
+  }
+  const mins = hour * 60 + minute
+  return mins >= 570 && mins < 960 // 09:30–16:00 ET
+}
+
+// Polygon (now Massive) keeps years of 5-minute bars, unlike Yahoo's ~60 days.
+// Returns null on any failure so callers fall back to the Yahoo path.
+async function fetchPolygonCandles(symbol: string, period1Sec: number, period2Sec: number): Promise<Candle[] | null> {
+  const apiKey = process.env.POLYGON_API_KEY
+  if (!apiKey) return null
+  const ticker = encodeURIComponent(symbol.replace(/-/g, '.'))
+  const fromMs = period1Sec * 1000
+  const toMs = period2Sec * 1000
+  for (const host of ['api.massive.com', 'api.polygon.io']) {
+    try {
+      const url = `https://${host}/v2/aggs/ticker/${ticker}/range/5/minute/${fromMs}/${toMs}?adjusted=true&sort=asc&limit=50000&apiKey=${apiKey}`
+      const response = await fetch(url, { cache: 'no-store' })
+      if (!response.ok) continue
+      const payload = (await response.json()) as PolygonAggResponse
+      const results = payload.results ?? []
+      if (results.length === 0) continue
+      const candles = results
+        .map((bar) => {
+          const { o: open, h: high, l: low, c: close } = bar
+          if ([open, high, low, close].some((v) => v == null || !Number.isFinite(v))) return null
+          return { time: Math.floor(bar.t / 1000), open, high, low, close, volume: bar.v ?? null }
+        })
+        .filter((c): c is Candle => c != null)
+        .filter((c) => isRegularSessionBar(c.time))
+      if (candles.length > 0) return candles
+    } catch {
+      // try the next host
+    }
+  }
+  return null
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const symbol    = searchParams.get('symbol')
@@ -239,7 +290,7 @@ export async function GET(request: Request) {
   }
 
   period1 = clampPeriod1ForRequestedInterval(period1, requiredStartMs, timeframe)
-  const interval = pickInterval(spanMs, period1 * 1000, timeframe)
+  let interval = pickInterval(spanMs, period1 * 1000, timeframe)
 
   // For 1D charts on closed trades: cap period2 at end of exit calendar day + 5 extra days
   // so the post-trade trend is visible (was 2 days previously).
@@ -248,38 +299,49 @@ export async function GET(request: Request) {
     period2 = Math.min(period2, exitNextDayStartSec + 5 * 86400)
   }
 
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&period1=${period1}&period2=${period2}&includePrePost=false`
+  // Polygon (Massive) backfill: Yahoo only keeps 5-minute bars for ~60 days,
+  // so when the trade itself is older than that and a Polygon key is
+  // configured, serve true 5m candles from Polygon instead of downgrading.
+  let candles: Candle[] | null = null
+  if (timeframe === '5m' && requiredStartMs < Date.now() - AGE_5M && process.env.POLYGON_API_KEY) {
+    candles = await fetchPolygonCandles(symbol, period1, period2)
+    if (candles) interval = '5m'
+  }
+
   const dailyContextPromise = interval === '1d' || interval === '1wk'
     ? null
     : fetchDailyContext(symbol, period1, period2)
 
-  let response: Response
-  try {
-    response = await fetch(url, { cache: 'no-store' })
-  } catch {
-    return NextResponse.json({ error: 'Failed to fetch market chart data' }, { status: 502 })
-  }
+  if (!candles) {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&period1=${period1}&period2=${period2}&includePrePost=false`
 
-  if (!response.ok) {
-    return NextResponse.json({ error: 'Market data source error' }, { status: 502 })
-  }
+    let response: Response
+    try {
+      response = await fetch(url, { cache: 'no-store' })
+    } catch {
+      return NextResponse.json({ error: 'Failed to fetch market chart data' }, { status: 502 })
+    }
 
-  const payload    = (await response.json()) as YahooChartResponse
-  const result     = payload.chart?.result?.[0]
-  const timestamps = result?.timestamp ?? []
-  const quote      = result?.indicators?.quote?.[0]
+    if (!response.ok) {
+      return NextResponse.json({ error: 'Market data source error' }, { status: 502 })
+    }
 
-  if (timestamps.length === 0) {
-    return NextResponse.json({ error: 'No chart candles available' }, { status: 404 })
-  }
+    const payload    = (await response.json()) as YahooChartResponse
+    const result     = payload.chart?.result?.[0]
+    const timestamps = result?.timestamp ?? []
+    const quote      = result?.indicators?.quote?.[0]
 
-  const opens   = quote?.open   ?? []
-  const highs   = quote?.high   ?? []
-  const lows    = quote?.low    ?? []
-  const closes  = quote?.close  ?? []
-  const volumes = quote?.volume ?? []
+    if (timestamps.length === 0) {
+      return NextResponse.json({ error: 'No chart candles available' }, { status: 404 })
+    }
 
-  let candles = timestamps
+    const opens   = quote?.open   ?? []
+    const highs   = quote?.high   ?? []
+    const lows    = quote?.low    ?? []
+    const closes  = quote?.close  ?? []
+    const volumes = quote?.volume ?? []
+
+    candles = timestamps
     .map((tsSec, i) => {
       const open  = opens[i];  const high = highs[i]
       const low   = lows[i];   const close = closes[i]
@@ -324,7 +386,8 @@ export async function GET(request: Request) {
 
   // Repair corrupt volume values (Yahoo sometimes returns placeholder values like 745).
   // Re-fetches the affected days at 1h resolution and sums hourly volumes.
-  candles = await repairCorruptVolume(symbol, candles)
+    candles = await repairCorruptVolume(symbol, candles)
+  }
   const dailyCandles = dailyContextPromise ? await dailyContextPromise : candles
 
   const visiblePreMs = Math.max(spanMs * 0.8, Math.floor(lookbackMs * 0.6))
