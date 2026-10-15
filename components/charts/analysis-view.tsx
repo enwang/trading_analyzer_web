@@ -430,7 +430,7 @@ function buildPnlDistribution(trades: ClosedTrade[]) {
   return { buckets, total: valid.length }
 }
 
-function PnlDistributionCard({ trades, timeZone }: { trades: ClosedTrade[]; timeZone: string }) {
+function PnlDistributionCard({ trades, timeZone, monthKey, range }: { trades: ClosedTrade[]; timeZone: string; monthKey: string | null; range: DateRangeKey }) {
   const [mode, setMode] = useState<DistributionMode>('pnl')
   const [selectedLabel, setSelectedLabel] = useState<string | null>(null)
   const distribution = useMemo(() => buildPnlDistribution(trades), [trades])
@@ -439,6 +439,14 @@ function PnlDistributionCard({ trades, timeZone }: { trades: ClosedTrade[]; time
     if (!selectedBucket) return [] as ClosedTrade[]
     return [...selectedBucket.trades].sort((a, b) => (b.exitTime ?? '').localeCompare(a.exitTime ?? ''))
   }, [selectedBucket])
+  // Carry the current analysis view into trade detail links so the detail
+  // page's "Back to Analysis" returns to the same month / range.
+  const tradeHref = (id: string) => {
+    const params = new URLSearchParams({ from: 'analysis' })
+    if (monthKey) params.set('month', monthKey)
+    else if (range !== 'All') params.set('range', range)
+    return `/trades/${id}?${params.toString()}`
+  }
   const maxCount = niceCeil(Math.max(1, ...distribution.buckets.map((bucket) => bucket.count)))
   const maxTotalPnl = niceCeil(Math.max(1, ...distribution.buckets.map((bucket) => Math.abs(bucket.totalPnl))))
   const yMax = mode === 'count' ? maxCount : maxTotalPnl
@@ -585,7 +593,7 @@ function PnlDistributionCard({ trades, timeZone }: { trades: ClosedTrade[]; time
                   {selectedTrades.map((t) => (
                     <TableRow key={t.id}>
                       <TableCell className="font-medium">
-                        <Link href={`/trades/${t.id}?from=analysis`} className="hover:underline">
+                        <Link href={tradeHref(t.id)} className="hover:underline">
                           {t.symbol}
                         </Link>
                       </TableCell>
@@ -764,10 +772,18 @@ function buildDayTrends(
 
 export function AnalysisView({ data }: { data: AnalysisData }) {
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
-  const [expandedDay, setExpandedDay] = useState<string | null>(null)
-  const [range, setRange] = useState<DateRangeKey>('All')
-  const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null)
   const searchParams = useSearchParams()
+  // Restore the view the user came back to (e.g. via a trade detail's
+  // "Back to Analysis" link, which carries ?month= / ?range=).
+  const monthParam = searchParams.get('month')
+  const initialMonthKey = monthParam && /^\d{4}-\d{2}$/.test(monthParam) ? monthParam : null
+  const rangeParam = searchParams.get('range')
+  const initialRange: DateRangeKey = (DATE_RANGES as readonly string[]).includes(rangeParam ?? '')
+    ? (rangeParam as DateRangeKey)
+    : 'All'
+  const [expandedDay, setExpandedDay] = useState<string | null>(null)
+  const [range, setRange] = useState<DateRangeKey>(initialRange)
+  const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(initialMonthKey)
   const today = new Date().toLocaleDateString('en-CA')
   const startDate = getStartDate(range)
   const dateFrom = startDate ?? ''
@@ -923,7 +939,7 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
       <TabsContent value="summary" className="space-y-4">
         <SummaryGrid summary={filteredSummaryData.summary} />
 
-        <PnlDistributionCard trades={summaryTrades} timeZone={timeZone} />
+        <PnlDistributionCard trades={summaryTrades} timeZone={timeZone} monthKey={selectedMonthKey} range={range} />
 
         <div className="grid gap-4 xl:grid-cols-2">
           <MetricChartCard

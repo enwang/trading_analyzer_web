@@ -6,6 +6,7 @@ import { getAuthenticatedUserId } from '@/lib/auth/user'
 import { rowToTrade } from '@/types/trade'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { DATE_RANGES } from '@/lib/date-range'
 import { BackToTradesButton } from '@/components/trades/back-to-trades-button'
 import { TradeDetailTabs } from '@/components/trades/trade-detail-tabs'
 import { TradeChart } from '@/components/trades/trade-chart'
@@ -119,12 +120,14 @@ export default async function TradeDetailsPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ view?: string; date?: string; sort?: string; dir?: string; from?: string; r?: string; q?: string; symbol?: string; tz?: string }>
+  searchParams: Promise<{ view?: string; date?: string; sort?: string; dir?: string; from?: string; r?: string; q?: string; symbol?: string; tz?: string; month?: string; range?: string }>
 }) {
   const { id } = await params
-  const { view, date, sort, dir, from, r: rParam, q, symbol, tz } = await searchParams
+  const { view, date, sort, dir, from, r: rParam, q, symbol, tz, month, range } = await searchParams
   const fromOverview = from === 'overview'
   const fromAnalysis = from === 'analysis'
+  const safeMonth = month && /^\d{4}-\d{2}$/.test(month) ? month : null
+  const safeRange = range && (DATE_RANGES as readonly string[]).includes(range) ? range : null
   const safeView = view === 'all' || view === 'win' || view === 'loss' || view === 'open' || view === 'marked' || view === 'lastweek'
     ? view
     : null
@@ -143,7 +146,7 @@ export default async function TradeDetailsPage({
   const backHref = fromOverview
     ? '/overview'
     : fromAnalysis
-      ? '/analysis'
+      ? (safeMonth ? `/analysis?month=${safeMonth}` : safeRange ? `/analysis?range=${safeRange}` : '/analysis')
       : (backParams.toString() ? `/trades?${backParams.toString()}` : '/trades')
   const backLabel = fromOverview ? 'Back to Overview' : fromAnalysis ? 'Back to Analysis' : 'Back to Trades'
   const supabase = await createClient()
