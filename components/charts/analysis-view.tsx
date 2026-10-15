@@ -1,7 +1,7 @@
 'use client'
 
 import type React from 'react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import {
@@ -782,30 +782,34 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
     ? (rangeParam as DateRangeKey)
     : 'All'
   const [expandedDay, setExpandedDay] = useState<string | null>(null)
-  // URL params win; otherwise restore the last view of this session, so
-  // returning to Analysis via ANY path (sidebar, a detour through the
-  // trades list, a plain back link) keeps the month/range being analyzed.
-  const [range, setRange] = useState<DateRangeKey>(() => {
-    if (rangeParam) return initialRange
-    try {
-      const saved = window.sessionStorage.getItem('analysis-range')
-      return (DATE_RANGES as readonly string[]).includes(saved ?? '') ? (saved as DateRangeKey) : initialRange
-    } catch { return initialRange }
-  })
-  const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(() => {
-    if (monthParam) return initialMonthKey
-    try {
-      const saved = window.sessionStorage.getItem('analysis-month')
-      return saved && /^\d{4}-\d{2}$/.test(saved) ? saved : null
-    } catch { return null }
-  })
+  const [range, setRange] = useState<DateRangeKey>(initialRange)
+  const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(initialMonthKey)
+  // Restore the last view of this session AFTER mount, so returning to
+  // Analysis via any path (sidebar, a detour through the trades list, a
+  // plain back link) keeps the month/range being analyzed. Reading
+  // sessionStorage in the state initializer instead would diverge from
+  // the server render and force a full client re-render on hydration.
+  // URL params (?month= / ?range= from a trade detail's back link) win.
+  const restoredRef = useRef(false)
   useEffect(() => {
+    if (!restoredRef.current) {
+      restoredRef.current = true
+      if (!monthParam && !rangeParam) {
+        try {
+          const savedMonth = window.sessionStorage.getItem('analysis-month')
+          if (savedMonth && /^\d{4}-\d{2}$/.test(savedMonth)) setSelectedMonthKey(savedMonth)
+          const savedRange = window.sessionStorage.getItem('analysis-range')
+          if ((DATE_RANGES as readonly string[]).includes(savedRange ?? '')) setRange(savedRange as DateRangeKey)
+        } catch { /* sessionStorage unavailable */ }
+        return
+      }
+    }
     try {
       if (selectedMonthKey) window.sessionStorage.setItem('analysis-month', selectedMonthKey)
       else window.sessionStorage.removeItem('analysis-month')
       window.sessionStorage.setItem('analysis-range', range)
     } catch { /* sessionStorage unavailable */ }
-  }, [range, selectedMonthKey])
+  }, [range, selectedMonthKey, monthParam, rangeParam])
   const today = new Date().toLocaleDateString('en-CA')
   const startDate = getStartDate(range)
   const dateFrom = startDate ?? ''
