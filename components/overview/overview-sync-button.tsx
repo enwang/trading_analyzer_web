@@ -9,11 +9,14 @@ import { formatLocalStopSync, syncLocalOpenStopOrders } from '@/lib/ibkr/local-s
 
 export function OverviewSyncButton() {
   const router = useRouter()
+  const [timings, setTimings] = useState<Record<string, number> | null>(null)
   const [syncing, setSyncing] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [stopMessage, setStopMessage] = useState<string | null>(null)
 
   async function syncNow() {
+    const started = performance.now()
+    setTimings(null)
     setSyncing(true)
     setMessage(null)
     setStopMessage(null)
@@ -24,6 +27,7 @@ export function OverviewSyncButton() {
         body: JSON.stringify({}),
       })
       const json = await res.json()
+      setTimings({ ...json.timings, client_total: Math.round(performance.now() - started) })
       if (!res.ok) {
         setMessage(json?.error ?? 'Sync failed')
         return
@@ -48,7 +52,7 @@ export function OverviewSyncButton() {
   }
 
   return (
-    <div className="flex flex-col items-end gap-1">
+    <div className="flex flex-col items-end gap-1" data-sync-timings={timings ? JSON.stringify(timings) : undefined}>
       <div className="flex gap-2">
         <Button size="sm" onClick={syncNow} disabled={syncing}>
           <RefreshCw className={`size-4 ${syncing ? 'animate-spin' : ''}`} />

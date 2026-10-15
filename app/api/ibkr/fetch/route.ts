@@ -60,11 +60,25 @@ type UpsertRow = {
 } & Record<string, unknown>
 
 export async function POST(request: NextRequest) {
+  const started = performance.now()
+  const timings: Record<string, number> = {}
+  async function timed<T>(name: string, task: () => PromiseLike<T>): Promise<T> {
+    const start = performance.now()
+    try { return await task() }
+    finally { timings[name] = Math.round(performance.now() - start) }
+  }
+  function respond(body: Record<string, unknown>, status = 200) {
+    timings.total = Math.round(performance.now() - started)
+    return NextResponse.json({ ...body, timings }, {
+      status,
+      headers: { 'Server-Timing': Object.entries(timings).map(([name, ms]) => `${name};dur=${ms}`).join(', ') },
+    })
+  }
   try {
     const supabase = await createClient()
     const {
       data: { user },
-    } = await supabase.auth.getUser()
+    } = await timed('auth', () => supabase.auth.getUser())
 
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -74,11 +88,11 @@ export async function POST(request: NextRequest) {
     let token = typeof body.token === 'string' ? body.token.trim() : ''
     let queryId = typeof body.queryId === 'string' ? body.queryId.trim() : ''
     if (body.token == null && body.queryId == null) {
-      const { data: settings, error: settingsError } = await supabase
+      const { data: settings, error: settingsError } = await timed('settings', () => supabase
         .from('user_settings')
         .select('ibkr_token, ibkr_query_id')
         .eq('user_id', user.id)
-        .single()
+        .single())
       if (settingsError && settingsError.code !== 'PGRST116') throw settingsError
       token = settings?.ibkr_token?.trim() ?? ''
       queryId = settings?.ibkr_query_id?.trim() ?? ''
@@ -96,11 +110,11 @@ export async function POST(request: NextRequest) {
     // Fetching the broker report does not mutate website trades. Both tasks can
     // run together, but the backup must finish before any trade writes start.
     const [snapshot, { trades, navDaily, navChange, cashTransactions }] = await Promise.all([
-      createTradeSnapshot(supabase, user.id, {
+      timed('snapshot', () => createTradeSnapshot(supabase, user.id, {
         label: `Before IBKR sync ${new Date().toISOString()}`,
         reason: 'ibkr-sync',
-      }),
-      fetchFlexAll(token, queryId),
+      })),
+      timed('broker', () => fetchFlexAll(token, queryId, (name, ms) => { timings[name] = ms })),
     ])
     after(async () => {
       try { await pruneOldSnapshots(supabase, user.id) }
@@ -108,26 +122,26 @@ export async function POST(request: NextRequest) {
     })
 
     if (navDaily.length > 0) {
-      await supabase.from('account_nav_daily').upsert(
+      await timed('nav_daily', () => supabase.from('account_nav_daily').upsert(
         navDaily.map((r) => ({ ...r, user_id: user.id })),
         { onConflict: 'user_id,report_date' }
-      )
+      ))
     }
     if (navChange.length > 0) {
-      await supabase.from('account_nav_change').upsert(
+      await timed('nav_change', () => supabase.from('account_nav_change').upsert(
         navChange.map((r) => ({ ...r, user_id: user.id })),
         { onConflict: 'user_id,from_date,to_date' }
-      )
+      ))
     }
     if (cashTransactions.length > 0) {
-      await supabase.from('account_cash_transactions').upsert(
+      await timed('cash', () => supabase.from('account_cash_transactions').upsert(
         cashTransactions.map((r) => ({ ...r, user_id: user.id })),
         { onConflict: 'user_id,transaction_ts,amount' }
-      )
+      ))
     }
 
     if (!trades.length) {
-      return NextResponse.json({
+      return respond({
         userId: user.id,
         upserted: 0,
         skipped: 0,
@@ -140,18 +154,18 @@ export async function POST(request: NextRequest) {
     let rows: UpsertRow[] = trades.map(t => ({ ...t, user_id: user.id, needs_review: false, stop_loss_locked: false }))
     const touchedSymbols = [...new Set(rows.map(r => r.symbol))]
 
-    const hiddenKeys = await loadHiddenTradeKeys(supabase, user.id, touchedSymbols)
+    const hiddenKeys = await timed('hidden', () => loadHiddenTradeKeys(supabase, user.id, touchedSymbols))
     rows = filterOutHidden(rows, hiddenKeys)
 
     if (touchedSymbols.length > 0) {
       const normalizeTs = (t: string | null | undefined) => t ? t.slice(0, 19) : ''
 
       // Fetch ALL existing trades (open and closed) to preserve manual fields
-      const { data: existingRows } = await supabase
+      const { data: existingRows } = await timed('existing', () => supabase
         .from('trades')
         .select('symbol, entry_time, exit_time, entry_price, stop_loss, current_stop_loss, stop_loss_locked, initial_risk_amount, r_multiple, setup_tag, notes, needs_review, execution_legs')
         .eq('user_id', user.id)
-        .in('symbol', touchedSymbols)
+        .in('symbol', touchedSymbols))
 
       type ExistingRow = { symbol: string; entry_time: string | null; exit_time: string | null; entry_price: number | null; stop_loss: number | null; current_stop_loss: number | null; stop_loss_locked: boolean | null; initial_risk_amount: number | null; r_multiple: number | null; setup_tag: string | null; notes: string | null; needs_review: boolean | null; execution_legs: unknown | null }
       const openRowsBySymbol = new Map<string, ExistingRow[]>()
@@ -281,12 +295,12 @@ export async function POST(request: NextRequest) {
       )]
       const symbolsToDeleteOpen = [...new Set([...symbolsWithNewOpenSet, ...symbolsThatJustClosed])]
       if (symbolsToDeleteOpen.length > 0) {
-        await supabase
+        await timed('delete_open', () => supabase
           .from('trades')
           .delete()
           .eq('user_id', user.id)
           .is('exit_time', null)
-          .in('symbol', symbolsToDeleteOpen)
+          .in('symbol', symbolsToDeleteOpen))
       }
 
       // Clean up stale partial-exit rows: for each incoming open position, delete any
@@ -295,20 +309,20 @@ export async function POST(request: NextRequest) {
       // recorded as separate closed rows instead of being absorbed into the open trade.
       const incomingOpenRows = rows.filter(r => r.exit_time == null && r.entry_time)
       for (const openRow of incomingOpenRows) {
-        await supabase
+        await timed('delete_partial', () => supabase
           .from('trades')
           .delete()
           .eq('user_id', user.id)
           .eq('symbol', openRow.symbol as string)
           .eq('entry_time', openRow.entry_time as string)
-          .not('exit_time', 'is', null)
+          .not('exit_time', 'is', null))
       }
     }
 
-    const { error, data } = await supabase
+    const { error, data } = await timed('trades_write', () => supabase
       .from('trades')
       .upsert(rows, { onConflict: 'user_id,symbol,entry_time,exit_time', ignoreDuplicates: false })
-      .select('id')
+      .select('id'))
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })
@@ -318,7 +332,7 @@ export async function POST(request: NextRequest) {
     const skipped = trades.length - upserted
 
     // Update last sync date
-    await supabase.from('user_settings').upsert(
+    await timed('settings_write', () => supabase.from('user_settings').upsert(
       {
         user_id: user.id,
         ibkr_token: token,
@@ -327,9 +341,9 @@ export async function POST(request: NextRequest) {
         updated_at: new Date().toISOString(),
       },
       { onConflict: 'user_id' }
-    )
+    ))
 
-    return NextResponse.json({ userId: user.id, upserted, skipped, snapshotId: snapshot?.id ?? null })
+    return respond({ userId: user.id, upserted, skipped, snapshotId: snapshot?.id ?? null })
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
     return NextResponse.json({ error: msg }, { status: 500 })

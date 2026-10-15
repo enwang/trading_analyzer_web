@@ -71,15 +71,22 @@ export async function fetchFlexTrades(
 
 export async function fetchFlexAll(
   token: string,
-  queryId: string
+  queryId: string,
+  onTiming?: (name: string, ms: number) => void
 ): Promise<FlexExtract> {
+  let phaseStart = performance.now()
   const { refCode, dlUrl } = await sendRequest(token, queryId)
+  onTiming?.('broker_request', Math.round(performance.now() - phaseStart))
+  phaseStart = performance.now()
   const raw = await pollAndDownload(token, refCode, dlUrl)
+  onTiming?.('broker_download', Math.round(performance.now() - phaseStart))
+  phaseStart = performance.now()
   const trimmed = raw.trimStart()
-  if (trimmed.startsWith('<')) {
-    return { trades: parseXml(raw), navDaily: [], navChange: [], cashTransactions: [] }
-  }
-  return extractFlexCsv(raw)
+  const result = trimmed.startsWith('<')
+    ? { trades: parseXml(raw), navDaily: [], navChange: [], cashTransactions: [] }
+    : extractFlexCsv(raw)
+  onTiming?.('broker_parse', Math.round(performance.now() - phaseStart))
+  return result
 }
 
 export async function fetchFlexRaw(token: string, queryId: string): Promise<string> {
