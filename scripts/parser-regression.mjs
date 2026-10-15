@@ -7,13 +7,15 @@ function fail(message) {
   process.exit(1)
 }
 
+// mytrade.csv is a local, gitignored real-account export. When it is absent
+// (any fresh clone), skip the real-data assertions and still run every inline
+// synthetic case below — same pattern as sync-open-trades-regression.mjs.
 const csvPath = './mytrade.csv'
-if (!fs.existsSync(csvPath)) {
-  fail(`missing ${csvPath}`)
+const hasCsv = fs.existsSync(csvPath)
+if (!hasCsv) {
+  console.log(`parser-regression: SKIP ${csvPath} checks (file not present)`)
 }
-
-const csv = fs.readFileSync(csvPath, 'utf8')
-const trades = parseFlexCsv(csv)
+const trades = hasCsv ? parseFlexCsv(fs.readFileSync(csvPath, 'utf8')) : []
 
 const navStatement = parseFlexStatement(`ClientAccountID,CurrencyPrimary,FromDate,ToDate,StartingValue,EndingValue,DepositsWithdrawals,TWR
 U123,USD,2026-01-01,2026-09-18,437549.39,530159.01,50000,8.31%
@@ -22,6 +24,7 @@ if (navStatement.navChange.length !== 1 || navStatement.navChange[0].twr !== 8.3
   fail(`expected IBKR TWR 8.31, got ${JSON.stringify(navStatement.navChange)}`)
 }
 
+if (hasCsv) {
 const wins = trades.filter((t) => t.outcome === 'win').length
 if (wins !== 12) {
   fail(`expected 12 winners, got ${wins}`)
@@ -115,6 +118,7 @@ if (!asmlOpen) {
 if ((asmlOpen.shares ?? 0) !== 30) {
   fail(`expected open ASML shares = 30, got ${asmlOpen.shares}`)
 }
+} // end mytrade.csv real-data checks
 
 const multiLotOpenCsv = `Open/CloseIndicator,Symbol,Quantity,Date/Time,Open Date/Time,Buy/Sell,T. Price,Basis
 O,AAOI,100,2026-03-01 09:30:00,,BUY,10,

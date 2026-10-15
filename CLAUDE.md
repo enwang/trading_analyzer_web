@@ -11,6 +11,8 @@ npm run test:parser-regression
 Minimum required check (for current `mytrade.csv`):
 - Winners count must be exactly `12`.
 
+`mytrade.csv` is a local, gitignored fixture; when it is absent the script skips the real-data checks and still runs all inline synthetic cases.
+
 ## UI Verification Rule
 
 For UI-related fixes or regressions, verify the actual behavior with browser MCP before claiming the issue is fixed.
