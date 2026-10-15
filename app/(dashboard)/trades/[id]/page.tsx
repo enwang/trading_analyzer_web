@@ -122,6 +122,7 @@ export default async function TradeDetailsPage({
   const { id } = await params
   const { view, date, sort, dir, from, r: rParam, q, symbol, tz } = await searchParams
   const fromOverview = from === 'overview'
+  const fromAnalysis = from === 'analysis'
   const safeView = view === 'all' || view === 'win' || view === 'loss' || view === 'open' || view === 'marked' || view === 'lastweek'
     ? view
     : null
@@ -139,7 +140,9 @@ export default async function TradeDetailsPage({
   if (dir === 'asc' || dir === 'desc') backParams.set('dir', dir)
   const backHref = fromOverview
     ? '/overview'
-    : (backParams.toString() ? `/trades?${backParams.toString()}` : '/trades')
+    : fromAnalysis
+      ? '/analysis'
+      : (backParams.toString() ? `/trades?${backParams.toString()}` : '/trades')
   const supabase = await createClient()
   const userId = await getAuthenticatedUserId()
 

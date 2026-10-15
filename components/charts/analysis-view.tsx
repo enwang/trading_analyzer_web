@@ -342,6 +342,7 @@ type PnlDistributionBucket = {
   signedCount: number
   totalPnl: number
   signedTotalPnl: number
+  trades: ClosedTrade[]
 }
 
 type DistributionMode = 'count' | 'pnl'
@@ -360,13 +361,13 @@ function niceCeil(value: number) {
   return niceNormalized * magnitude
 }
 
-function buildSideBuckets(values: number[]) {
-  if (!values.length) return [] as PnlDistributionBucket[]
+function buildSideBuckets(trades: ClosedTrade[]) {
+  if (!trades.length) return [] as PnlDistributionBucket[]
 
   const step = 1000
-  const sorted = [...values].sort((a, b) => a - b)
-  const minValue = sorted[0]
-  const maxValue = sorted[sorted.length - 1]
+  const sorted = [...trades].sort((a, b) => a.pnl - b.pnl)
+  const minValue = sorted[0].pnl
+  const maxValue = sorted[sorted.length - 1].pnl
   const minRange = Math.floor(minValue / step) * step
   const maxRange = Math.ceil(maxValue / step) * step || step
   const bucketMap = new Map<number, PnlDistributionBucket>()
@@ -381,10 +382,12 @@ function buildSideBuckets(values: number[]) {
       signedCount: 0,
       totalPnl: 0,
       signedTotalPnl: 0,
+      trades: [],
     })
   }
 
-  for (const value of values) {
+  for (const trade of sorted) {
+    const value = trade.pnl
     const min = value < 0 && value % step === 0
       ? value
       : Math.floor(value / step) * step
@@ -394,20 +397,21 @@ function buildSideBuckets(values: number[]) {
     bucket.signedCount = bucket.max <= 0 ? -bucket.count : bucket.count
     bucket.totalPnl += value
     bucket.signedTotalPnl = bucket.totalPnl
+    bucket.trades.push(trade)
   }
 
   return Array.from(bucketMap.values()).filter((bucket) => bucket.count > 0)
 }
 
 function buildPnlDistribution(trades: ClosedTrade[]) {
-  const pnls = trades.map((t) => t.pnl).filter((p) => Number.isFinite(p))
-  if (!pnls.length) {
+  const valid = trades.filter((t) => Number.isFinite(t.pnl))
+  if (!valid.length) {
     return { buckets: [] as PnlDistributionBucket[], total: 0 }
   }
 
-  const losses = pnls.filter((pnl) => pnl < 0)
-  const breakevens = pnls.filter((pnl) => pnl === 0)
-  const wins = pnls.filter((pnl) => pnl > 0)
+  const losses = valid.filter((t) => t.pnl < 0)
+  const breakevens = valid.filter((t) => t.pnl === 0)
+  const wins = valid.filter((t) => t.pnl > 0)
   const buckets = [
     ...buildSideBuckets(losses),
     ...(breakevens.length ? [{
@@ -418,16 +422,23 @@ function buildPnlDistribution(trades: ClosedTrade[]) {
       signedCount: breakevens.length,
       totalPnl: 0,
       signedTotalPnl: 0,
+      trades: breakevens,
     }] : []),
     ...buildSideBuckets(wins),
   ]
 
-  return { buckets, total: pnls.length }
+  return { buckets, total: valid.length }
 }
 
-function PnlDistributionCard({ trades }: { trades: ClosedTrade[] }) {
+function PnlDistributionCard({ trades, timeZone }: { trades: ClosedTrade[]; timeZone: string }) {
   const [mode, setMode] = useState<DistributionMode>('pnl')
+  const [selectedLabel, setSelectedLabel] = useState<string | null>(null)
   const distribution = useMemo(() => buildPnlDistribution(trades), [trades])
+  const selectedBucket = distribution.buckets.find((bucket) => bucket.label === selectedLabel) ?? null
+  const selectedTrades = useMemo(() => {
+    if (!selectedBucket) return [] as ClosedTrade[]
+    return [...selectedBucket.trades].sort((a, b) => (b.exitTime ?? '').localeCompare(a.exitTime ?? ''))
+  }, [selectedBucket])
   const maxCount = niceCeil(Math.max(1, ...distribution.buckets.map((bucket) => bucket.count)))
   const maxTotalPnl = niceCeil(Math.max(1, ...distribution.buckets.map((bucket) => Math.abs(bucket.totalPnl))))
   const yMax = mode === 'count' ? maxCount : maxTotalPnl
@@ -448,7 +459,7 @@ function PnlDistributionCard({ trades }: { trades: ClosedTrade[] }) {
           <div>
             <div className="text-sm font-medium">P&L Distribution</div>
             <div className="text-muted-foreground text-xs">
-              {distribution.total} closed trades · {mode === 'count' ? 'by trade count' : 'by total P&L'}
+              {distribution.total} closed trades · {mode === 'count' ? 'by trade count' : 'by total P&L'} · click a bar to see its trades
             </div>
           </div>
           <div className="inline-flex rounded-md border bg-background p-0.5">
@@ -470,7 +481,17 @@ function PnlDistributionCard({ trades }: { trades: ClosedTrade[] }) {
         <div className="h-[320px] px-3 py-2">
           {distribution.buckets.length ? (
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={distribution.buckets} margin={{ top: 16, right: 14, left: 6, bottom: 18 }}>
+              <BarChart
+                data={distribution.buckets}
+                margin={{ top: 16, right: 14, left: 6, bottom: 18 }}
+                onClick={(state) => {
+                  const rawIdx = state?.activeTooltipIndex
+                  const idx = typeof rawIdx === 'number' ? rawIdx : Number(rawIdx)
+                  if (!Number.isFinite(idx)) return
+                  const bucket = distribution.buckets[idx]
+                  if (bucket) setSelectedLabel((current) => (current === bucket.label ? null : bucket.label))
+                }}
+              >
                 <CartesianGrid vertical={false} stroke="#f1f5f9" />
                 <XAxis
                   dataKey="label"
@@ -511,11 +532,12 @@ function PnlDistributionCard({ trades }: { trades: ClosedTrade[] }) {
                     )
                   }}
                 />
-                <Bar dataKey={barDataKey} name={mode === 'count' ? 'Trades' : 'Total P&L'} radius={[3, 3, 0, 0]}>
+                <Bar dataKey={barDataKey} name={mode === 'count' ? 'Trades' : 'Total P&L'} radius={[3, 3, 0, 0]} cursor="pointer">
                   {distribution.buckets.map((bucket) => (
                     <Cell
                       key={bucket.label}
                       fill={bucket.min === 0 && bucket.max === 0 ? '#64748b' : bucket.max <= 0 ? '#dc2626' : '#10b981'}
+                      fillOpacity={selectedLabel == null || selectedLabel === bucket.label ? 1 : 0.3}
                     />
                   ))}
                 </Bar>
@@ -527,6 +549,62 @@ function PnlDistributionCard({ trades }: { trades: ClosedTrade[] }) {
             </div>
           )}
         </div>
+
+        {selectedBucket && (
+          <div className="border-t">
+            <div className="flex items-center justify-between gap-3 px-4 py-2.5">
+              <div className="text-sm">
+                <span className="font-medium">{selectedBucket.label}</span>
+                <span className="text-muted-foreground"> · {selectedBucket.count} trades · total </span>
+                <span className={`font-medium ${selectedBucket.totalPnl >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                  {fmtMoney(selectedBucket.totalPnl)}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="rounded p-1 hover:bg-muted"
+                aria-label="Clear bucket selection"
+                onClick={() => setSelectedLabel(null)}
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+            <div className="max-h-72 overflow-y-auto px-4 pb-3">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Symbol</TableHead>
+                    <TableHead>Entry</TableHead>
+                    <TableHead>Exit</TableHead>
+                    <TableHead className="text-right">Shares</TableHead>
+                    <TableHead className="text-right">P&L %</TableHead>
+                    <TableHead className="text-right">Net P&L</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {selectedTrades.map((t) => (
+                    <TableRow key={t.id}>
+                      <TableCell className="font-medium">
+                        <Link href={`/trades/${t.id}?from=analysis`} className="hover:underline">
+                          {t.symbol}
+                        </Link>
+                      </TableCell>
+                      <TableCell>{formatDateCell(t.entryTime, timeZone)}</TableCell>
+                      <TableCell>{formatDateCell(t.exitTime, timeZone)}</TableCell>
+                      <TableCell className="text-right">{formatShares(Math.abs(t.shares))}</TableCell>
+                      <TableCell className={`text-right ${t.pnl >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                        {t.pnlPct != null ? `${(t.pnlPct * 100).toFixed(2)}%` : '—'}
+                      </TableCell>
+                      <TableCell className={`text-right font-medium ${t.pnl >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                        {fmtMoney(t.pnl)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   )
@@ -845,7 +923,7 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
       <TabsContent value="summary" className="space-y-4">
         <SummaryGrid summary={filteredSummaryData.summary} />
 
-        <PnlDistributionCard trades={summaryTrades} />
+        <PnlDistributionCard trades={summaryTrades} timeZone={timeZone} />
 
         <div className="grid gap-4 xl:grid-cols-2">
           <MetricChartCard
