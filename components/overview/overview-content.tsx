@@ -51,6 +51,7 @@ export function OverviewContent({
   qqqReturns,
   soxxReturns,
   arkkReturns,
+  brkbReturns,
 }: {
   trades: Trade[]
   navData: NavRow[]
@@ -60,6 +61,7 @@ export function OverviewContent({
   qqqReturns: BenchmarkRow[]
   soxxReturns: BenchmarkRow[]
   arkkReturns: BenchmarkRow[]
+  brkbReturns: BenchmarkRow[]
 }) {
   const [range, setRange] = useState<DateRangeKey>('YTD')
 
@@ -100,6 +102,7 @@ export function OverviewContent({
   const filteredQqq = useMemo(() => startDate ? rebase(qqqReturns, startDate) : qqqReturns, [qqqReturns, startDate])
   const filteredSoxx = useMemo(() => startDate ? rebase(soxxReturns, startDate) : soxxReturns, [soxxReturns, startDate])
   const filteredArkk = useMemo(() => startDate ? rebase(arkkReturns, startDate) : arkkReturns, [arkkReturns, startDate])
+  const filteredBrkb = useMemo(() => startDate ? rebase(brkbReturns, startDate) : brkbReturns, [brkbReturns, startDate])
 
   const filteredDeposits = useMemo(() => {
     if (!startDate) return cashDeposits
@@ -247,6 +250,7 @@ export function OverviewContent({
               qqq={filteredQqq}
               soxx={filteredSoxx}
               arkk={filteredArkk}
+              brkb={filteredBrkb}
               height={240}
               disableAnchors={range === 'WTD' || range === 'MTD'}
             />

@@ -27,6 +27,7 @@ interface ChartPoint {
   qqqPct?: number
   soxxPct?: number
   arkkPct?: number
+  brkbPct?: number
 }
 
 interface Props {
@@ -37,6 +38,7 @@ interface Props {
   qqq?: BenchmarkRow[]
   soxx?: BenchmarkRow[]
   arkk?: BenchmarkRow[]
+  brkb?: BenchmarkRow[]
   height?: number
   disableAnchors?: boolean
 }
@@ -183,11 +185,12 @@ function computeDailyTWR(
   return points
 }
 
-export function AccountEquityCurve({ data, changes = [], deposits = [], spy = [], qqq = [], soxx = [], arkk = [], height = 240, disableAnchors = false }: Props) {
+export function AccountEquityCurve({ data, changes = [], deposits = [], spy = [], qqq = [], soxx = [], arkk = [], brkb = [], height = 240, disableAnchors = false }: Props) {
   const [showSpy, setShowSpy] = useState(false)
   const [showQqq, setShowQqq] = useState(false)
   const [showSoxx, setShowSoxx] = useState(false)
   const [showArkk, setShowArkk] = useState(false)
+  const [showBrkb, setShowBrkb] = useState(false)
 
   if (!data.length) {
     return (
@@ -212,20 +215,24 @@ export function AccountEquityCurve({ data, changes = [], deposits = [], spy = []
   const qqqMap = new Map(qqq.map(r => [r.date, r.pct]))
   const soxxMap = new Map(soxx.map(r => [r.date, r.pct]))
   const arkkMap = new Map(arkk.map(r => [r.date, r.pct]))
+  const brkbMap = new Map(brkb.map(r => [r.date, r.pct]))
   let lastSpyPct: number | undefined
   let lastQqqPct: number | undefined
   let lastSoxxPct: number | undefined
   let lastArkkPct: number | undefined
+  let lastBrkbPct: number | undefined
   const points: ChartPoint[] = rawPoints.map(p => {
     const spyVal = spyMap.has(p.date) ? spyMap.get(p.date)! : lastSpyPct
     const qqqVal = qqqMap.has(p.date) ? qqqMap.get(p.date)! : lastQqqPct
     const soxxVal = soxxMap.has(p.date) ? soxxMap.get(p.date)! : lastSoxxPct
     const arkkVal = arkkMap.has(p.date) ? arkkMap.get(p.date)! : lastArkkPct
+    const brkbVal = brkbMap.has(p.date) ? brkbMap.get(p.date)! : lastBrkbPct
     if (spyVal !== undefined) lastSpyPct = spyVal
     if (qqqVal !== undefined) lastQqqPct = qqqVal
     if (soxxVal !== undefined) lastSoxxPct = soxxVal
     if (arkkVal !== undefined) lastArkkPct = arkkVal
-    return { ...p, spyPct: spyVal, qqqPct: qqqVal, soxxPct: soxxVal, arkkPct: arkkVal }
+    if (brkbVal !== undefined) lastBrkbPct = brkbVal
+    return { ...p, spyPct: spyVal, qqqPct: qqqVal, soxxPct: soxxVal, arkkPct: arkkVal, brkbPct: brkbVal }
   })
 
   const allPcts = points.map(p => p.pct)
@@ -233,6 +240,7 @@ export function AccountEquityCurve({ data, changes = [], deposits = [], spy = []
   if (showQqq) points.forEach(p => p.qqqPct !== undefined && allPcts.push(p.qqqPct))
   if (showSoxx) points.forEach(p => p.soxxPct !== undefined && allPcts.push(p.soxxPct))
   if (showArkk) points.forEach(p => p.arkkPct !== undefined && allPcts.push(p.arkkPct))
+  if (showBrkb) points.forEach(p => p.brkbPct !== undefined && allPcts.push(p.brkbPct))
   const minPct = Math.min(...allPcts)
   const maxPct = Math.max(...allPcts)
   const lastPct = points[points.length - 1].pct
@@ -240,7 +248,7 @@ export function AccountEquityCurve({ data, changes = [], deposits = [], spy = []
 
   return (
     <div>
-      {(spy.length > 0 || qqq.length > 0 || soxx.length > 0 || arkk.length > 0) && (
+      {(spy.length > 0 || qqq.length > 0 || soxx.length > 0 || arkk.length > 0 || brkb.length > 0) && (
         <div className="mb-2 flex flex-wrap gap-2">
           {spy.length > 0 && (
             <button
@@ -276,6 +284,15 @@ export function AccountEquityCurve({ data, changes = [], deposits = [], spy = []
             >
               <span className="inline-block h-2 w-2 rounded-full" style={{ background: '#06b6d4' }} />
               ARKK
+            </button>
+          )}
+          {brkb.length > 0 && (
+            <button
+              onClick={() => setShowBrkb(v => !v)}
+              className={`flex items-center gap-1.5 rounded px-2 py-0.5 text-xs font-medium border transition-colors ${showBrkb ? 'border-pink-400 bg-pink-50 text-pink-600 dark:bg-pink-950 dark:text-pink-400' : 'border-gray-200 text-gray-400 dark:border-gray-700'}`}
+            >
+              <span className="inline-block h-2 w-2 rounded-full" style={{ background: '#ec4899' }} />
+              BRK.B
             </button>
           )}
         </div>
@@ -318,6 +335,9 @@ export function AccountEquityCurve({ data, changes = [], deposits = [], spy = []
                   )}
                   {showArkk && p.arkkPct !== undefined && (
                     <div style={{ color: '#06b6d4' }}>ARKK {fmtPct(p.arkkPct)}</div>
+                  )}
+                  {showBrkb && p.brkbPct !== undefined && (
+                    <div style={{ color: '#ec4899' }}>BRK.B {fmtPct(p.brkbPct)}</div>
                   )}
                 </div>
               )
@@ -373,6 +393,18 @@ export function AccountEquityCurve({ data, changes = [], deposits = [], spy = []
               type="monotone"
               dataKey="arkkPct"
               stroke="#06b6d4"
+              dot={false}
+              strokeWidth={1.5}
+              strokeDasharray="4 2"
+              activeDot={{ r: 3 }}
+              connectNulls
+            />
+          )}
+          {showBrkb && (
+            <Line
+              type="monotone"
+              dataKey="brkbPct"
+              stroke="#ec4899"
               dot={false}
               strokeWidth={1.5}
               strokeDasharray="4 2"

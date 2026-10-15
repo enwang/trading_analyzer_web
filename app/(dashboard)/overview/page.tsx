@@ -66,11 +66,12 @@ export default async function OverviewPage() {
 
   const navStart = navData.find(r => r.report_date >= '2026-01-01')?.report_date ?? navData[0]?.report_date ?? '2026-01-01'
   const navEnd = navData[navData.length - 1]?.report_date ?? new Date().toISOString().slice(0, 10)
-  const [spyReturns, qqqReturns, soxxReturns, arkkReturns] = await Promise.all([
+  const [spyReturns, qqqReturns, soxxReturns, arkkReturns, brkbReturns] = await Promise.all([
     fetchTickerReturns('SPY', navStart, navEnd),
     fetchTickerReturns('QQQ', navStart, navEnd),
     fetchTickerReturns('SOXX', navStart, navEnd),
     fetchTickerReturns('ARKK', navStart, navEnd),
+    fetchTickerReturns('BRK-B', navStart, navEnd),
   ])
 
   return (
@@ -88,6 +89,7 @@ export default async function OverviewPage() {
         qqqReturns={qqqReturns}
         soxxReturns={soxxReturns}
         arkkReturns={arkkReturns}
+        brkbReturns={brkbReturns}
       />
     </div>
   )
