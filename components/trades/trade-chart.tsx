@@ -96,11 +96,12 @@ function getDefaultTimeframe(entryTime: string | null, exitTime: string | null):
   if (!entryTime) return '1D'
   const entryMs = Date.parse(entryTime)
   if (!Number.isFinite(entryMs)) return '1D'
-  // Held longer than a day (entry→exit, or entry→now while still open) is
-  // a swing trade — default to the daily chart rather than an intraday one.
+  // Held past the entry day (exit on a later market day, or an open trade
+  // now on a later day) is a swing — default to the daily chart rather
+  // than an intraday one, even if the hold was under 24 hours.
   const exitMs = exitTime ? Date.parse(exitTime) : NaN
   const holdEndMs = Number.isFinite(exitMs) ? exitMs : Date.now()
-  if (holdEndMs - entryMs > 86_400_000) return '1D'
+  if (swingMarketDateKey(holdEndMs / 1000) !== swingMarketDateKey(entryMs / 1000)) return '1D'
   return Date.now() - entryMs <= 55 * 86_400_000 ? '5' : '1D'
 }
 
