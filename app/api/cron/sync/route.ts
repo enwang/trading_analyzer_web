@@ -1,3 +1,4 @@
+import { scheduleTradeBackup } from '@/lib/trade-backup'
 import { createClient } from '@supabase/supabase-js'
 import { fetchFlexAll } from '@/lib/ibkr/flex'
 import { preservedPriceScaleForKnownSplit, scalePreservedPrice } from '@/lib/ibkr/stock-splits'
@@ -308,6 +309,7 @@ export async function GET(request: Request) {
         .update(settingsUpdate)
         .eq('user_id', s.user_id)
 
+      scheduleTradeBackup(supabase, s.user_id)
       results.push({
         user_id: s.user_id,
         upserted,

@@ -1,3 +1,4 @@
+import { scheduleTradeBackup } from '@/lib/trade-backup'
 import { NextResponse } from 'next/server'
 
 import { createTradeSnapshot } from '@/lib/trade-snapshots'
@@ -96,6 +97,7 @@ export async function POST() {
       cleanedGroups += 1
     }
 
+    scheduleTradeBackup(supabase, user.id)
     return NextResponse.json({ deleted, groups: cleanedGroups, snapshotId: snapshot?.id ?? null })
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)

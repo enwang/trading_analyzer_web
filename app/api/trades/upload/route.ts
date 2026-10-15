@@ -1,3 +1,4 @@
+import { scheduleTradeBackup } from '@/lib/trade-backup'
 import { createClient } from '@/lib/supabase/server'
 import { parseFlexCsv } from '@/lib/ibkr/flex'
 import { preservedPriceScaleForKnownSplit, scalePreservedPrice } from '@/lib/ibkr/stock-splits'
@@ -253,6 +254,7 @@ export async function POST(request: NextRequest) {
     const upserted = data?.length ?? 0
     const skipped = trades.length - upserted
 
+    scheduleTradeBackup(supabase, user.id)
     return NextResponse.json({ upserted, skipped, snapshotId: snapshot?.id ?? null })
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)

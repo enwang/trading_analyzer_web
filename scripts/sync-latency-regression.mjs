@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import vm from 'node:vm'
 import ts from 'typescript'
+import * as crypto from 'node:crypto'
 
 // Execute the real route and snapshot helper with deterministic database/broker
 // transports. No production credentials or writes are used.
@@ -19,12 +20,12 @@ function loadTs(path, dependencies = {}) {
   }, { filename: path })
   return module.exports
 }
-const snapshots = loadTs('../lib/trade-snapshots.ts')
+const snapshots = loadTs('../lib/trade-snapshots.ts', { 'node:crypto': crypto })
 const hidden = loadTs('../lib/hidden-trades.ts')
 
-async function scenario(failure) {
+async function scenario(failure, reuse = false) {
   const events = []
-  let backupSaved = false
+  let backupSaved = reuse
   let writtenRows
   const manual = {
     user_id: 'user-1', symbol: 'ABC', entry_time: '2026-01-02T14:30:00', exit_time: '2026-01-03T15:00:00',
@@ -41,6 +42,7 @@ async function scenario(failure) {
       const query = {
         select() { return query },
         eq(...args) { filters.push(args); return query },
+        range() { return query }, limit() { return query }, maybeSingle() { return query },
         in() { return query }, order() { return query }, single() { return query },
         is() { return query }, not() { return query },
         insert(value) { action = 'insert'; payload = value; return query },
@@ -59,6 +61,7 @@ async function scenario(failure) {
               assert.ok(filters.some(([key, value]) => key === 'user_id' && value === 'user-1'))
               data = [manual]
             }
+            if (table === 'trade_snapshots' && action === 'read') data = reuse ? { id: 'existing-backup', fingerprint: snapshots.tradeSnapshotFingerprint([manual]) } : null
             if (table === 'hidden_trades') data = [excluded]
             if (table === 'trade_snapshots' && action === 'insert') {
               assert.equal(payload.payload.trades[0].notes, manual.notes)
@@ -75,6 +78,7 @@ async function scenario(failure) {
     },
   }
   const route = loadTs('../app/api/ibkr/fetch/route.ts', {
+    '@/lib/trade-backup': { scheduleTradeBackup: () => events.push('background-backup:scheduled') },
     '@/lib/supabase/server': { createClient: async () => db },
     '@/lib/ibkr/flex': { fetchFlexAll: async () => ({ trades: [incoming, excluded], navDaily: [{}], navChange: [{}], cashTransactions: [{}] }) },
     '@/lib/ibkr/stock-splits': { preservedPriceScaleForKnownSplit: () => 1, scalePreservedPrice: x => x },
@@ -101,10 +105,17 @@ assert.equal(writtenRows[0].stop_loss_locked, true)
 assert.equal(writtenRows[0].setup_tag, 'breakout')
 assert.ok(response.body.timings.total >= 0)
 assert.ok(response.headers['Server-Timing'].includes('total;dur='))
-for (const failure of ['trades:read', 'trade_snapshots:insert', 'account_nav_daily:upsert', 'trades:upsert']) {
+assert.ok(events.includes('background-backup:scheduled'))
+const reused = await scenario(undefined, true)
+assert.equal(reused.response.body.snapshotId, 'existing-backup')
+assert.equal(reused.response.body.snapshotReused, true)
+assert.ok(!reused.events.includes('trade_snapshots:insert:start'), 'Reuse a persisted identical backup')
+assert.equal(reused.writtenRows[0].notes, 'Keep my journal')
+for (const failure of ['trade_snapshots:read', 'trades:read', 'trade_snapshots:insert', 'account_nav_daily:upsert', 'trades:upsert']) {
   const result = await scenario(failure)
   assert.equal(result.response.status, 500, failure)
   assert.equal(result.writtenRows, undefined, failure)
+  assert.ok(!result.events.includes('background-backup:scheduled'), 'Do not prepare post-sync backup for a failed sync')
   assert.ok(!result.events.includes('user_settings:upsert:start'), 'Do not record successful sync on failure')
 }
 console.log('sync-latency-regression: PASS (real route: concurrent writes, one trade read, backup ordering, preservation, hidden trades, failure paths)')

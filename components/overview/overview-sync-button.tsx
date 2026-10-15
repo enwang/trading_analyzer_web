@@ -27,7 +27,7 @@ export function OverviewSyncButton() {
         body: JSON.stringify({}),
       })
       const json = await res.json()
-      setTimings({ ...json.timings, client_total: Math.round(performance.now() - started) })
+      setTimings({ ...json.timings, snapshot_reused: json.snapshotReused ? 1 : 0, client_total: Math.round(performance.now() - started) })
       if (!res.ok) {
         setMessage(json?.error ?? 'Sync failed')
         return

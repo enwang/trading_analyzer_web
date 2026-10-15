@@ -1,3 +1,4 @@
+import { scheduleTradeBackup } from '@/lib/trade-backup'
 import { NextResponse } from 'next/server'
 
 import { createTradeSnapshot } from '@/lib/trade-snapshots'
@@ -62,6 +63,7 @@ export async function POST(
     }
   }
 
+  scheduleTradeBackup(supabase, user.id)
   return NextResponse.json({
     restored: trades.length,
     beforeRestoreSnapshotId: beforeRestore?.id ?? null,

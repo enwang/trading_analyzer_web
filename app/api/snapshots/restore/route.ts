@@ -1,3 +1,4 @@
+import { scheduleTradeBackup } from '@/lib/trade-backup'
 import { createClient } from '@/lib/supabase/server'
 import { createTradeSnapshot } from '@/lib/trade-snapshots'
 import { NextRequest, NextResponse } from 'next/server'
@@ -49,6 +50,7 @@ export async function POST(request: NextRequest) {
     if (insertErr) return NextResponse.json({ error: `Insert failed: ${insertErr.message}` }, { status: 500 })
   }
 
+  scheduleTradeBackup(supabase, user.id)
   return NextResponse.json({
     restored: payload.trades.length,
     fromSnapshot: snap.label,

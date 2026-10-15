@@ -1,10 +1,11 @@
+import { scheduleTradeBackup } from '@/lib/trade-backup'
 import { createClient } from '@/lib/supabase/server'
 import { fetchFlexAll } from '@/lib/ibkr/flex'
 import { preservedPriceScaleForKnownSplit, scalePreservedPrice } from '@/lib/ibkr/stock-splits'
-import { createTradeSnapshot, pruneOldSnapshots } from '@/lib/trade-snapshots'
+import { createTradeSnapshot, loadLatestTradeSnapshot, loadTradeSnapshotRows } from '@/lib/trade-snapshots'
 import { filterOutHidden, loadHiddenTradeKeys } from '@/lib/hidden-trades'
 import { usesStopLossFirstSizing } from '@/lib/market/stop-loss'
-import { after, NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 
 type Leg = { action?: string; shares?: number; price?: number; time?: string }
 
@@ -111,27 +112,21 @@ export async function POST(request: NextRequest) {
     // run together, but the backup must finish before any trade writes start.
     const [{ snapshot, existingRows }, { trades, navDaily, navChange, cashTransactions }] = await Promise.all([
       timed('snapshot', async () => {
-        const { data, error } = await timed('existing', () => supabase
-          .from('trades')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: true }))
-        if (error) throw error
-        const existingRows = data ?? []
+        const [existingRows, latestSnapshot] = await Promise.all([
+          timed('existing', () => loadTradeSnapshotRows(supabase, user.id)),
+          timed('snapshot_lookup', () => loadLatestTradeSnapshot(supabase, user.id)),
+        ])
         const snapshot = await timed('snapshot_write', () => createTradeSnapshot(supabase, user.id, {
           label: `Before IBKR sync ${new Date().toISOString()}`,
           reason: 'ibkr-sync',
           trades: existingRows,
+          reuseIfUnchanged: true,
+          latestSnapshot,
         }))
         return { snapshot, existingRows }
       }),
       timed('broker', () => fetchFlexAll(token, queryId, (name, ms) => { timings[name] = ms })),
     ])
-    after(async () => {
-      try { await pruneOldSnapshots(supabase, user.id) }
-      catch { console.error('IBKR sync: old snapshot cleanup failed') }
-    })
-
     const touchedSymbols = [...new Set(trades.map(r => r.symbol))]
     // Independent tables and the hidden-trade lookup run concurrently.
     const [hiddenKeys] = await Promise.all([
@@ -158,6 +153,7 @@ export async function POST(request: NextRequest) {
         navDaily: navDaily.length,
         navChange: navChange.length,
         snapshotId: snapshot?.id ?? null,
+        snapshotReused: snapshot?.reused ?? false,
       })
     }
 
@@ -168,7 +164,7 @@ export async function POST(request: NextRequest) {
       const normalizeTs = (t: string | null | undefined) => t ? t.slice(0, 19) : ''
 
       // Reuse the pre-write snapshot rows to preserve manual fields.
-      type ExistingRow = { symbol: string; entry_time: string | null; exit_time: string | null; entry_price: number | null; stop_loss: number | null; current_stop_loss: number | null; stop_loss_locked: boolean | null; initial_risk_amount: number | null; r_multiple: number | null; setup_tag: string | null; notes: string | null; needs_review: boolean | null; execution_legs: unknown | null }
+      type ExistingRow = (typeof existingRows)[number]
       const openRowsBySymbol = new Map<string, ExistingRow[]>()
       for (const existing of existingRows ?? []) {
         if (existing.exit_time != null) continue
@@ -261,7 +257,7 @@ export async function POST(request: NextRequest) {
             existingEntryPrice: rowWithStopLoss.entry_price,
             incomingEntryPrice: typeof row.entry_price === 'number' ? row.entry_price : null,
           })
-          rowRecord.stop_loss = scalePreservedPrice(rowWithStopLoss.stop_loss, preservedPriceScale)
+          rowRecord.stop_loss = scalePreservedPrice(rowWithStopLoss.stop_loss ?? null, preservedPriceScale)
           if (rowWithStopLoss.stop_loss_locked) {
             rowRecord.stop_loss_locked = true
           }
@@ -280,7 +276,7 @@ export async function POST(request: NextRequest) {
               existingEntryPrice: rowWithCurrentStopLoss.entry_price,
               incomingEntryPrice: typeof row.entry_price === 'number' ? row.entry_price : null,
             })
-            rowRecord.current_stop_loss = scalePreservedPrice(rowWithCurrentStopLoss.current_stop_loss, preservedPriceScale)
+            rowRecord.current_stop_loss = scalePreservedPrice(rowWithCurrentStopLoss.current_stop_loss ?? null, preservedPriceScale)
           }
         }
       }
@@ -339,7 +335,8 @@ export async function POST(request: NextRequest) {
       { onConflict: 'user_id' }
     ).throwOnError())
 
-    return respond({ userId: user.id, upserted, skipped, snapshotId: snapshot?.id ?? null })
+    scheduleTradeBackup(supabase, user.id)
+    return respond({ userId: user.id, upserted, skipped, snapshotId: snapshot?.id ?? null, snapshotReused: snapshot?.reused ?? false })
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
     return respond({ error: msg }, 500)
