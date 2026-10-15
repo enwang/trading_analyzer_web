@@ -15,13 +15,12 @@ export default async function AnalysisPage() {
   const supabase = await createClient()
   const userId = await getAuthenticatedUserId()
 
-  const { data: rows } = await supabase
-    .from('trades')
-    .select('*')
-    .eq('user_id', userId)
-    .order('entry_time', { ascending: true })
-
-  const [{ data: navRows }, { data: navChangeRows }, { data: cashTxRows }] = await Promise.all([
+  const [{ data: rows }, { data: navRows }, { data: navChangeRows }, { data: cashTxRows }] = await Promise.all([
+    supabase
+      .from('trades')
+      .select('*')
+      .eq('user_id', userId)
+      .order('entry_time', { ascending: true }),
     supabase
       .from('account_nav_daily')
       .select('report_date,total')
