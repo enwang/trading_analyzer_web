@@ -143,6 +143,7 @@ export default async function TradeDetailsPage({
     : fromAnalysis
       ? '/analysis'
       : (backParams.toString() ? `/trades?${backParams.toString()}` : '/trades')
+  const backLabel = fromOverview ? 'Back to Overview' : fromAnalysis ? 'Back to Analysis' : 'Back to Trades'
   const supabase = await createClient()
   const userId = await getAuthenticatedUserId()
 
@@ -178,7 +179,7 @@ export default async function TradeDetailsPage({
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <BackToTradesButton href={backHref} />
+          <BackToTradesButton href={backHref} label={backLabel} />
           <h1 className="text-xl font-semibold">
             {trade.symbol} Trade Details
           </h1>

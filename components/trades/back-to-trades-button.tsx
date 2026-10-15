@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 
 const TRADES_LAST_URL_STORAGE_KEY = 'trades-table-last-url'
 
-export function BackToTradesButton({ href }: { href: string }) {
+export function BackToTradesButton({ href, label = 'Back to Trades' }: { href: string; label?: string }) {
   const router = useRouter()
 
   return (
@@ -25,7 +25,7 @@ export function BackToTradesButton({ href }: { href: string }) {
       }}
     >
       <ArrowLeft className="size-4" />
-      Back to Trades
+      {label}
     </Button>
   )
 }
