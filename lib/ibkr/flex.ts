@@ -19,7 +19,9 @@ const GET_STATEMENT_URL =
   'https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService/GetStatement'
 const FLEX_VERSION = '3'
 const MAX_WAIT_MS = 60_000
-const POLL_INTERVAL_MS = 3_000
+// 1s keeps poll quantization from dominating sync time; the poll loop backs
+// off if IBKR signals throttling (1018/1009) instead of failing the sync.
+const POLL_INTERVAL_MS = 1_000
 
 // Only include trades opened on or after this date
 const QUERY_START = new Date('2026-01-01T00:00:00Z')
@@ -190,6 +192,12 @@ async function pollAndDownload(
         return warnText
       }
       await sleep(POLL_INTERVAL_MS)
+      continue
+    }
+    const pollErrorCode = extractXmlTag(text, 'ErrorCode')
+    if (pollErrorCode === '1018' || pollErrorCode === '1009') {
+      // Throttled or heavy load — back off instead of failing the whole sync.
+      await sleep(5_000)
       continue
     }
     throw new Error(`IBKR polling failed with status: ${status}`)

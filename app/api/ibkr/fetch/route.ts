@@ -291,29 +291,42 @@ export async function POST(request: NextRequest) {
         rows.filter(r => r.exit_time != null && symbolsWithExistingOpen.has(r.symbol) && !symbolsWithNewOpenSet.has(r.symbol)).map(r => r.symbol)
       )]
       const symbolsToDeleteOpen = [...new Set([...symbolsWithNewOpenSet, ...symbolsThatJustClosed])]
-      if (symbolsToDeleteOpen.length > 0) {
-        await timed('delete_open', () => supabase
-          .from('trades')
-          .delete()
-          .eq('user_id', user.id)
-          .is('exit_time', null)
-          .in('symbol', symbolsToDeleteOpen))
-      }
 
       // Clean up stale partial-exit rows: for each incoming open position, delete any
       // existing closed row that shares the same entry_time. These arise when a previous
       // sync had the parser bug (unsorted C-rows), which caused partial exits to be
       // recorded as separate closed rows instead of being absorbed into the open trade.
-      const incomingOpenRows = rows.filter(r => r.exit_time == null && r.entry_time)
-      for (const openRow of incomingOpenRows) {
-        await timed('delete_partial', () => supabase
-          .from('trades')
-          .delete()
-          .eq('user_id', user.id)
-          .eq('symbol', openRow.symbol as string)
-          .eq('entry_time', openRow.entry_time as string)
-          .not('exit_time', 'is', null))
+      // Batched to one delete per symbol (entry_time IN (...)) instead of one per open
+      // row — the row sets are disjoint from delete_open (closed vs open), so both run
+      // concurrently.
+      const entryTimesBySymbol = new Map<string, string[]>()
+      for (const openRow of rows.filter(r => r.exit_time == null && r.entry_time)) {
+        const symbol = openRow.symbol as string
+        const entryTime = openRow.entry_time as string
+        const list = entryTimesBySymbol.get(symbol) ?? []
+        if (!list.includes(entryTime)) list.push(entryTime)
+        entryTimesBySymbol.set(symbol, list)
       }
+
+      await Promise.all([
+        symbolsToDeleteOpen.length > 0
+          ? timed('delete_open', () => supabase
+              .from('trades')
+              .delete()
+              .eq('user_id', user.id)
+              .is('exit_time', null)
+              .in('symbol', symbolsToDeleteOpen))
+          : Promise.resolve(),
+        ...[...entryTimesBySymbol.entries()].map(([symbol, entryTimes]) =>
+          timed('delete_partial', () => supabase
+            .from('trades')
+            .delete()
+            .eq('user_id', user.id)
+            .eq('symbol', symbol)
+            .in('entry_time', entryTimes)
+            .not('exit_time', 'is', null))
+        ),
+      ])
     }
 
     const { error, data } = await timed('trades_write', () => supabase
