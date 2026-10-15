@@ -40,6 +40,12 @@ const AGE_15M = 60 * 86_400_000
 const AGE_30M = 60 * 86_400_000
 const AGE_1H  = 730 * 86_400_000
 
+// A closed old trade's 5m data never changes, so cache Polygon-backed
+// responses in memory (per warm instance) to stay well under the free
+// tier's 5 calls/minute; the browser caches them too via Cache-Control.
+const polygonResponseCache = new Map<string, { at: number; payload: unknown }>()
+const POLYGON_CACHE_TTL_MS = 6 * 60 * 60_000
+
 function requestedIntervalAgeLimitMs(timeframe: string): number | null {
   if (timeframe === '1m') return AGE_1M
   if (timeframe === '5m') return AGE_5M
@@ -292,6 +298,15 @@ export async function GET(request: Request) {
   period1 = clampPeriod1ForRequestedInterval(period1, requiredStartMs, timeframe)
   let interval = pickInterval(spanMs, period1 * 1000, timeframe)
 
+  const cacheable = timeframe === '5m' && !!exitTime && requiredStartMs < Date.now() - AGE_5M
+  const cacheKey = [symbol, timeframe, entryTime ?? '', exitTime ?? '', p1Param ?? '', p2Param ?? ''].join('|')
+  if (cacheable) {
+    const hit = polygonResponseCache.get(cacheKey)
+    if (hit && Date.now() - hit.at < POLYGON_CACHE_TTL_MS) {
+      return NextResponse.json(hit.payload, { headers: { 'Cache-Control': 'private, max-age=3600' } })
+    }
+  }
+
   // For 1D charts on closed trades: cap period2 at end of exit calendar day + 5 extra days
   // so the post-trade trend is visible (was 2 days previously).
   if (interval === '1d' && exitTime && !Number.isNaN(exitMs)) {
@@ -303,9 +318,13 @@ export async function GET(request: Request) {
   // so when the trade itself is older than that and a Polygon key is
   // configured, serve true 5m candles from Polygon instead of downgrading.
   let candles: Candle[] | null = null
+  let usedPolygon = false
   if (timeframe === '5m' && requiredStartMs < Date.now() - AGE_5M && process.env.POLYGON_API_KEY) {
     candles = await fetchPolygonCandles(symbol, period1, period2)
-    if (candles) interval = '5m'
+    if (candles) {
+      interval = '5m'
+      usedPolygon = true
+    }
   }
 
   const dailyContextPromise = interval === '1d' || interval === '1wk'
@@ -399,10 +418,17 @@ export async function GET(request: Request) {
   const visibleToMs = exitTime ? exitMs : Math.max(exitMs, Date.now())
   const visibleTo   = Math.ceil((visibleToMs + visiblePostMs) / 1000)
 
-  return NextResponse.json({
+  const payloadOut = {
     symbol, interval, timeframe, candles, dailyCandles,
     entryTimeSec: entryTime ? Math.floor(entryMs / 1000) : null,
     exitTimeSec:  exitTime  ? Math.floor(exitMs  / 1000) : null,
     visibleRange: { from: visibleFrom, to: visibleTo },
-  })
+  }
+  if (cacheable && usedPolygon) {
+    if (polygonResponseCache.size > 100) polygonResponseCache.clear()
+    polygonResponseCache.set(cacheKey, { at: Date.now(), payload: payloadOut })
+  }
+  return NextResponse.json(payloadOut, cacheable && usedPolygon
+    ? { headers: { 'Cache-Control': 'private, max-age=3600' } }
+    : undefined)
 }
