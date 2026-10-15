@@ -40,6 +40,7 @@ interface Props {
   side?:       'long' | 'short' | null
   entryPrice?: number | null
   exitPrice?:  number | null
+  initialStopLoss?: number | null
   executionLegs?: ExecutionLeg[] | null
 }
 
@@ -285,7 +286,7 @@ function mergeLegsForMarkers(legs: ExecutionLeg[]) {
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
-export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exitPrice, executionLegs }: Props) {
+export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exitPrice, initialStopLoss, executionLegs }: Props) {
   const containerRef     = useRef<HTMLDivElement>(null)
   const ohlcOverlayRef   = useRef<HTMLDivElement>(null)
   const dollarVolumeValueRef = useRef<HTMLSpanElement>(null)
@@ -791,6 +792,18 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
 
     main.setMarkers([])
 
+    // Initial stop-loss: solid red price line across the whole chart
+    if (initialStopLoss != null && Number.isFinite(initialStopLoss) && initialStopLoss > 0) {
+      main.createPriceLine({
+        price: initialStopLoss,
+        color: '#dc2626',
+        lineWidth: 1,
+        lineStyle: LineStyle.Solid,
+        axisLabelVisible: true,
+        title: 'Initial Stop',
+      })
+    }
+
     const formatAxisCompact = (value: number) => {
       if (value >= 1_000_000_000) return `${Number((value / 1_000_000_000).toFixed(1))}B`
       if (value >= 1_000_000) return `${Number((value / 1_000_000).toFixed(1))}M`
@@ -1132,6 +1145,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
     side,
     entryPrice,
     exitPrice,
+    initialStopLoss,
     executionLegs,
     entryTime,
     exitTime,
@@ -1168,6 +1182,11 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
             {exitPrice != null && exitTime && (
               <span className="text-xs text-[#6f7687]">
                 Exit: <span className="font-medium text-red-500">${exitPrice.toFixed(2)}</span>
+              </span>
+            )}
+            {initialStopLoss != null && (
+              <span className="text-xs text-[#6f7687]">
+                Initial Stop: <span className="font-medium text-red-600">${initialStopLoss.toFixed(2)}</span>
               </span>
             )}
           </div>
