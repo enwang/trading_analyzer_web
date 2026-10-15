@@ -792,16 +792,29 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
 
     main.setMarkers([])
 
-    // Initial stop-loss: red segment that starts at the entry bar and runs to
-    // the last bar. A price line always spans the full chart width, so use a
-    // line series instead; exclude it from autoscaling so the candle price
-    // scale is unaffected.
+    // Initial stop-loss: red segment running to the last bar. A price line
+    // always spans the full chart width, so use a line series instead;
+    // exclude it from autoscaling so the candle price scale is unaffected.
+    // Segment start: on intraday timeframes the stop is normally the low of
+    // the entry day (LoD), so start at the entry-day bar that printed that
+    // low (at or before the entry bar). On daily/weekly, start at the entry bar.
     if (initialStopLoss != null && Number.isFinite(initialStopLoss) && initialStopLoss > 0 && candles.length > 1) {
-      const startSec = meta.entryTimeSec != null
+      const entryBarSec = meta.entryTimeSec != null
         ? nearestCandleTimeSec(candles, meta.entryTimeSec)
-        : candles[0].time
+        : null
+      let startSec = entryBarSec ?? candles[0].time
+      if ((timeframe === '5' || timeframe === '60') && entryBarSec != null && meta.entryTimeSec != null) {
+        const entryDayKey = swingMarketDateKey(meta.entryTimeSec)
+        let lodBar: Candle | null = null
+        for (const candle of candles) {
+          if (candle.time > entryBarSec) continue
+          if (swingMarketDateKey(candle.time) !== entryDayKey) continue
+          if (!lodBar || candle.low < lodBar.low) lodBar = candle
+        }
+        if (lodBar) startSec = lodBar.time
+      }
       const endSec = candles[candles.length - 1].time
-      if (startSec != null && startSec < endSec) {
+      if (startSec < endSec) {
         const stopSeries = chart.addLineSeries({
           color: '#dc2626',
           lineWidth: 1,
