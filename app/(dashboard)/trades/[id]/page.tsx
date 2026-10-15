@@ -1,9 +1,11 @@
 import { notFound, redirect } from 'next/navigation'
+import { ExternalLink } from 'lucide-react'
 
 import { createClient } from '@/lib/supabase/server'
 import { getAuthenticatedUserId } from '@/lib/auth/user'
 import { rowToTrade } from '@/types/trade'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { BackToTradesButton } from '@/components/trades/back-to-trades-button'
 import { TradeDetailTabs } from '@/components/trades/trade-detail-tabs'
 import { TradeChart } from '@/components/trades/trade-chart'
@@ -174,6 +176,9 @@ export default async function TradeDetailsPage({
   const trade = rowToTrade(row)
   const passedR = rParam != null ? Number(rParam) : null
   const initialRMultiple = (passedR != null && Number.isFinite(passedR)) ? passedR : trade.rMultiple
+  // IBKR class shares use a space ("BRK B"); TradingView uses a dot ("BRK.B").
+  const tvSymbol = trade.symbol.trim().replace(/\s+/g, '.')
+  const tradingViewUrl = `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tvSymbol)}`
 
   return (
     <div className="space-y-4">
@@ -184,7 +189,15 @@ export default async function TradeDetailsPage({
             {trade.symbol} Trade Details
           </h1>
         </div>
-        <Badge className={outcomeClass(trade.outcome)}>{outcomeLabel(trade.outcome)}</Badge>
+        <div className="flex items-center gap-2">
+          <Button asChild variant="outline" size="sm">
+            <a href={tradingViewUrl} target="_blank" rel="noreferrer">
+              <ExternalLink className="size-4" />
+              Open in TradingView
+            </a>
+          </Button>
+          <Badge className={outcomeClass(trade.outcome)}>{outcomeLabel(trade.outcome)}</Badge>
+        </div>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[380px_1fr]">
