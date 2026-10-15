@@ -792,16 +792,30 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
 
     main.setMarkers([])
 
-    // Initial stop-loss: solid red price line across the whole chart
-    if (initialStopLoss != null && Number.isFinite(initialStopLoss) && initialStopLoss > 0) {
-      main.createPriceLine({
-        price: initialStopLoss,
-        color: '#dc2626',
-        lineWidth: 1,
-        lineStyle: LineStyle.Solid,
-        axisLabelVisible: true,
-        title: 'Initial Stop',
-      })
+    // Initial stop-loss: red segment that starts at the entry bar and runs to
+    // the last bar. A price line always spans the full chart width, so use a
+    // line series instead; exclude it from autoscaling so the candle price
+    // scale is unaffected.
+    if (initialStopLoss != null && Number.isFinite(initialStopLoss) && initialStopLoss > 0 && candles.length > 1) {
+      const startSec = meta.entryTimeSec != null
+        ? nearestCandleTimeSec(candles, meta.entryTimeSec)
+        : candles[0].time
+      const endSec = candles[candles.length - 1].time
+      if (startSec != null && startSec < endSec) {
+        const stopSeries = chart.addLineSeries({
+          color: '#dc2626',
+          lineWidth: 1,
+          lineStyle: LineStyle.Solid,
+          priceLineVisible: false,
+          lastValueVisible: true,
+          crosshairMarkerVisible: false,
+          autoscaleInfoProvider: () => null,
+        })
+        stopSeries.setData([
+          { time: startSec as UTCTimestamp, value: initialStopLoss },
+          { time: endSec as UTCTimestamp, value: initialStopLoss },
+        ])
+      }
     }
 
     const formatAxisCompact = (value: number) => {
