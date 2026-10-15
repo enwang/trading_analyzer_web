@@ -92,10 +92,15 @@ const MARKET_DATE_FORMATTER = new Intl.DateTimeFormat('en-CA', {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-function getDefaultTimeframe(entryTime: string | null, _exitTime: string | null): Timeframe {
+function getDefaultTimeframe(entryTime: string | null, exitTime: string | null): Timeframe {
   if (!entryTime) return '1D'
   const entryMs = Date.parse(entryTime)
   if (!Number.isFinite(entryMs)) return '1D'
+  // Held longer than a day (entry→exit, or entry→now while still open) is
+  // a swing trade — default to the daily chart rather than an intraday one.
+  const exitMs = exitTime ? Date.parse(exitTime) : NaN
+  const holdEndMs = Number.isFinite(exitMs) ? exitMs : Date.now()
+  if (holdEndMs - entryMs > 86_400_000) return '1D'
   return Date.now() - entryMs <= 55 * 86_400_000 ? '5' : '1D'
 }
 
