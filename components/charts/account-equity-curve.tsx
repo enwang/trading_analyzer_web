@@ -26,6 +26,7 @@ interface ChartPoint {
   spyPct?: number
   qqqPct?: number
   soxxPct?: number
+  arkkPct?: number
 }
 
 interface Props {
@@ -35,6 +36,7 @@ interface Props {
   spy?: BenchmarkRow[]
   qqq?: BenchmarkRow[]
   soxx?: BenchmarkRow[]
+  arkk?: BenchmarkRow[]
   height?: number
   disableAnchors?: boolean
 }
@@ -181,10 +183,11 @@ function computeDailyTWR(
   return points
 }
 
-export function AccountEquityCurve({ data, changes = [], deposits = [], spy = [], qqq = [], soxx = [], height = 240, disableAnchors = false }: Props) {
+export function AccountEquityCurve({ data, changes = [], deposits = [], spy = [], qqq = [], soxx = [], arkk = [], height = 240, disableAnchors = false }: Props) {
   const [showSpy, setShowSpy] = useState(false)
   const [showQqq, setShowQqq] = useState(false)
   const [showSoxx, setShowSoxx] = useState(false)
+  const [showArkk, setShowArkk] = useState(false)
 
   if (!data.length) {
     return (
@@ -208,23 +211,28 @@ export function AccountEquityCurve({ data, changes = [], deposits = [], spy = []
   const spyMap = new Map(spy.map(r => [r.date, r.pct]))
   const qqqMap = new Map(qqq.map(r => [r.date, r.pct]))
   const soxxMap = new Map(soxx.map(r => [r.date, r.pct]))
+  const arkkMap = new Map(arkk.map(r => [r.date, r.pct]))
   let lastSpyPct: number | undefined
   let lastQqqPct: number | undefined
   let lastSoxxPct: number | undefined
+  let lastArkkPct: number | undefined
   const points: ChartPoint[] = rawPoints.map(p => {
     const spyVal = spyMap.has(p.date) ? spyMap.get(p.date)! : lastSpyPct
     const qqqVal = qqqMap.has(p.date) ? qqqMap.get(p.date)! : lastQqqPct
     const soxxVal = soxxMap.has(p.date) ? soxxMap.get(p.date)! : lastSoxxPct
+    const arkkVal = arkkMap.has(p.date) ? arkkMap.get(p.date)! : lastArkkPct
     if (spyVal !== undefined) lastSpyPct = spyVal
     if (qqqVal !== undefined) lastQqqPct = qqqVal
     if (soxxVal !== undefined) lastSoxxPct = soxxVal
-    return { ...p, spyPct: spyVal, qqqPct: qqqVal, soxxPct: soxxVal }
+    if (arkkVal !== undefined) lastArkkPct = arkkVal
+    return { ...p, spyPct: spyVal, qqqPct: qqqVal, soxxPct: soxxVal, arkkPct: arkkVal }
   })
 
   const allPcts = points.map(p => p.pct)
   if (showSpy) points.forEach(p => p.spyPct !== undefined && allPcts.push(p.spyPct))
   if (showQqq) points.forEach(p => p.qqqPct !== undefined && allPcts.push(p.qqqPct))
   if (showSoxx) points.forEach(p => p.soxxPct !== undefined && allPcts.push(p.soxxPct))
+  if (showArkk) points.forEach(p => p.arkkPct !== undefined && allPcts.push(p.arkkPct))
   const minPct = Math.min(...allPcts)
   const maxPct = Math.max(...allPcts)
   const lastPct = points[points.length - 1].pct
@@ -232,8 +240,8 @@ export function AccountEquityCurve({ data, changes = [], deposits = [], spy = []
 
   return (
     <div>
-      {(spy.length > 0 || qqq.length > 0 || soxx.length > 0) && (
-        <div className="mb-2 flex gap-2">
+      {(spy.length > 0 || qqq.length > 0 || soxx.length > 0 || arkk.length > 0) && (
+        <div className="mb-2 flex flex-wrap gap-2">
           {spy.length > 0 && (
             <button
               onClick={() => setShowSpy(v => !v)}
@@ -259,6 +267,15 @@ export function AccountEquityCurve({ data, changes = [], deposits = [], spy = []
             >
               <span className="inline-block h-2 w-2 rounded-full" style={{ background: '#f59e0b' }} />
               SOXX
+            </button>
+          )}
+          {arkk.length > 0 && (
+            <button
+              onClick={() => setShowArkk(v => !v)}
+              className={`flex items-center gap-1.5 rounded px-2 py-0.5 text-xs font-medium border transition-colors ${showArkk ? 'border-cyan-400 bg-cyan-50 text-cyan-600 dark:bg-cyan-950 dark:text-cyan-400' : 'border-gray-200 text-gray-400 dark:border-gray-700'}`}
+            >
+              <span className="inline-block h-2 w-2 rounded-full" style={{ background: '#06b6d4' }} />
+              ARKK
             </button>
           )}
         </div>
@@ -298,6 +315,9 @@ export function AccountEquityCurve({ data, changes = [], deposits = [], spy = []
                   )}
                   {showSoxx && p.soxxPct !== undefined && (
                     <div style={{ color: '#f59e0b' }}>SOXX {fmtPct(p.soxxPct)}</div>
+                  )}
+                  {showArkk && p.arkkPct !== undefined && (
+                    <div style={{ color: '#06b6d4' }}>ARKK {fmtPct(p.arkkPct)}</div>
                   )}
                 </div>
               )
@@ -341,6 +361,18 @@ export function AccountEquityCurve({ data, changes = [], deposits = [], spy = []
               type="monotone"
               dataKey="soxxPct"
               stroke="#f59e0b"
+              dot={false}
+              strokeWidth={1.5}
+              strokeDasharray="4 2"
+              activeDot={{ r: 3 }}
+              connectNulls
+            />
+          )}
+          {showArkk && (
+            <Line
+              type="monotone"
+              dataKey="arkkPct"
+              stroke="#06b6d4"
               dot={false}
               strokeWidth={1.5}
               strokeDasharray="4 2"
