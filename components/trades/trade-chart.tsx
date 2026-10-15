@@ -792,12 +792,14 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
 
     main.setMarkers([])
 
-    // Initial stop-loss: red segment running to the last bar. A price line
-    // always spans the full chart width, so use a line series instead;
-    // exclude it from autoscaling so the candle price scale is unaffected.
+    // Initial stop-loss: red segment running past the last bar so it reaches
+    // the pane's right edge. A price line always spans the full chart width,
+    // so use a line series instead; exclude it from autoscaling so the candle
+    // price scale is unaffected.
     // Segment start: on intraday timeframes the stop is normally the low of
     // the entry day (LoD), so start at the entry-day bar that printed that
     // low (at or before the entry bar). On daily/weekly, start at the entry bar.
+    let stopStartSec: number | null = null
     if (initialStopLoss != null && Number.isFinite(initialStopLoss) && initialStopLoss > 0 && candles.length > 1) {
       const entryBarSec = meta.entryTimeSec != null
         ? nearestCandleTimeSec(candles, meta.entryTimeSec)
@@ -813,8 +815,11 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
         }
         if (lodBar) startSec = lodBar.time
       }
-      const endSec = candles[candles.length - 1].time
+      const lastSec = candles[candles.length - 1].time
+      const intervalSec = Math.max(1, lastSec - candles[candles.length - 2].time)
+      const endSec = lastSec + intervalSec * 90
       if (startSec < endSec) {
+        stopStartSec = startSec
         const stopSeries = chart.addLineSeries({
           color: '#dc2626',
           lineWidth: 1,
@@ -947,6 +952,25 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
           label.style.fontWeight = '600'
           label.style.padding = '1px 3px'
           overlay.appendChild(label)
+        }
+      }
+
+      if (stopStartSec != null && initialStopLoss != null) {
+        const x = chart.timeScale().timeToCoordinate(ts(stopStartSec))
+        const y = main.priceToCoordinate(initialStopLoss)
+        if (x != null && y != null && x <= overlay.clientWidth && y >= 0 && y <= overlay.clientHeight) {
+          const stopLabel = document.createElement('div')
+          stopLabel.textContent = 'Initial Stop'
+          stopLabel.style.position = 'absolute'
+          stopLabel.style.left = `${Math.max(4, Math.min(overlay.clientWidth - 96, x + 4))}px`
+          stopLabel.style.top = `${Math.max(0, y - 18)}px`
+          stopLabel.style.whiteSpace = 'nowrap'
+          stopLabel.style.color = '#dc2626'
+          stopLabel.style.background = 'rgba(255,255,255,0.9)'
+          stopLabel.style.fontSize = '10px'
+          stopLabel.style.fontWeight = '600'
+          stopLabel.style.padding = '1px 3px'
+          overlay.appendChild(stopLabel)
         }
       }
 
