@@ -17,6 +17,14 @@ Minimum required check (for current `mytrade.csv`):
 
 For UI-related fixes or regressions, verify the actual behavior with browser MCP before claiming the issue is fixed.
 
+## Hydration Guard Rule
+
+Never read `sessionStorage`/`localStorage` inside a `useState` lazy initializer: the server render has no storage, so the first client render diverges and React discards the page and re-renders it entirely (a steep slowdown on heavy pages). Read storage in a mount `useEffect` instead. Guarded by:
+
+```bash
+npm run test:hydration-guard-regression
+```
+
 ## Overlay Boundary Rule
 
 For hovercards, tooltips, popovers, or any absolute-positioned UI near table edges or viewport edges, verify the overlay stays fully visible and is not clipped by the right boundary of the page.

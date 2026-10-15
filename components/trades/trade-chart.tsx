@@ -296,13 +296,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
   const indicatorAxisRef = useRef<HTMLDivElement>(null)
 
   const [timeframe, setTimeframe] = useState<Timeframe>(() => getDefaultTimeframe(entryTime, exitTime))
-  const [style,     setStyle]     = useState<ChartStyle>(() => {
-    if (typeof window === 'undefined') return 'hollow'
-    const raw = window.localStorage.getItem(CHART_STYLE_STORAGE_KEY)
-    return raw === 'candles' || raw === 'hollow' || raw === 'bars' || raw === 'line' || raw === 'area'
-      ? raw
-      : 'hollow'
-  })
+  const [style,     setStyle]     = useState<ChartStyle>('hollow')
   const [styleHydrated, setStyleHydrated] = useState(false)
   const [volumeOn,  setVolumeOn]  = useState(true)
   const [ema6On,    setEma6On]    = useState(true)
@@ -330,7 +324,14 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
     if (tz) setUserTimeZone(tz)
   }, [])
 
+  // Read the persisted chart style after mount — reading localStorage in
+  // the useState initializer would diverge from the server render and force
+  // a hydration re-render (see scripts/hydration-guard-regression.mjs).
   useEffect(() => {
+    const raw = window.localStorage.getItem(CHART_STYLE_STORAGE_KEY)
+    if (raw === 'candles' || raw === 'hollow' || raw === 'bars' || raw === 'line' || raw === 'area') {
+      setStyle(raw)
+    }
     setStyleHydrated(true)
   }, [])
 
