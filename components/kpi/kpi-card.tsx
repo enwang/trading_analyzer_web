@@ -25,7 +25,7 @@ export function KpiCard({ label, value, sub, trend, href, hoverTitle, hoverItems
       <CardContent>
         <div
           className={cn(
-            'text-2xl font-bold tabular-nums',
+            'text-lg font-bold tabular-nums min-[430px]:text-xl sm:text-2xl',
             trend === 'up' && 'text-emerald-600',
             trend === 'down' && 'text-red-600'
           )}

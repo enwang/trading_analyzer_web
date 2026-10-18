@@ -84,7 +84,7 @@ export function AccountSummaryCard({
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <p className="text-2xl font-bold tabular-nums">
+        <p className="text-lg font-bold tabular-nums min-[430px]:text-xl sm:text-2xl">
           {accountEquity != null ? fmt(accountEquity) : '—'}
         </p>
         {gain != null && (

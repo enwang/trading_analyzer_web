@@ -79,7 +79,7 @@ export function OpenPnlCard({ trades }: { trades: OpenTradeForPnl[] }) {
       <CardContent>
         {quotesReady ? (
           <>
-            <p className={`text-2xl font-bold tabular-nums ${valueClass(total)}`}>
+            <p className={`text-lg font-bold tabular-nums min-[430px]:text-xl sm:text-2xl ${valueClass(total)}`}>
               {fmtMoneySigned(total)}
             </p>
             <div className="mt-1.5 flex flex-col gap-0.5">
@@ -93,7 +93,7 @@ export function OpenPnlCard({ trades }: { trades: OpenTradeForPnl[] }) {
           </>
         ) : (
           <>
-            <p className="text-muted-foreground text-2xl font-bold tabular-nums">—</p>
+            <p className="text-muted-foreground text-lg font-bold tabular-nums min-[430px]:text-xl sm:text-2xl">—</p>
             <p className="text-muted-foreground mt-0.5 text-xs">Loading quotes…</p>
           </>
         )}

@@ -81,7 +81,7 @@ export function OpenRiskCard({
       <CardContent>
         {quotesReady ? (
           <>
-            <p className="text-2xl font-bold tabular-nums text-red-600">
+            <p className="text-lg font-bold tabular-nums min-[430px]:text-xl sm:text-2xl text-red-600">
               ${totalRisk.toFixed(2)}
             </p>
             <p className="text-muted-foreground mt-0.5 text-xs">
@@ -92,7 +92,7 @@ export function OpenRiskCard({
           </>
         ) : (
           <>
-            <p className="text-muted-foreground text-2xl font-bold tabular-nums">—</p>
+            <p className="text-muted-foreground text-lg font-bold tabular-nums min-[430px]:text-xl sm:text-2xl">—</p>
             <p className="text-muted-foreground mt-0.5 text-xs">Loading quotes…</p>
           </>
         )}

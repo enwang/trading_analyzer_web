@@ -33,6 +33,26 @@ export type CardConfig =
 
 const LS_KEY = 'overview-kpi-order'
 
+// Fixed card order for touch devices, captured from Wilson's phone layout
+// (Oct 18, 2026) after he arranged it there. Touch devices always use this
+// order and ignore any locally stored one; desktop keeps its own stored
+// order and drag-reorder. largest-win/largest-loss sit at the end — they
+// are hidden on phone widths anyway (hideOnMobile).
+const MOBILE_CARD_ORDER = [
+  'account-summary',
+  'net-pnl',
+  'open-pnl',
+  'open-risk',
+  'avg-win-loss',
+  'profit-factor',
+  'win-rate',
+  'expectancy',
+  'avg-win-loss-values',
+  'trades',
+  'largest-win',
+  'largest-loss',
+]
+
 function renderCard(card: CardConfig) {
   switch (card.type) {
     case 'account-summary':
@@ -120,9 +140,14 @@ export function OverviewKpiGrid({ cards }: { cards: CardConfig[] }) {
   const orderedCards = orderedIds.map((id) => cardMap.get(id)).filter(Boolean) as CardConfig[]
 
   if (!dragEnabled) {
+    const mobileCards = [...cards].sort((a, b) => {
+      const ia = MOBILE_CARD_ORDER.indexOf(a.id)
+      const ib = MOBILE_CARD_ORDER.indexOf(b.id)
+      return (ia === -1 ? Number.MAX_SAFE_INTEGER : ia) - (ib === -1 ? Number.MAX_SAFE_INTEGER : ib)
+    })
     return (
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-        {orderedCards.map((card) => (
+        {mobileCards.map((card) => (
           <div key={card.id} className={hideOnMobileClass(card)}>{renderCard(card)}</div>
         ))}
       </div>
