@@ -1,4 +1,7 @@
 import http from 'node:http'
+import { createGatewayDisconnectAlerts } from '../lib/ibkr/gateway-notifications.mjs'
+import { createGatewaySessionMaintainer } from '../lib/ibkr/gateway-session.mjs'
+import { fetchWebStopOrders, requestWebJson } from '../lib/ibkr/web-stop-orders.mjs'
 import { execFile } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
@@ -15,6 +18,9 @@ import {
   matchOpenStopsToTrades,
   reconcileStopOrderSymbols,
 } from '../lib/ibkr/open-stop-orders.ts'
+
+const gatewayAlerts = createGatewayDisconnectAlerts()
+const maintainGatewaySession = createGatewaySessionMaintainer()
 
 const BRIDGE_PORT = Number(process.env.IBKR_STOP_BRIDGE_PORT || 4317)
 const DESKTOP_ORDERS_APP = join(homedir(), 'Applications', 'Trading Analyzer IBKR Reader.app')
@@ -102,6 +108,7 @@ function readJson(request) {
 }
 
 async function fetchOpenStopOrders(knownSymbols) {
+  if (process.env.IBKR_WEB_API_URL) return fetchWebStopOrders(process.env, requestWebJson, undefined, maintainGatewaySession)
   const symbolList = [...new Set(knownSymbols)].join(',')
   let workingDirectory
   try {
@@ -164,10 +171,13 @@ function marketDateKey(value) {
   return `${parts.year}-${parts.month}-${parts.day}`
 }
 
-async function syncStops(userId) {
+async function performStopSync(userId) {
   if (typeof userId !== 'string' || !/^[0-9a-f-]{36}$/i.test(userId)) {
     throw new Error('A valid user ID is required')
   }
+
+  // Fail before database queries and history processing when Gateway is offline.
+  if (process.env.IBKR_WEB_API_URL) await maintainGatewaySession()
 
   const { url, serviceRoleKey } = requireEnvironment()
   const supabase = createClient(url, serviceRoleKey, { auth: { persistSession: false } })
@@ -209,7 +219,8 @@ async function syncStops(userId) {
     if (stopHistory.length === 0) throw error
   }
 
-  const activeOrders = reconcileStopOrderSymbols(
+  const reconcile = process.env.IBKR_WEB_API_URL ? orders => orders : reconcileStopOrderSymbols
+  const activeOrders = reconcile(
     orders.filter(order => ['SUBMITTED', 'PRESUBMITTED'].includes(order.status?.toUpperCase() ?? 'SUBMITTED')),
     trades ?? [],
   )
@@ -287,11 +298,12 @@ async function syncStops(userId) {
       ? `IBKR scanned ${scan.pageCount ?? 1} order page(s), but only ${scan.recognizedRows}/${scan.expectedRows} rows were readable.`
       : undefined
   const warning = [
-    desktopError ? `IBKR Desktop was unavailable; cached stop history was used (${desktopError}).` : null,
+    desktopError ? `IBKR order source was unavailable; cached stop history was used (${desktopError}).` : null,
     scanWarning,
   ].filter(Boolean).join(' ') || undefined
   const result = {
-    source: desktopError ? 'cached IBKR Desktop history' : 'IBKR Desktop',
+    liveOrdersAvailable: !desktopError,
+    source: desktopError ? 'cached IBKR stop history' : process.env.IBKR_WEB_API_URL ? 'IBKR Web API' : 'IBKR Desktop',
     openStopOrders: activeOrders.length,
     filledStopOrders: orders.filter(order => order.status?.toUpperCase() === 'FILLED').length,
     updated,
@@ -310,6 +322,61 @@ async function syncStops(userId) {
   return result
 }
 
+// Serialize all reads/writes, including background and manual syncs.
+let pendingSync = null
+let autoSyncUserId = process.env.IBKR_STOP_SYNC_USER_ID || null
+let lastAutoError = null
+function syncStops(userId) {
+  if (pendingSync) {
+    return pendingSync.then(() => syncStops(userId))
+  }
+  if (process.env.IBKR_STOP_SYNC_USER_ID && userId !== process.env.IBKR_STOP_SYNC_USER_ID) {
+    return Promise.reject(new Error('This bridge is configured for a different website user'))
+  }
+  pendingSync = performStopSync(userId).finally(() => { pendingSync = null })
+  return pendingSync
+}
+
+const autoSyncSeconds = Number(process.env.IBKR_STOP_AUTO_SYNC_SECONDS || 3600)
+if (!Number.isFinite(autoSyncSeconds) || autoSyncSeconds < 30) {
+  throw new Error('IBKR_STOP_AUTO_SYNC_SECONDS must be at least 30')
+}
+async function autoSync() {
+  if (!process.env.IBKR_WEB_API_URL || !autoSyncUserId || pendingSync) return
+  try {
+    const result = await syncStops(autoSyncUserId)
+    lastAutoError = result.warning ?? null
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    // Log only changed failures, rather than repeating login errors every minute.
+    if (message !== lastAutoError) console.error(JSON.stringify({ event: 'auto-stop-sync-error', message }))
+    lastAutoError = message
+  }
+}
+const autoSyncTimer = setInterval(() => { void autoSync() }, autoSyncSeconds * 1000)
+autoSyncTimer.unref()
+
+// Keep an existing login alive independently of the hourly order sync.
+let heartbeatError = null
+let heartbeatPending = false
+async function keepGatewayAlive() {
+  if (!process.env.IBKR_WEB_API_URL || heartbeatPending) return
+  heartbeatPending = true
+  try {
+    await maintainGatewaySession()
+    heartbeatError = null
+  } catch (error) {
+    heartbeatError = error instanceof Error ? error.message : String(error)
+  } finally {
+    await gatewayAlerts(heartbeatError === null).catch(error => {
+      console.error(JSON.stringify({ event: 'gateway-notification-error', message: error.message }))
+    })
+    heartbeatPending = false
+  }
+}
+const heartbeatTimer = setInterval(() => { void keepGatewayAlive() }, 60_000)
+heartbeatTimer.unref()
+
 const server = http.createServer(async (request, response) => {
   const origin = request.headers.origin ?? ''
   const headers = corsHeaders(origin, request)
@@ -321,7 +388,7 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === 'GET' && request.url === '/health') {
-    return sendJson(response, 200, { ok: true }, headers)
+    return sendJson(response, 200, { ok: true, source: process.env.IBKR_WEB_API_URL ? 'IBKR Web API' : 'IBKR Desktop', autoSync: Boolean(process.env.IBKR_WEB_API_URL && autoSyncUserId), autoSyncSeconds, lastAutoError, heartbeatSeconds: process.env.IBKR_WEB_API_URL ? 60 : null, heartbeatError, sessionRecovery: maintainGatewaySession.state(), notifications: gatewayAlerts.state() }, headers)
   }
 
   if (request.method !== 'POST' || request.url !== '/sync-stops') {
@@ -331,7 +398,10 @@ const server = http.createServer(async (request, response) => {
 
   try {
     const body = await readJson(request)
+    // Also avoid waiting behind an earlier sync when authentication is unavailable.
+    if (process.env.IBKR_WEB_API_URL) await maintainGatewaySession()
     const result = await syncStops(body.userId)
+    autoSyncUserId = body.userId
     sendJson(response, 200, result, headers)
   } catch (error) {
     sendJson(response, 503, { error: error instanceof Error ? error.message : String(error) }, headers)
@@ -340,6 +410,8 @@ const server = http.createServer(async (request, response) => {
 
 server.listen(BRIDGE_PORT, '127.0.0.1', () => {
   console.log(`IBKR stop bridge listening on http://127.0.0.1:${BRIDGE_PORT}`)
+  void autoSync()
+  void keepGatewayAlive()
 })
 
 server.on('error', error => {

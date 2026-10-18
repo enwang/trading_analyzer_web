@@ -42,3 +42,6 @@ next-env.d.ts
 
 # local trade data files
 *.csv
+
+# Local Client Portal Gateway binaries and session data
+.local/
