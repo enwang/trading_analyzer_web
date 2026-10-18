@@ -28,6 +28,12 @@ const DESKTOP_ORDERS_HELPER = process.env.IBKR_DESKTOP_ORDERS_HELPER
 const STOP_HISTORY_DIR = join(homedir(), 'Library', 'Application Support', 'Trading Analyzer')
 const STOP_HISTORY_PATH = join(STOP_HISTORY_DIR, 'ibkr-stop-order-history.json')
 const STOP_HISTORY_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
+const BRIDGE_CONFIG_PATH = join(STOP_HISTORY_DIR, 'ibkr-stop-bridge-config.json')
+// The bridge also syncs on its own timer so stop values stay fresh whenever
+// this Mac is awake and IBKR Desktop is open — no matter which device the
+// user pressed "Sync now" on (a phone browser cannot reach 127.0.0.1).
+const AUTO_SYNC_BASE_MS = Number(process.env.IBKR_STOP_BRIDGE_AUTO_SYNC_MS || 10 * 60 * 1000)
+const AUTO_SYNC_MAX_BACKOFF_MS = 60 * 60 * 1000
 const execFileAsync = promisify(execFile)
 
 async function readStopHistory() {
@@ -310,6 +316,77 @@ async function syncStops(userId) {
   return result
 }
 
+async function loadBridgeUserId() {
+  try {
+    const config = JSON.parse(await readFile(BRIDGE_CONFIG_PATH, 'utf8'))
+    if (typeof config?.userId === 'string' && /^[0-9a-f-]{36}$/i.test(config.userId)) {
+      return config.userId
+    }
+  } catch {}
+  // Fall back to the (single) journal user recorded in user_settings, so the
+  // timer works even before the first browser-triggered sync on this Mac.
+  try {
+    const { url, serviceRoleKey } = requireEnvironment()
+    const supabase = createClient(url, serviceRoleKey, { auth: { persistSession: false } })
+    const { data } = await supabase.from('user_settings').select('user_id').limit(1)
+    const userId = data?.[0]?.user_id
+    if (typeof userId === 'string' && userId) {
+      await saveBridgeUserId(userId)
+      return userId
+    }
+  } catch {}
+  return null
+}
+
+async function saveBridgeUserId(userId) {
+  try {
+    await mkdir(STOP_HISTORY_DIR, { recursive: true })
+    await writeFile(
+      BRIDGE_CONFIG_PATH,
+      JSON.stringify({ userId, updatedAt: new Date().toISOString() }),
+      { mode: 0o600 },
+    )
+  } catch {}
+}
+
+let autoSyncTimer = null
+let autoSyncRunning = false
+let autoSyncDelayMs = AUTO_SYNC_BASE_MS
+
+function scheduleAutoSync(delayMs) {
+  if (autoSyncTimer) clearTimeout(autoSyncTimer)
+  autoSyncTimer = setTimeout(runAutoSync, delayMs)
+  autoSyncTimer.unref?.()
+}
+
+async function runAutoSync() {
+  if (autoSyncRunning) {
+    scheduleAutoSync(AUTO_SYNC_BASE_MS)
+    return
+  }
+  autoSyncRunning = true
+  try {
+    const userId = await loadBridgeUserId()
+    if (!userId) {
+      scheduleAutoSync(AUTO_SYNC_BASE_MS)
+      return
+    }
+    const result = await syncStops(userId)
+    if (String(result.source ?? '').startsWith('cached')) {
+      // Desktop read failed and only cached history applied — back off so a
+      // closed IBKR Desktop is not polled aggressively all day.
+      autoSyncDelayMs = Math.min(autoSyncDelayMs * 2, AUTO_SYNC_MAX_BACKOFF_MS)
+    } else {
+      autoSyncDelayMs = AUTO_SYNC_BASE_MS
+    }
+  } catch {
+    autoSyncDelayMs = Math.min(autoSyncDelayMs * 2, AUTO_SYNC_MAX_BACKOFF_MS)
+  } finally {
+    autoSyncRunning = false
+    scheduleAutoSync(autoSyncDelayMs)
+  }
+}
+
 const server = http.createServer(async (request, response) => {
   const origin = request.headers.origin ?? ''
   const headers = corsHeaders(origin, request)
@@ -332,6 +409,7 @@ const server = http.createServer(async (request, response) => {
   try {
     const body = await readJson(request)
     const result = await syncStops(body.userId)
+    void saveBridgeUserId(body.userId)
     sendJson(response, 200, result, headers)
   } catch (error) {
     sendJson(response, 503, { error: error instanceof Error ? error.message : String(error) }, headers)
@@ -340,6 +418,10 @@ const server = http.createServer(async (request, response) => {
 
 server.listen(BRIDGE_PORT, '127.0.0.1', () => {
   console.log(`IBKR stop bridge listening on http://127.0.0.1:${BRIDGE_PORT}`)
+  if (AUTO_SYNC_BASE_MS > 0) {
+    console.log(`IBKR stop bridge auto-sync armed (every ${Math.round(AUTO_SYNC_BASE_MS / 60000)} min while IBKR Desktop is reachable)`)
+    scheduleAutoSync(45_000)
+  }
 })
 
 server.on('error', error => {

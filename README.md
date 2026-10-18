@@ -28,6 +28,8 @@ npm run ibkr:stop-bridge:install
 
 The bridge runs only on `127.0.0.1` and starts automatically at login. Keep TWS logged in when pressing `Sync now`.
 
+The bridge also syncs stops on its own every 10 minutes (backing off to hourly while IBKR Desktop is unreachable), so stop values stay fresh whenever the Mac is awake and IBKR Desktop is open — no matter which device triggered the trade sync. The user id is learned from the first browser-triggered sync (or from `user_settings`) and stored in `~/Library/Application Support/Trading Analyzer/ibkr-stop-bridge-config.json`. Set `IBKR_STOP_BRIDGE_AUTO_SYNC_MS=0` to disable the timer. After pulling bridge changes, restart it with `launchctl kickstart -k gui/$(id -u)/com.welsnake.trading-analyzer.ibkr-stop-bridge`.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
