@@ -15,6 +15,7 @@ import {
   Upload,
   LayoutDashboard,
   LogOut,
+  X,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -27,7 +28,12 @@ const nav = [
   { href: '/import', label: 'Import', icon: Upload },
 ]
 
-export function Sidebar() {
+interface SidebarProps {
+  mobileOpen?: boolean
+  onClose?: () => void
+}
+
+export function Sidebar({ mobileOpen = false, onClose }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
   const supabase = createClient()
@@ -40,10 +46,23 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="flex h-screen w-52 shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground">
+    <aside
+      className={cn(
+        // Mobile: fixed slide-in drawer. Desktop (md+): static column, as before.
+        'fixed inset-y-0 left-0 z-40 flex h-full w-64 shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground transition-transform duration-200 md:static md:z-auto md:h-screen md:w-52 md:translate-x-0',
+        mobileOpen ? 'translate-x-0' : '-translate-x-full'
+      )}
+    >
       <div className="flex h-14 items-center gap-2 border-b px-4">
         <LineChart className="size-5 shrink-0" />
         <span className="truncate font-semibold text-sm">Trading Journal</span>
+        <button
+          onClick={onClose}
+          aria-label="Close menu"
+          className="ml-auto rounded-md p-1.5 text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground md:hidden"
+        >
+          <X className="size-5" />
+        </button>
       </div>
 
       <nav className="flex-1 space-y-0.5 px-2 py-3">
@@ -52,6 +71,7 @@ export function Sidebar() {
             key={href}
             href={href}
             prefetch={false}
+            onClick={onClose}
             className={cn(
               'flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors',
               pathname === href

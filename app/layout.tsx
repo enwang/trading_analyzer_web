@@ -6,6 +6,11 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Trading Journal",
   description: "Personal trading analytics dashboard",
+  appleWebApp: {
+    capable: true,
+    title: "Trading Journal",
+    statusBarStyle: "black-translucent",
+  },
 };
 
 export default function RootLayout({

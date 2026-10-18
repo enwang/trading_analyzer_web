@@ -316,7 +316,7 @@ export function OverviewContent({
   return (
     <div className="space-y-6">
       {/* Date range selector */}
-      <div className="flex gap-1">
+      <div className="flex flex-wrap gap-1">
         {DATE_RANGES.map((r) => (
           <button
             key={r}
@@ -336,7 +336,7 @@ export function OverviewContent({
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0">
+          <CardHeader className="flex flex-col gap-2 space-y-0 sm:flex-row sm:items-center sm:justify-between">
             <CardTitle className="text-sm font-medium">Account Equity</CardTitle>
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <span>From</span>
