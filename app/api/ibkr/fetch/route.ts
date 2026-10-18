@@ -160,6 +160,19 @@ export async function POST(request: NextRequest) {
     let rows: UpsertRow[] = trades.map(t => ({ ...t, user_id: user.id, needs_review: false, stop_loss_locked: false }))
     rows = filterOutHidden(rows, hiddenKeys)
 
+    // "New" trades for the sync message: incoming entries the journal has
+    // never seen, matched on symbol + entry time — so a tracked open
+    // position that merely closed during this sync is not counted as new.
+    const existingEntryKeys = new Set(
+      (existingRows ?? []).map(r => `${r.symbol}|${(r.entry_time ?? '').slice(0, 19)}`)
+    )
+    const newTrades = new Set(
+      rows
+        .filter(r => r.entry_time)
+        .map(r => `${r.symbol}|${(r.entry_time ?? '').slice(0, 19)}`)
+        .filter(k => !existingEntryKeys.has(k))
+    ).size
+
     if (touchedSymbols.length > 0) {
       const normalizeTs = (t: string | null | undefined) => t ? t.slice(0, 19) : ''
 
@@ -349,7 +362,7 @@ export async function POST(request: NextRequest) {
     ).throwOnError())
 
     scheduleTradeBackup(supabase, user.id)
-    return respond({ userId: user.id, upserted, skipped, snapshotId: snapshot?.id ?? null, snapshotReused: snapshot?.reused ?? false })
+    return respond({ userId: user.id, upserted, skipped, newTrades, snapshotId: snapshot?.id ?? null, snapshotReused: snapshot?.reused ?? false })
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e)
     return respond({ error: msg }, 500)

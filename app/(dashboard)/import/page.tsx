@@ -112,7 +112,11 @@ export default function ImportPage() {
       if (!res.ok) {
         setSyncMsg(`Error: ${json.error ?? res.statusText}`)
       } else {
-        const tradeMessage = `Synced ${json.upserted} trades.`
+        const tradeMessage = typeof json.newTrades === 'number'
+          ? json.newTrades > 0
+            ? `Synced ${json.newTrades} new trade${json.newTrades === 1 ? '' : 's'}.`
+            : 'Synced. No new trades.'
+          : `Synced ${json.upserted} trades.`
         setSyncMsg(tradeMessage)
         setSyncing(false)
         setLastSync(new Date().toISOString().slice(0, 10))
