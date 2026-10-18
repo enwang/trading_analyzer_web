@@ -1,7 +1,7 @@
 'use client'
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import type { MonthlyReturnRow, MonthlyStatsRow, YearlyAveragesRow, MonthlyBenchmarks } from '@/lib/monthly-recap'
+import type { MonthlyReturnRow, MonthlyStatsRow, YearlyAveragesRow } from '@/lib/monthly-recap'
 
 function fmtPct(n: number | null, sign = false): string {
   if (n == null) return '—'
@@ -35,25 +35,14 @@ interface Props {
   yearly: YearlyAveragesRow
   selectedMonthKey?: string | null
   onSelectMonth?: (monthKey: string) => void
-  benchmarks?: MonthlyBenchmarks | null
 }
 
-export function MonthlyRecap({ year, returns, stats, yearly, selectedMonthKey, onSelectMonth, benchmarks }: Props) {
-  const currentMonthKey = new Date().toISOString().slice(0, 7)
-  const benchCell = (row: MonthlyReturnRow, pick: (b: MonthlyBenchmarks) => Record<string, number>) => {
-    if (!benchmarks) return null
-    const v = pick(benchmarks)[row.monthKey]
-    return (
-      <td className={`px-3 py-2 text-right font-mono ${returnClass(v ?? null)}`}>
-        {fmtPct(v ?? null, true)}
-      </td>
-    )
-  }
+export function MonthlyRecap({ year, returns, stats, yearly, selectedMonthKey, onSelectMonth }: Props) {
   return (
     <div className="space-y-4">
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm font-medium">{year} Recap — Monthly Returns{benchmarks ? ' vs Benchmarks' : ''}</CardTitle>
+          <CardTitle className="text-sm font-medium">{year} Recap — Monthly Returns</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
@@ -65,14 +54,6 @@ export function MonthlyRecap({ year, returns, stats, yearly, selectedMonthKey, o
                   <th className="px-3 py-2 text-right">Ending NAV</th>
                   <th className="px-3 py-2 text-right">Deposits / Withdrawals</th>
                   <th className="px-3 py-2 text-right">Month Return</th>
-                  {benchmarks && (
-                    <>
-                      <th className="px-3 py-2 text-right">SPY</th>
-                      <th className="px-3 py-2 text-right">QQQ</th>
-                      <th className="px-3 py-2 text-right">BRK.B</th>
-                      <th className="px-3 py-2 text-right">vs SPY</th>
-                    </>
-                  )}
                   <th className="px-3 py-2 text-right">Cumulative Return</th>
                 </tr>
               </thead>
@@ -86,9 +67,6 @@ export function MonthlyRecap({ year, returns, stats, yearly, selectedMonthKey, o
                         onClick={() => onSelectMonth?.(row.monthKey)}
                       >
                         {row.monthLabel}
-                        {row.monthKey === currentMonthKey && (
-                          <span className="ml-1 text-xs font-normal text-muted-foreground">MTD</span>
-                        )}
                       </button>
                     </td>
                     <td className="px-3 py-2 text-right font-mono">{fmtMoney(row.startingNav)}</td>
@@ -97,18 +75,6 @@ export function MonthlyRecap({ year, returns, stats, yearly, selectedMonthKey, o
                     <td className={`px-3 py-2 text-right font-mono ${returnClass(row.monthReturnPct)}`}>
                       {fmtPct(row.monthReturnPct, true)}
                     </td>
-                    {benchCell(row, (b) => b.spy)}
-                    {benchCell(row, (b) => b.qqq)}
-                    {benchCell(row, (b) => b.brkb)}
-                    {benchmarks && (() => {
-                      const spy = benchmarks.spy[row.monthKey]
-                      const excess = row.monthReturnPct != null && spy != null ? row.monthReturnPct - spy : null
-                      return (
-                        <td className={`px-3 py-2 text-right font-mono font-semibold ${returnClass(excess)}`}>
-                          {fmtPct(excess, true)}
-                        </td>
-                      )
-                    })()}
                     <td className={`px-3 py-2 text-right font-mono ${returnClass(row.cumulativeReturnPct)}`}>
                       {fmtPct(row.cumulativeReturnPct, true)}
                     </td>
@@ -116,7 +82,7 @@ export function MonthlyRecap({ year, returns, stats, yearly, selectedMonthKey, o
                 ))}
                 {returns.length === 0 && (
                   <tr>
-                    <td colSpan={benchmarks ? 10 : 6} className="px-3 py-6 text-center text-muted-foreground">
+                    <td colSpan={6} className="px-3 py-6 text-center text-muted-foreground">
                       No NAV data yet. Run a sync after enabling Net Asset Value (NAV) in Base in your Flex Query.
                     </td>
                   </tr>

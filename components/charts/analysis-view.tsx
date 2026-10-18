@@ -25,7 +25,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { type DateRangeKey, DATE_RANGES, getStartDate } from '@/lib/date-range'
 import { MonthlyRecap } from '@/components/charts/monthly-recap'
-import type { MonthlyReturnRow, MonthlyStatsRow, YearlyAveragesRow, MonthlyBenchmarks } from '@/lib/monthly-recap'
+import type { MonthlyReturnRow, MonthlyStatsRow, YearlyAveragesRow } from '@/lib/monthly-recap'
 import {
   Table,
   TableBody,
@@ -79,7 +79,6 @@ interface AnalysisData {
     returns: MonthlyReturnRow[]
     stats: MonthlyStatsRow[]
     yearly: YearlyAveragesRow
-    benchmarks?: MonthlyBenchmarks
   }
 }
 
@@ -986,7 +985,6 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
           returns={data.monthlyRecap.returns}
           stats={data.monthlyRecap.stats}
           yearly={data.monthlyRecap.yearly}
-          benchmarks={data.monthlyRecap.benchmarks}
           selectedMonthKey={selectedMonthKey}
           onSelectMonth={handleSelectMonth}
         />

@@ -9,10 +9,7 @@ import {
   computeMonthlyReturns,
   computeMonthlyStats,
   computeYearlyAverages,
-  computeBenchmarkMonthlyReturns,
-  type MonthlyBenchmarks,
 } from '@/lib/monthly-recap'
-import { fetchTickerReturns } from '@/lib/market/benchmarks'
 
 export default async function AnalysisPage() {
   const supabase = await createClient()
@@ -65,21 +62,6 @@ export default async function AnalysisPage() {
   const yearlyAverages = computeYearlyAverages(trades, recapYear)
   const recapReturns = monthlyReturns.rows
   const recapStats = monthlyStats.filter((r) => r.monthKey.startsWith(recapYear))
-
-  // Benchmark monthly returns (SPY / QQQ / BRK.B) over the same recap year, so
-  // the Monthly Recap table can show the account against the indexes per month.
-  const benchStart = `${recapYear}-01-01`
-  const benchEnd = (navRows ?? [])[(navRows ?? []).length - 1]?.report_date ?? new Date().toISOString().slice(0, 10)
-  const [spySeries, qqqSeries, brkbSeries] = await Promise.all([
-    fetchTickerReturns('SPY', benchStart, benchEnd),
-    fetchTickerReturns('QQQ', benchStart, benchEnd),
-    fetchTickerReturns('BRK-B', benchStart, benchEnd),
-  ])
-  const benchmarks: MonthlyBenchmarks = {
-    spy: computeBenchmarkMonthlyReturns(spySeries),
-    qqq: computeBenchmarkMonthlyReturns(qqqSeries),
-    brkb: computeBenchmarkMonthlyReturns(brkbSeries),
-  }
 
   const normalizedClosed = trades.filter((t) => t.outcome !== 'open' && t.pnl != null)
   const avgRealizedRMultiple = summary.expectancy / DEFAULT_INITIAL_RISK_AMOUNT
@@ -135,7 +117,6 @@ export default async function AnalysisPage() {
       returns: recapReturns,
       stats: recapStats,
       yearly: yearlyAverages,
-      benchmarks,
     },
   }
 
