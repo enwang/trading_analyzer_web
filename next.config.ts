@@ -7,6 +7,17 @@ const nextConfig: NextConfig = {
     // Vercel sets VERCEL_GIT_COMMIT_SHA automatically for git deployments.
     NEXT_PUBLIC_BUILD_VERSION: process.env.VERCEL_GIT_COMMIT_SHA ?? "dev",
   },
+  async headers() {
+    return [
+      {
+        // The service worker script itself must never be HTTP-cached, or a
+        // new worker version would only be picked up after the browser's
+        // 24h service-worker update check.
+        source: "/sw.js",
+        headers: [{ key: "Cache-Control", value: "no-cache, no-store, must-revalidate" }],
+      },
+    ];
+  },
   experimental: {
     staleTimes: {
       // Tab-to-tab navigation reuses the client router cache for 3 minutes
