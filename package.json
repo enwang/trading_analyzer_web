@@ -20,7 +20,13 @@
     "ibkr:stop-bridge:install": "node scripts/install-ibkr-stop-bridge.mjs",
     "rag:transcribe": "node scripts/batch-transcribe.mjs",
     "rag:build": "node scripts/rag-build.mjs",
-    "rag:query": "node scripts/rag-query.mjs"
+    "rag:query": "node scripts/rag-query.mjs",
+    "ibkr:gateway": "node scripts/start-ibkr-web-gateway.mjs",
+    "test:web-stop-orders-regression": "node scripts/web-stop-orders-regression.mjs",
+    "ibkr:gateway:configure": "node --env-file=.env.local scripts/configure-ibkr-web-sync.mjs",
+    "ibkr:gateway:install": "node scripts/install-ibkr-web-gateway.mjs",
+    "test:gateway-session-regression": "node scripts/gateway-session-regression.mjs",
+    "ibkr:gateway:notifications": "node scripts/install-gateway-notifications.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.88.0",
