@@ -27,7 +27,7 @@ const DESKTOP_ORDERS_HELPER = process.env.IBKR_DESKTOP_ORDERS_HELPER
   )
 const STOP_HISTORY_DIR = join(homedir(), 'Library', 'Application Support', 'Trading Analyzer')
 const STOP_HISTORY_PATH = join(STOP_HISTORY_DIR, 'ibkr-stop-order-history.json')
-const STOP_HISTORY_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
+const STOP_HISTORY_MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000
 const BRIDGE_CONFIG_PATH = join(STOP_HISTORY_DIR, 'ibkr-stop-bridge-config.json')
 // The bridge also syncs on its own timer so stop values stay fresh whenever
 // this Mac is awake and IBKR Desktop is open — no matter which device the

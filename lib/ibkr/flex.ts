@@ -85,7 +85,7 @@ export async function fetchFlexAll(
   phaseStart = performance.now()
   const trimmed = raw.trimStart()
   const result = trimmed.startsWith('<')
-    ? { trades: parseXml(raw), navDaily: [], navChange: [], cashTransactions: [] }
+    ? { trades: parseXml(raw), navDaily: [], navChange: [], cashTransactions: [], orders: [] }
     : extractFlexCsv(raw)
   onTiming?.('broker_parse', Math.round(performance.now() - phaseStart))
   return result
@@ -248,11 +248,25 @@ export interface CashTransactionRow {
   description: string | null
 }
 
+export interface FlexOrder {
+  order_id: number | null
+  symbol: string
+  action: string          // 'BUY' | 'SELL' (normalized when recognizable)
+  quantity: number
+  order_type: string      // e.g. 'STP', 'STP LMT', 'LMT'
+  stop_price: number | null   // Aux. Price for stop orders
+  limit_price: number | null
+  status: string          // raw IBKR status, e.g. 'Filled', 'Submitted'
+  order_time: string | null   // ISO 8601 UTC
+  fill_price: number | null
+}
+
 export interface FlexExtract {
   trades: NormalizedTrade[]
   navDaily: NavDailyRow[]
   navChange: NavChangeRow[]
   cashTransactions: CashTransactionRow[]
+  orders: FlexOrder[]
 }
 
 const SECTION_HEADER_HINTS = [
@@ -287,7 +301,7 @@ export function splitFlexCsvSections(csvStr: string): { header: string; body: st
   return sections
 }
 
-type FlexSectionKind = 'trades' | 'open_positions' | 'nav_daily' | 'nav_change' | 'cash_transactions' | 'unknown'
+type FlexSectionKind = 'trades' | 'open_positions' | 'orders' | 'nav_daily' | 'nav_change' | 'cash_transactions' | 'unknown'
 
 type OpenPositionSnapshot = {
   symbol: string
@@ -298,6 +312,9 @@ type OpenPositionSnapshot = {
 function classifySection(header: string): FlexSectionKind {
   const h = header.toLowerCase()
   const hasSymbol = h.includes('"symbol"') || h.includes(',symbol,') || h.includes(',symbol"')
+  // Orders section MUST be checked before trades: its header also carries
+  // Symbol + Buy/Sell, but only Orders has Order Status / Aux. Price columns.
+  if (hasSymbol && (h.includes('orderstatus') || h.includes('order status') || h.includes('aux. price') || h.includes('auxprice'))) return 'orders'
   // Trades section is wide and includes Symbol + TradeID + OpenIndicator/OpenCloseIndicator
   if (hasSymbol && (h.includes('tradeid') || h.includes('"buysell"') || h.includes(',buysell,') || h.includes('buy/sell'))) return 'trades'
   if (hasSymbol && h.includes('position') && !h.includes('tradeid')) return 'open_positions'
@@ -452,13 +469,44 @@ function parseOpenPositionsCsv(csv: string): OpenPositionSnapshot[] {
   return rows
 }
 
+function parseOrdersCsv(csv: string): FlexOrder[] {
+  const result = Papa.parse<Record<string, string>>(csv, {
+    header: true,
+    skipEmptyLines: true,
+    transformHeader: (h: string) => h.trim().toLowerCase(),
+  })
+  const orders: FlexOrder[] = []
+  for (const row of (result.data ?? []) as Record<string, string>[]) {
+    const symbol = (row['symbol'] ?? '').trim().toUpperCase()
+    const quantity = parseNum(row['quantity'])
+    if (!symbol || quantity == null) continue
+    const rawAction = (row['buy/sell'] ?? row['buysell'] ?? row['action'] ?? '').trim().toUpperCase()
+    const action = rawAction.startsWith('S') ? 'SELL' : rawAction.startsWith('B') ? 'BUY' : rawAction
+    const dtRaw = row['date/time'] ?? row['datetime'] ?? row['order date/time'] ?? row['orderdatetime'] ?? row['date']
+    const parsedDate = dtRaw ? parseIbkrDatetime(dtRaw) : null
+    orders.push({
+      order_id: parseNum(row['order id'] ?? row['orderid'] ?? row['ib order id'] ?? row['iborderid']),
+      symbol,
+      action,
+      quantity,
+      order_type: (row['order type'] ?? row['ordertype'] ?? row['type'] ?? '').trim(),
+      stop_price: parseNum(row['aux. price'] ?? row['auxprice'] ?? row['aux price'] ?? row['stop price'] ?? row['stopprice']),
+      limit_price: parseNum(row['limit price'] ?? row['limitprice'] ?? row['lmt. price']),
+      status: (row['order status'] ?? row['orderstatus'] ?? row['status'] ?? '').trim(),
+      order_time: parsedDate ? toUtcIso(parsedDate) : null,
+      fill_price: parseNum(row['fill price'] ?? row['fillprice'] ?? row['avg fill price'] ?? row['average fill price']),
+    })
+  }
+  return orders
+}
+
 function extractFlexCsv(csvStr: string): FlexExtract {
   const sections = splitFlexCsvSections(csvStr)
   // Fallback: when no recognizable section headers are present (e.g. older
   // single-section trades exports that don't start with ClientAccountID), treat
   // the whole CSV as a trades section so backwards-compat callers still work.
   if (sections.length === 0) {
-    return { trades: parseTradesCsv(csvStr), navDaily: [], navChange: [], cashTransactions: [] }
+    return { trades: parseTradesCsv(csvStr), navDaily: [], navChange: [], cashTransactions: [], orders: [] }
   }
 
   const tradeSections: string[] = []
@@ -467,6 +515,7 @@ function extractFlexCsv(csvStr: string): FlexExtract {
   const navDaily: NavDailyRow[] = []
   const navChange: NavChangeRow[] = []
   const cashTransactions: CashTransactionRow[] = []
+  const orders: FlexOrder[] = []
 
   for (const sec of sections) {
     const kind = classifySection(sec.header)
@@ -481,6 +530,8 @@ function extractFlexCsv(csvStr: string): FlexExtract {
       navChange.push(...parseNavChangeCsv(csv))
     } else if (kind === 'cash_transactions') {
       cashTransactions.push(...parseCashTransactionsCsv(csv))
+    } else if (kind === 'orders') {
+      orders.push(...parseOrdersCsv(csv))
     }
   }
 
@@ -488,7 +539,7 @@ function extractFlexCsv(csvStr: string): FlexExtract {
     trades = parseTradesCsv(tradeSections.join('\n'), openPositions)
   }
 
-  return { trades, navDaily, navChange, cashTransactions }
+  return { trades, navDaily, navChange, cashTransactions, orders }
 }
 
 export function parseFlexStatement(csvStr: string): FlexExtract {
@@ -510,7 +561,21 @@ function parseTradesCsv(csvStr: string, openPositionSnapshots: OpenPositionSnaps
     transformHeader: (h: string) => h.trim().toLowerCase(),
   })
 
-  const raw = result.data as Record<string, string>[]
+  const parsedRows = result.data as Record<string, string>[]
+  if (!parsedRows.length) return []
+
+  // When the Flex query also enables the Orders level of detail, the Trades
+  // section mixes ORDER rows (one per order; their TradePrice is the order's
+  // average fill price) in with EXECUTION rows. Only executions describe
+  // fills — drop every other level so an order row can never be mistaken
+  // for a trade leg. Exports without the column keep all rows.
+  const levelKey = Object.keys(parsedRows[0]).find(k => k === 'levelofdetail')
+  const raw = levelKey
+    ? parsedRows.filter(row => {
+        const level = (row[levelKey] ?? '').trim().toUpperCase()
+        return level === '' || level.includes('EXECUTION')
+      })
+    : parsedRows
   if (!raw.length) return []
 
   // Case-insensitive column lookup

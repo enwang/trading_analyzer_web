@@ -24,6 +24,27 @@ if (navStatement.navChange.length !== 1 || navStatement.navChange[0].twr !== 8.3
   fail(`expected IBKR TWR 8.31, got ${JSON.stringify(navStatement.navChange)}`)
 }
 
+// Mixed level-of-detail Trades section: when the query enables the Orders
+// level, ORDER rows (TradePrice = the order's average fill) sit next to
+// EXECUTION rows. They must never become trade legs — the executions alone
+// define the trade.
+const mixedLevelTrades = parseFlexCsv(`ClientAccountID,Symbol,DateTime,Quantity,TradePrice,Open/CloseIndicator,Buy/Sell,TradeID,IBOrderID,LevelOfDetail,OrderType
+U123,XYZ,2026-10-01 09:30:00,100,50,O,BUY,T1,111,EXECUTION,LMT
+U123,XYZ,2026-10-03 10:00:00,-100,55,C,SELL,T2,222,EXECUTION,STP
+U123,XYZ,2026-10-03 10:00:00,-100,55,C,SELL,,222,ORDER,STP
+U123,XYZ,2026-10-03 10:05:00,-100,45,C,SELL,,333,ORDER,STP
+`)
+if (mixedLevelTrades.length !== 1) {
+  fail(`expected 1 trade from executions only, got ${mixedLevelTrades.length}`)
+}
+const mixedTrade = mixedLevelTrades[0]
+if ((mixedTrade.shares ?? 0) !== 100 || mixedTrade.exit_time == null) {
+  fail(`expected one closed 100-share trade, got ${JSON.stringify(mixedTrade)}`)
+}
+if (Math.abs((mixedTrade.pnl ?? 0) - 500) > 1e-6) {
+  fail(`expected pnl 500 from executions only, got ${mixedTrade.pnl}`)
+}
+
 if (hasCsv) {
 const wins = trades.filter((t) => t.outcome === 'win').length
 if (wins !== 12) {
