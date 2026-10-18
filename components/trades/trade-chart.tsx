@@ -1207,8 +1207,8 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
       <div className="overflow-hidden rounded-lg border border-[#d8dce5] bg-white">
 
         {/* Header bar */}
-        <div className="flex items-center justify-between border-b border-[#e6e9ef] px-3 py-2">
-          <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-[#e6e9ef] px-3 py-2">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className="text-sm font-semibold tracking-tight text-[#23262d]">{symbol}</span>
             <span className="text-xs text-[#6f7687]">{formatTradeDate(entryTime, userTimeZone)}</span>
             {entryPrice != null && (

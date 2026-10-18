@@ -473,11 +473,11 @@ export function TradeDetailTabs(props: Props) {
             <SectionTitle>Executions</SectionTitle>
             {mergedLegs.length > 0 ? (
               <div className="overflow-hidden rounded-md border">
-                <div className="grid grid-cols-[1fr_auto_auto_auto_auto] bg-muted/40 px-2 py-1 text-[11px] font-medium text-muted-foreground">
+                <div className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto_auto] gap-x-1 bg-muted/40 px-1.5 py-1 text-[11px] font-medium text-muted-foreground sm:px-2">
                   <span>Time</span>
-                  <span className="px-2">Action</span>
-                  <span className="px-2 text-right">Price</span>
-                  <span className="px-2 text-right">Qty</span>
+                  <span className="px-1 sm:px-2">Action</span>
+                  <span className="px-1 text-right sm:px-2">Price</span>
+                  <span className="px-1 text-right sm:px-2">Qty</span>
                   <span className="text-right">P&L</span>
                 </div>
                 {mergedLegs.map((leg, i) => {
@@ -485,11 +485,11 @@ export function TradeDetailTabs(props: Props) {
                   const qty = signedQty(leg.action, leg.shares)
                   const quantity = formatShares(Math.abs(qty))
                   return (
-                    <div key={`${leg.time}-${leg.action}-${i}`} className="grid grid-cols-[1fr_auto_auto_auto_auto] items-center border-t px-2 py-1.5 text-[11px]">
-                      <LocalTime date={leg.time} className="font-mono text-muted-foreground" />
-                      <span className={`px-2 font-medium ${leg.action === 'BUY' ? 'text-emerald-700' : 'text-red-700'}`}>{leg.action}</span>
-                      <span className="px-2 text-right">${leg.price.toFixed(2)}</span>
-                      <span className="px-2 text-right">{qty > 0 ? `+${quantity}` : `-${quantity}`}</span>
+                    <div key={`${leg.time}-${leg.action}-${i}`} className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto_auto] items-center gap-x-1 border-t px-1.5 py-1.5 text-[11px] sm:px-2">
+                      <LocalTime date={leg.time} className="block truncate font-mono text-muted-foreground" />
+                      <span className={`px-1 font-medium sm:px-2 ${leg.action === 'BUY' ? 'text-emerald-700' : 'text-red-700'}`}>{leg.action}</span>
+                      <span className="px-1 text-right sm:px-2">${leg.price.toFixed(2)}</span>
+                      <span className="px-1 text-right sm:px-2">{qty > 0 ? `+${quantity}` : `-${quantity}`}</span>
                       <span className={`text-right ${gross != null && gross > 0 ? 'text-emerald-700' : gross != null && gross < 0 ? 'text-red-700' : ''}`}>
                         {gross != null ? `${gross >= 0 ? '+' : ''}$${gross.toFixed(2)}` : '—'}
                       </span>

@@ -185,10 +185,10 @@ export default async function TradeDetailsPage({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
           <BackToTradesButton href={backHref} label={backLabel} />
-          <h1 className="text-xl font-semibold">
+          <h1 className="truncate text-xl font-semibold">
             {trade.symbol} Trade Details
           </h1>
         </div>
