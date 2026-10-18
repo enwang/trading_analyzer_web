@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { computeSummary } from '@/lib/metrics'
 import type { Trade } from '@/types/trade'
 import { AccountEquityCurve } from '@/components/charts/account-equity-curve'
+import { MonthlyBenchmarkCard } from '@/components/overview/monthly-benchmark-card'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { OverviewKpiGrid, type CardConfig } from '@/components/overview/overview-kpi-grid'
 import { type DateRangeKey, DATE_RANGES, getStartDate } from '@/lib/date-range'
@@ -256,6 +257,12 @@ export function OverviewContent({
             />
           </CardContent>
         </Card>
+        <MonthlyBenchmarkCard
+          navData={navData}
+          navChanges={navChanges}
+          cashDeposits={cashDeposits}
+          spyReturns={spyReturns}
+        />
       </div>
     </div>
   )
