@@ -15,6 +15,18 @@ type BenchmarkRow = { date: string; pct: number }
 
 const LS_RANGE_KEY = 'overview-date-range'
 
+function monthLabelOf(monthKey: string): string {
+  const [y, m] = monthKey.split('-').map(Number)
+  const d = new Date(Date.UTC(y, m - 1, 1))
+  return `${d.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' })} ${String(y).slice(-2)}`
+}
+
+function monthWindow(monthKey: string): { start: string; end: string } {
+  const [y, m] = monthKey.split('-').map(Number)
+  const end = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10)
+  return { start: `${monthKey}-01`, end }
+}
+
 function rebase(data: BenchmarkRow[], startDate: string): BenchmarkRow[] {
   // Use the last point BEFORE startDate as the 0% baseline so the benchmark
   // starts from the same reference point as the NAV baseline row.
@@ -108,6 +120,53 @@ export function OverviewContent({
     if (!startDate) return cashDeposits
     return cashDeposits.filter(r => r.transaction_ts.slice(0, 10) >= startDate)
   }, [cashDeposits, startDate])
+
+  // Chart-only month selection: when a month is picked, the equity chart shows
+  // just that calendar month (account + benchmarks rebased to the month start),
+  // independent of the page date-range that drives the KPI cards.
+  const [chartMonth, setChartMonth] = useState<string | null>(null)
+
+  const chartMonths = useMemo(() => {
+    const keys = [...new Set(navData.map(r => r.report_date.slice(0, 7)))].sort()
+    return keys.reverse().map(key => ({ key, label: monthLabelOf(key) }))
+  }, [navData])
+
+  const chartView = useMemo(() => {
+    if (!chartMonth) {
+      return {
+        nav: filteredNavData,
+        changes: filteredNavChanges,
+        deposits: filteredDeposits,
+        spy: filteredSpy,
+        qqq: filteredQqq,
+        soxx: filteredSoxx,
+        arkk: filteredArkk,
+        brkb: filteredBrkb,
+        disableAnchors: range === 'WTD' || range === 'MTD',
+      }
+    }
+    const { start, end } = monthWindow(chartMonth)
+    const inMonth = navData.filter(r => r.report_date >= start && r.report_date <= end)
+    const prior = [...navData].filter(r => r.report_date < start).pop()
+    const monthBench = (series: BenchmarkRow[]) => rebase(series, start).filter(r => r.date <= end)
+    // Include deposits from a few days before the month so the chart's
+    // settlement-day matching still sees early-month deposits.
+    const depositStart = (() => { const dt = new Date(start + 'T12:00:00Z'); dt.setUTCDate(dt.getUTCDate() - 4); return dt.toISOString().slice(0, 10) })()
+    return {
+      nav: prior ? [prior, ...inMonth] : inMonth,
+      changes: navChanges.filter(c => c.to_date >= start && c.from_date <= end),
+      deposits: cashDeposits.filter(r => {
+        const d = r.transaction_ts.slice(0, 10)
+        return d >= depositStart && d <= end
+      }),
+      spy: monthBench(spyReturns),
+      qqq: monthBench(qqqReturns),
+      soxx: monthBench(soxxReturns),
+      arkk: monthBench(arkkReturns),
+      brkb: monthBench(brkbReturns),
+      disableAnchors: true,
+    }
+  }, [chartMonth, navData, navChanges, cashDeposits, spyReturns, qqqReturns, soxxReturns, arkkReturns, brkbReturns, filteredNavData, filteredNavChanges, filteredDeposits, filteredSpy, filteredQqq, filteredSoxx, filteredArkk, filteredBrkb, range])
 
   const stats = useMemo(() => computeSummary(filteredTrades), [filteredTrades])
 
@@ -238,21 +297,32 @@ export function OverviewContent({
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <CardTitle className="text-sm font-medium">Account Equity</CardTitle>
+            <select
+              value={chartMonth ?? ''}
+              onChange={(e) => setChartMonth(e.target.value || null)}
+              className="rounded border border-gray-200 bg-transparent px-2 py-1 text-xs dark:border-gray-700"
+              aria-label="Chart month"
+            >
+              <option value="">All</option>
+              {chartMonths.map(m => (
+                <option key={m.key} value={m.key}>{m.label}</option>
+              ))}
+            </select>
           </CardHeader>
           <CardContent>
             <AccountEquityCurve
-              data={filteredNavData}
-              changes={filteredNavChanges}
-              deposits={filteredDeposits}
-              spy={filteredSpy}
-              qqq={filteredQqq}
-              soxx={filteredSoxx}
-              arkk={filteredArkk}
-              brkb={filteredBrkb}
+              data={chartView.nav}
+              changes={chartView.changes}
+              deposits={chartView.deposits}
+              spy={chartView.spy}
+              qqq={chartView.qqq}
+              soxx={chartView.soxx}
+              arkk={chartView.arkk}
+              brkb={chartView.brkb}
               height={240}
-              disableAnchors={range === 'WTD' || range === 'MTD'}
+              disableAnchors={chartView.disableAnchors}
             />
           </CardContent>
         </Card>
