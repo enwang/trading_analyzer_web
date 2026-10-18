@@ -29,7 +29,7 @@ export type CardConfig =
   | { id: string; type: 'account-summary'; accountEquity: number | null; startEquity: number | null; netDeposits: number; trades: OpenTradeForRisk[] }
   | { id: string; type: 'open-pnl'; trades: OpenTrade[] }
   | { id: string; type: 'open-risk'; trades: OpenTradeForRisk[]; accountEquity: number | null }
-  | { id: string; type: 'kpi'; label: React.ReactNode; value: React.ReactNode; sub?: string; trend?: 'up' | 'down'; href?: string; hoverTitle?: string; hoverItems?: string[] }
+  | { id: string; type: 'kpi'; label: React.ReactNode; value: React.ReactNode; sub?: string; trend?: 'up' | 'down'; href?: string; hoverTitle?: string; hoverItems?: string[]; hideOnMobile?: boolean }
 
 const LS_KEY = 'overview-kpi-order'
 
@@ -46,6 +46,12 @@ function renderCard(card: CardConfig) {
   }
 }
 
+// Cards flagged hideOnMobile are display:none below the sm breakpoint
+// (phone portrait) and shown normally at sm and up, desktop included.
+function hideOnMobileClass(card: CardConfig) {
+  return card.type === 'kpi' && card.hideOnMobile ? 'hidden sm:block' : undefined
+}
+
 function SortableCard({ card }: { card: CardConfig }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: card.id })
 
@@ -55,7 +61,7 @@ function SortableCard({ card }: { card: CardConfig }) {
       {...attributes}
       {...listeners}
       style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 }}
-      className={`touch-none select-none ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+      className={`touch-none select-none ${isDragging ? 'cursor-grabbing' : 'cursor-grab'} ${hideOnMobileClass(card) ?? ''}`}
     >
       {renderCard(card)}
     </div>
@@ -117,7 +123,7 @@ export function OverviewKpiGrid({ cards }: { cards: CardConfig[] }) {
     return (
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
         {orderedCards.map((card) => (
-          <div key={card.id}>{renderCard(card)}</div>
+          <div key={card.id} className={hideOnMobileClass(card)}>{renderCard(card)}</div>
         ))}
       </div>
     )

@@ -309,8 +309,8 @@ export function OverviewContent({
         </div>
       ),
     },
-    { id: 'largest-win', type: 'kpi', label: 'Largest Win', value: fmt(stats.largestWin), trend: 'up', href: largestWinTrade ? `/trades/${largestWinTrade.id}?from=overview` : undefined, hoverTitle: largestWinTrade ? `${largestWinTrade.symbol} trade` : undefined, hoverItems: largestWinTrade ? [fmtHoverDate(largestWinTrade.exitTime), fmtSigned(largestWinTrade.pnl ?? 0)] : undefined },
-    { id: 'largest-loss', type: 'kpi', label: 'Largest Loss', value: fmt(stats.largestLoss), trend: 'down', href: largestLossTrade ? `/trades/${largestLossTrade.id}?from=overview` : undefined, hoverTitle: largestLossTrade ? `${largestLossTrade.symbol} trade` : undefined, hoverItems: largestLossTrade ? [fmtHoverDate(largestLossTrade.exitTime), fmtSigned(largestLossTrade.pnl ?? 0)] : undefined },
+    { id: 'largest-win', type: 'kpi', label: 'Largest Win', value: fmt(stats.largestWin), trend: 'up', hideOnMobile: true, href: largestWinTrade ? `/trades/${largestWinTrade.id}?from=overview` : undefined, hoverTitle: largestWinTrade ? `${largestWinTrade.symbol} trade` : undefined, hoverItems: largestWinTrade ? [fmtHoverDate(largestWinTrade.exitTime), fmtSigned(largestWinTrade.pnl ?? 0)] : undefined },
+    { id: 'largest-loss', type: 'kpi', label: 'Largest Loss', value: fmt(stats.largestLoss), trend: 'down', hideOnMobile: true, href: largestLossTrade ? `/trades/${largestLossTrade.id}?from=overview` : undefined, hoverTitle: largestLossTrade ? `${largestLossTrade.symbol} trade` : undefined, hoverItems: largestLossTrade ? [fmtHoverDate(largestLossTrade.exitTime), fmtSigned(largestLossTrade.pnl ?? 0)] : undefined },
   ]
 
   return (
