@@ -112,7 +112,7 @@ export default function ImportPage() {
       if (!res.ok) {
         setSyncMsg(`Error: ${json.error ?? res.statusText}`)
       } else {
-        const tradeMessage = `Synced ${json.upserted} trades (${json.skipped} skipped).`
+        const tradeMessage = `Synced ${json.upserted} trades.`
         setSyncMsg(tradeMessage)
         setSyncing(false)
         setLastSync(new Date().toISOString().slice(0, 10))
@@ -146,7 +146,7 @@ export default function ImportPage() {
       if (!res.ok) {
         setUploadMsg(`Error: ${json.error ?? res.statusText}`)
       } else {
-        setUploadMsg(`Imported ${json.upserted} trades (${json.skipped} skipped).`)
+        setUploadMsg(`Imported ${json.upserted} trades.`)
         if (fileRef.current) fileRef.current.value = ''
         await loadSnapshots()
       }
