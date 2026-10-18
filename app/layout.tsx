@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { ThemeProvider } from "next-themes";
+import { VersionChecker } from "@/components/version-checker";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -16,6 +17,7 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body className="antialiased">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+          <VersionChecker />
           {children}
         </ThemeProvider>
       </body>

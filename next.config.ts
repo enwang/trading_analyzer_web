@@ -1,6 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  env: {
+    // Baked into the bundle at build time; the client version checker compares
+    // it against /api/version so open tabs refresh themselves after a deploy.
+    // Vercel sets VERCEL_GIT_COMMIT_SHA automatically for git deployments.
+    NEXT_PUBLIC_BUILD_VERSION: process.env.VERCEL_GIT_COMMIT_SHA ?? "dev",
+  },
   experimental: {
     staleTimes: {
       // Tab-to-tab navigation reuses the client router cache for 3 minutes
