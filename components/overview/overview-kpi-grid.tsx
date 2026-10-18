@@ -97,8 +97,31 @@ export function OverviewKpiGrid({ cards }: { cards: CardConfig[] }) {
     })
   }
 
+  // Drag-reorder is enabled only on fine-pointer (mouse) devices. On touch
+  // devices the drag sensors (touch-none) hijack scroll gestures and kept
+  // scrambling the cards by accident, so touch gets a plain grid — the saved
+  // order is still displayed, it just can't be changed by dragging there.
+  const [dragEnabled, setDragEnabled] = useState(false)
+  useEffect(() => {
+    const mq = window.matchMedia('(pointer: fine)')
+    setDragEnabled(mq.matches)
+    const onChange = (e: MediaQueryListEvent) => setDragEnabled(e.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+
   const cardMap = new Map(cards.map((c) => [c.id, c]))
   const orderedCards = orderedIds.map((id) => cardMap.get(id)).filter(Boolean) as CardConfig[]
+
+  if (!dragEnabled) {
+    return (
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+        {orderedCards.map((card) => (
+          <div key={card.id}>{renderCard(card)}</div>
+        ))}
+      </div>
+    )
+  }
 
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
