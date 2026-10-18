@@ -302,7 +302,13 @@ export function OverviewContent({
             <select
               value={chartMonth ?? ''}
               onChange={(e) => setChartMonth(e.target.value || null)}
-              className="rounded border border-gray-200 bg-transparent px-2 py-1 text-xs dark:border-gray-700"
+              className="appearance-none rounded border border-gray-200 bg-transparent py-1 pl-2 pr-8 text-xs dark:border-gray-700"
+              style={{
+                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
+                backgroundRepeat: 'no-repeat',
+                backgroundPosition: 'right 0.625rem center',
+                backgroundSize: '0.75rem',
+              }}
               aria-label="Chart month"
             >
               <option value="">All</option>

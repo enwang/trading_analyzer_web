@@ -243,8 +243,9 @@ export function AccountEquityCurve({ data, changes = [], deposits = [], spy = []
   if (showBrkb) points.forEach(p => p.brkbPct !== undefined && allPcts.push(p.brkbPct))
   const minPct = Math.min(...allPcts)
   const maxPct = Math.max(...allPcts)
-  const lastPct = points[points.length - 1].pct
-  const color = lastPct >= 0 ? '#22c55e' : '#ef4444'
+  // The account line is always the same green, in every view — its color must
+  // not flip with the sign of the displayed window's return (Wilson, Oct 18).
+  const color = '#22c55e'
 
   return (
     <div>
