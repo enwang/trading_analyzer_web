@@ -27,6 +27,34 @@ function monthWindow(monthKey: string): { start: string; end: string } {
   return { start: `${monthKey}-01`, end }
 }
 
+function MonthSelect({ value, onChange, options, disabled, ariaLabel }: {
+  value: string
+  onChange: (v: string) => void
+  options: { key: string; label: string }[]
+  disabled?: boolean
+  ariaLabel: string
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      disabled={disabled}
+      className="appearance-none rounded border border-gray-200 bg-transparent py-1 pl-2 pr-8 text-xs text-foreground dark:border-gray-700 disabled:opacity-50"
+      style={{
+        backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
+        backgroundRepeat: 'no-repeat',
+        backgroundPosition: 'right 0.625rem center',
+        backgroundSize: '0.75rem',
+      }}
+      aria-label={ariaLabel}
+    >
+      {options.map(o => (
+        <option key={o.key} value={o.key}>{o.label}</option>
+      ))}
+    </select>
+  )
+}
+
 function rebase(data: BenchmarkRow[], startDate: string): BenchmarkRow[] {
   // Use the last point BEFORE startDate as the 0% baseline so the benchmark
   // starts from the same reference point as the NAV baseline row.
@@ -121,10 +149,13 @@ export function OverviewContent({
     return cashDeposits.filter(r => r.transaction_ts.slice(0, 10) >= startDate)
   }, [cashDeposits, startDate])
 
-  // Chart-only month selection: when a month is picked, the equity chart shows
-  // just that calendar month (account + benchmarks rebased to the month start),
-  // independent of the page date-range that drives the KPI cards.
-  const [chartMonth, setChartMonth] = useState<string | null>(null)
+  // Chart-only month window: pick a From and To month and the equity chart
+  // shows just that window (account + benchmarks rebased to the window
+  // start), independent of the page date-range that drives the KPI cards.
+  // From = "All" follows the page range as before; To = "Now" is open-ended.
+  // From Sep / To Sep = a single month; From Jul / To Now = July to today.
+  const [chartFrom, setChartFrom] = useState<string | null>(null)
+  const [chartTo, setChartTo] = useState<string | null>(null)
 
   const chartMonths = useMemo(() => {
     const keys = [...new Set(navData.map(r => r.report_date.slice(0, 7)))].sort()
@@ -132,7 +163,7 @@ export function OverviewContent({
   }, [navData])
 
   const chartView = useMemo(() => {
-    if (!chartMonth) {
+    if (!chartFrom) {
       return {
         nav: filteredNavData,
         changes: filteredNavChanges,
@@ -145,28 +176,36 @@ export function OverviewContent({
         disableAnchors: range === 'WTD' || range === 'MTD',
       }
     }
-    const { start, end } = monthWindow(chartMonth)
-    const inMonth = navData.filter(r => r.report_date >= start && r.report_date <= end)
+    const start = `${chartFrom}-01`
+    const end = chartTo ? monthWindow(chartTo).end : null
+    const inWindow = navData.filter(r => r.report_date >= start && (end == null || r.report_date <= end))
     const prior = [...navData].filter(r => r.report_date < start).pop()
-    const monthBench = (series: BenchmarkRow[]) => rebase(series, start).filter(r => r.date <= end)
-    // Include deposits from a few days before the month so the chart's
-    // settlement-day matching still sees early-month deposits.
-    const depositStart = (() => { const dt = new Date(start + 'T12:00:00Z'); dt.setUTCDate(dt.getUTCDate() - 4); return dt.toISOString().slice(0, 10) })()
-    return {
-      nav: prior ? [prior, ...inMonth] : inMonth,
-      changes: navChanges.filter(c => c.to_date >= start && c.from_date <= end),
-      deposits: cashDeposits.filter(r => {
-        const d = r.transaction_ts.slice(0, 10)
-        return d >= depositStart && d <= end
-      }),
-      spy: monthBench(spyReturns),
-      qqq: monthBench(qqqReturns),
-      soxx: monthBench(soxxReturns),
-      arkk: monthBench(arkkReturns),
-      brkb: monthBench(brkbReturns),
-      disableAnchors: true,
+    const winBench = (series: BenchmarkRow[]) => {
+      const rebased = rebase(series, start)
+      return end == null ? rebased : rebased.filter(r => r.date <= end)
     }
-  }, [chartMonth, navData, navChanges, cashDeposits, spyReturns, qqqReturns, soxxReturns, arkkReturns, brkbReturns, filteredNavData, filteredNavChanges, filteredDeposits, filteredSpy, filteredQqq, filteredSoxx, filteredArkk, filteredBrkb, range])
+    return {
+      nav: prior ? [prior, ...inWindow] : inWindow,
+      // Window views must reproduce the Analysis monthly returns exactly, so
+      // the curve gets (a) the FULL deposit list — its settlement-day matching
+      // only ever flags days inside the displayed rows, so out-of-window
+      // deposits cannot match — and (b) NO period-level ChangeInNAV rows: their
+      // long spans corrupt the deposit-skip fallback and the TWR anchor logic.
+      // With anchors on, every month-end inside the window snaps to
+      // computeMonthlyReturns over the scoped data — the same numbers the
+      // Analysis tab prints. (The shipped version filtered both inputs to the
+      // month and disabled the anchors; in Sep 2026 that flattened the curve
+      // to +0.26% instead of +10.58%.)
+      changes: [] as NavChange[],
+      deposits: cashDeposits,
+      spy: winBench(spyReturns),
+      qqq: winBench(qqqReturns),
+      soxx: winBench(soxxReturns),
+      arkk: winBench(arkkReturns),
+      brkb: winBench(brkbReturns),
+      disableAnchors: false,
+    }
+  }, [chartFrom, chartTo, navData, cashDeposits, spyReturns, qqqReturns, soxxReturns, arkkReturns, brkbReturns, filteredNavData, filteredNavChanges, filteredDeposits, filteredSpy, filteredQqq, filteredSoxx, filteredArkk, filteredBrkb, range])
 
   const stats = useMemo(() => computeSummary(filteredTrades), [filteredTrades])
 
@@ -299,23 +338,27 @@ export function OverviewContent({
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <CardTitle className="text-sm font-medium">Account Equity</CardTitle>
-            <select
-              value={chartMonth ?? ''}
-              onChange={(e) => setChartMonth(e.target.value || null)}
-              className="appearance-none rounded border border-gray-200 bg-transparent py-1 pl-2 pr-8 text-xs dark:border-gray-700"
-              style={{
-                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
-                backgroundRepeat: 'no-repeat',
-                backgroundPosition: 'right 0.625rem center',
-                backgroundSize: '0.75rem',
-              }}
-              aria-label="Chart month"
-            >
-              <option value="">All</option>
-              {chartMonths.map(m => (
-                <option key={m.key} value={m.key}>{m.label}</option>
-              ))}
-            </select>
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span>From</span>
+              <MonthSelect
+                ariaLabel="Chart start month"
+                value={chartFrom ?? ''}
+                onChange={(v) => {
+                  const from = v || null
+                  setChartFrom(from)
+                  if (from && chartTo && chartTo < from) setChartTo(null)
+                }}
+                options={[{ key: '', label: 'All' }, ...chartMonths]}
+              />
+              <span>To</span>
+              <MonthSelect
+                ariaLabel="Chart end month"
+                value={chartTo ?? ''}
+                onChange={(v) => setChartTo(v || null)}
+                disabled={!chartFrom}
+                options={[{ key: '', label: 'Now' }, ...chartMonths.filter(m => !chartFrom || m.key >= chartFrom)]}
+              />
+            </div>
           </CardHeader>
           <CardContent>
             <AccountEquityCurve
