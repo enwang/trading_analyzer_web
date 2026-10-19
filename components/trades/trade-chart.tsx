@@ -913,6 +913,35 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
       overlay.innerHTML = ''
       renderIndicatorAxes()
 
+      // Bounds of the main price pane inside the chart container. Coordinates
+      // from timeToCoordinate/priceToCoordinate extrapolate past the visible
+      // range, so anything outside these bounds must be skipped — otherwise
+      // arrows/labels keep rendering over the price axis and sub-panes after
+      // their candle has been panned out of view.
+      const paneWidth = overlay.clientWidth - chart.priceScale('right').width()
+      // Vertical bounds from the candles inside the visible time window: the
+      // price axis autoscales to them, so a visible candle's executions fall
+      // inside [yTop, yBottom] while off-range prices extrapolate outside it.
+      let yTop: number | null = null
+      let yBottom: number | null = null
+      const visibleTimeRange = chart.timeScale().getVisibleRange()
+      if (visibleTimeRange) {
+        let hi = Number.NEGATIVE_INFINITY
+        let lo = Number.POSITIVE_INFINITY
+        for (const c of candles) {
+          if (c.time >= Number(visibleTimeRange.from) && c.time <= Number(visibleTimeRange.to)) {
+            if (c.high > hi) hi = c.high
+            if (c.low < lo) lo = c.low
+          }
+        }
+        if (hi > Number.NEGATIVE_INFINITY) {
+          yTop = main.priceToCoordinate(hi)
+          yBottom = main.priceToCoordinate(lo)
+        }
+      }
+      const inPaneX = (x: number) => x >= 0 && x <= paneWidth
+      const inPaneY = (y: number) => yTop == null || yBottom == null || (y >= yTop && y <= yBottom)
+
       if (timeframe === '5' || timeframe === '60') {
         let previousSession = marketDateKey(candles[0].time)
         for (const candle of candles.slice(1)) {
@@ -920,7 +949,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
           if (session === previousSession) continue
           previousSession = session
           const x = chart.timeScale().timeToCoordinate(ts(candle.time))
-          if (x == null) continue
+          if (x == null || !inPaneX(x)) continue
           const divider = document.createElement('div')
           divider.style.position = 'absolute'
           divider.style.left = `${x}px`
@@ -933,11 +962,11 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
 
       for (const snapshot of swingSnapshots) {
         const baseX = chart.timeScale().timeToCoordinate(ts(snapshot.sessionEnd))
-        if (baseX == null) continue
+        if (baseX == null || !inPaneX(baseX)) continue
         const labels = snapshot.levels
           .flatMap((level) => {
             const coordinate = main.priceToCoordinate(level.value)
-            return coordinate == null ? [] : [{ level, y: Number(coordinate) }]
+            return coordinate == null || !inPaneY(Number(coordinate)) ? [] : [{ level, y: Number(coordinate) }]
           })
           .sort((a, b) => a.y - b.y)
         let previousY = Number.NEGATIVE_INFINITY
@@ -965,7 +994,7 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
       for (const pt of arrowPoints) {
         const x = chart.timeScale().timeToCoordinate(ts(pt.timeSec))
         const y = main.priceToCoordinate(pt.price)
-        if (x == null || y == null) continue
+        if (x == null || y == null || !inPaneX(x) || !inPaneY(y)) continue
 
         const isBuy = pt.action === 'BUY'
         const color = isBuy ? '#16a34a' : '#dc2626'

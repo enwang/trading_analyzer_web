@@ -486,7 +486,10 @@ export function TradeDetailTabs(props: Props) {
                   const quantity = formatShares(Math.abs(qty))
                   return (
                     <div key={`${leg.time}-${leg.action}-${i}`} className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto_auto] items-center gap-x-1 border-t px-1.5 py-1.5 text-[11px] sm:px-2">
-                      <LocalTime date={leg.time} className="block truncate font-mono text-muted-foreground" />
+                      <span className="flex flex-col font-mono leading-tight text-muted-foreground">
+                        <LocalTime date={leg.time} dateOnly />
+                        <LocalTime date={leg.time} timeOnly />
+                      </span>
                       <span className={`px-1 font-medium sm:px-2 ${leg.action === 'BUY' ? 'text-emerald-700' : 'text-red-700'}`}>{leg.action}</span>
                       <span className="px-1 text-right sm:px-2">${leg.price.toFixed(2)}</span>
                       <span className="px-1 text-right sm:px-2">{qty > 0 ? `+${quantity}` : `-${quantity}`}</span>

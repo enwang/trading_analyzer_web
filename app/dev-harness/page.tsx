@@ -14,11 +14,11 @@ import type { ExecutionLeg } from '@/types/trade'
 export const dynamic = 'force-dynamic'
 
 const LEGS: ExecutionLeg[] = [
-  { time: '2026-10-14T13:45:00.000Z', action: 'BUY', shares: 500, price: 131.25 },
-  { time: '2026-10-14T14:02:00.000Z', action: 'BUY', shares: 750, price: 131.88 },
-  { time: '2026-10-15T15:20:00.000Z', action: 'SELL', shares: 400, price: 141.2 },
-  { time: '2026-10-15T17:41:00.000Z', action: 'SELL', shares: 500, price: 142.87 },
-  { time: '2026-10-15T17:58:00.000Z', action: 'SELL', shares: 350, price: 142.55 },
+  { time: '2026-10-14T13:45:00.000Z', action: 'BUY', shares: 500, price: 213.25 },
+  { time: '2026-10-14T14:02:00.000Z', action: 'BUY', shares: 750, price: 213.88 },
+  { time: '2026-10-15T15:20:00.000Z', action: 'SELL', shares: 400, price: 220.2 },
+  { time: '2026-10-15T17:41:00.000Z', action: 'SELL', shares: 500, price: 221.87 },
+  { time: '2026-10-15T17:58:00.000Z', action: 'SELL', shares: 350, price: 221.55 },
 ]
 
 export default function DevHarnessPage() {
@@ -51,8 +51,8 @@ export default function DevHarnessPage() {
             shares={1250}
             entryTime="2026-10-14T13:45:00.000Z"
             exitTime="2026-10-15T17:58:00.000Z"
-            entryPrice={131.25}
-            exitPrice={142.87}
+            entryPrice={213.25}
+            exitPrice={221.87}
             pnl={14525}
             pnlPct={0.0885}
             holdTimeMin={1693}
@@ -60,7 +60,7 @@ export default function DevHarnessPage() {
             setupTag="breakout"
             notes="Fixture note for layout testing."
             source="ibkr"
-            initialStopLoss={126.4}
+            initialStopLoss={208.4}
             initialRMultiple={2.35}
             initialRiskAmount={6062.5}
             initialMfe={0.112}
@@ -73,9 +73,9 @@ export default function DevHarnessPage() {
             entryTime="2026-10-14T13:45:00.000Z"
             exitTime="2026-10-15T17:58:00.000Z"
             side="long"
-            entryPrice={131.25}
-            exitPrice={142.87}
-            initialStopLoss={126.4}
+            entryPrice={213.25}
+            exitPrice={221.87}
+            initialStopLoss={208.4}
             executionLegs={LEGS}
           />
         </div>
