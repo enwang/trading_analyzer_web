@@ -59,26 +59,37 @@ function clampPeriod1ForRequestedInterval(period1: number, requiredStartMs: numb
   const limitMs = requestedIntervalAgeLimitMs(timeframe)
   if (limitMs == null) return period1
 
-  const earliestMs = Date.now() - limitMs
+  // Keep a safety margin inside Yahoo's age limit: Yahoo rejects the whole
+  // intraday request when startTime sits on (or past) the boundary, and a
+  // period1 clamped to exactly now-limit is already past it when evaluated.
+  const hardEarliestMs = Date.now() - limitMs
+  const earliestMs = hardEarliestMs + 86_400_000
   if (period1 * 1000 >= earliestMs) return period1
 
   // If the trade/range itself is too old, keep period1 unchanged so pickInterval
   // can choose the coarser Yahoo interval that still covers the trade. If only
   // the extra pre-entry context is too old, trim that context and preserve the
   // explicitly requested intraday timeframe.
-  if (requiredStartMs < earliestMs) return period1
+  if (requiredStartMs < hardEarliestMs) return period1
   return Math.floor(earliestMs / 1000)
 }
 
-function pickInterval(spanMs: number, fromMs: number, timeframe: string): string {
+function pickInterval(spanMs: number, fromMs: number, timeframe: string, requiredStartMs?: number): string {
   const ageMs = Date.now() - fromMs
   const day = 86_400_000
 
   if (timeframe !== 'auto') {
-    if (timeframe === '1m'  && ageMs <= AGE_1M)  return '1m'
-    if (timeframe === '5m'  && ageMs <= AGE_5M)  return '5m'
-    if (timeframe === '15m' && ageMs <= AGE_15M) return '15m'
-    if (timeframe === '30m' && ageMs <= AGE_30M) return '30m'
+    // Yahoo's data-age limit applies to the trade window itself, not to the
+    // lookback start: clampPeriod1ForRequestedInterval may have trimmed
+    // period1 to exactly the age boundary, so ageMs (measured from period1)
+    // reads just over the limit for trades near the boundary and the
+    // requested interval would be silently downgraded (the ~46–60 day dead
+    // zone for 5m). Measure the requested interval's age from the trade.
+    const requestedAgeMs = requiredStartMs != null ? Date.now() - requiredStartMs : ageMs
+    if (timeframe === '1m'  && requestedAgeMs <= AGE_1M)  return '1m'
+    if (timeframe === '5m'  && requestedAgeMs <= AGE_5M)  return '5m'
+    if (timeframe === '15m' && requestedAgeMs <= AGE_15M) return '15m'
+    if (timeframe === '30m' && requestedAgeMs <= AGE_30M) return '30m'
     if (timeframe === '1h') return '60m'
     if (timeframe === '1d') return '1d'
     // Fall through to auto when requested interval too old
@@ -296,7 +307,7 @@ export async function GET(request: Request) {
   }
 
   period1 = clampPeriod1ForRequestedInterval(period1, requiredStartMs, timeframe)
-  let interval = pickInterval(spanMs, period1 * 1000, timeframe)
+  let interval = pickInterval(spanMs, period1 * 1000, timeframe, requiredStartMs)
 
   const cacheable = timeframe === '5m' && !!exitTime && requiredStartMs < Date.now() - AGE_5M
   const cacheKey = [symbol, timeframe, entryTime ?? '', exitTime ?? '', p1Param ?? '', p2Param ?? ''].join('|')
