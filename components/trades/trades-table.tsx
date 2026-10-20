@@ -165,6 +165,14 @@ const TradeNotesInput = memo(function TradeNotesInput({
   )
 })
 
+// Full-word labels for the date-range buttons — the WTD/MTD/YTD
+// abbreviations were too cryptic to guess.
+const RANGE_LABELS: Record<DateRangeKey, string> = {
+  WTD: 'Week',
+  MTD: 'Month',
+  YTD: 'Year',
+  All: 'All',
+}
 const COLUMN_ORDER_STORAGE_KEY = 'trades-table-column-order-v1'
 const FILTER_STORAGE_KEY = 'trades-table-last-filter-v1'
 const TRADES_LAST_URL_STORAGE_KEY = 'trades-table-last-url'
@@ -1230,7 +1238,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-3">
           {(searchParams.get('symbol') || searchParams.get('date')) && (
             <Button
@@ -1247,45 +1255,53 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
             {title} ({filtered.length})
           </h1>
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <div className="relative w-full sm:w-44">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={symbolSearch}
-              onChange={(e) => setSymbolSearchAndUrl(e.target.value)}
-              placeholder="Symbol"
-              className="h-8 pl-8 pr-8 uppercase"
-              aria-label="Filter by symbol"
-            />
-            {symbolSearch && (
-              <button
-                type="button"
-                onClick={() => setSymbolSearchAndUrl('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-                aria-label="Clear symbol search"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            )}
+        <div className="grid grid-cols-2 items-center gap-2 md:flex md:flex-wrap md:justify-end">
+          {/* Mobile: search + Sync share one full-width row. On md the wrapper
+              dissolves (contents) and both join the flex row in their original
+              positions via the order utilities. */}
+          <div className="col-span-2 flex items-start gap-2 md:contents">
+            <div className="relative min-w-0 flex-1 md:order-1 md:w-44 md:flex-none">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={symbolSearch}
+                onChange={(e) => setSymbolSearchAndUrl(e.target.value)}
+                placeholder="Symbol"
+                className="h-8 pl-8 pr-8 uppercase"
+                aria-label="Filter by symbol"
+              />
+              {symbolSearch && (
+                <button
+                  type="button"
+                  onClick={() => setSymbolSearchAndUrl('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                  aria-label="Clear symbol search"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+            <div className="shrink-0 md:order-5">
+              <OverviewSyncButton />
+            </div>
           </div>
-          <div className="flex gap-1">
+          <div className="col-span-2 flex gap-1 md:order-2">
             {DATE_RANGES.map((r) => (
               <button
                 key={r}
                 onClick={() => selectRange(r)}
-                className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
+                className={`flex-1 rounded px-3 py-1 text-xs font-medium transition-colors md:flex-none ${
                   range === r
                     ? 'bg-foreground text-background'
                     : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                 }`}
               >
-                {r}
+                {RANGE_LABELS[r]}
               </button>
             ))}
           </div>
-          <span className="text-sm text-muted-foreground">View</span>
+          <span className="hidden text-sm text-muted-foreground md:order-3 md:inline">View</span>
           <Select value={filter} onValueChange={(v) => setFilterAndUrl(v as OutcomeFilter)}>
-            <SelectTrigger className="w-[180px]">
+            <SelectTrigger className="w-full md:order-4 md:w-[180px]">
               <SelectValue placeholder="Select view" />
             </SelectTrigger>
             <SelectContent position="popper">
@@ -1298,18 +1314,8 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
               <SelectItem value="loss">Losers</SelectItem>
             </SelectContent>
           </Select>
-          <OverviewSyncButton />
-        </div>
-      </div>
-      {error && <div className="text-sm text-red-700">{error}</div>}
-
-      {/* Mobile card list (below md): the full table is ~1500px wide, so on a
-          phone the key numbers (P&L, R) sit several swipes off-screen. Each
-          trade becomes a compact card with everything important visible at
-          once; tapping it opens the same trade detail as the table row. */}
-      <div className={`space-y-2 transition-opacity duration-150 md:hidden ${isPending ? 'opacity-50' : 'opacity-100'}`}>
-        <div className="flex items-center justify-end gap-2">
-          <span className="text-xs text-muted-foreground">Sort</span>
+          {/* Mobile-only sort for the card list, aligned beside the View
+              select in the same grid row. Desktop sorts via table headers. */}
           <Select
             value={`${sortKey}:${sortDir}`}
             onValueChange={(v) => {
@@ -1318,7 +1324,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
               setSortDir(dir)
             }}
           >
-            <SelectTrigger className="h-8 w-[178px] text-xs">
+            <SelectTrigger className="w-full text-xs md:hidden" aria-label="Sort trades">
               <SelectValue />
             </SelectTrigger>
             <SelectContent position="popper">
@@ -1333,6 +1339,14 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
             </SelectContent>
           </Select>
         </div>
+      </div>
+      {error && <div className="text-sm text-red-700">{error}</div>}
+
+      {/* Mobile card list (below md): the full table is ~1500px wide, so on a
+          phone the key numbers (P&L, R) sit several swipes off-screen. Each
+          trade becomes a compact card with everything important visible at
+          once; tapping it opens the same trade detail as the table row. */}
+      <div className={`space-y-2 transition-opacity duration-150 md:hidden ${isPending ? 'opacity-50' : 'opacity-100'}`}>
         {filtered.length === 0 && (
           <div className="rounded-lg border py-10 text-center text-sm text-muted-foreground">
             No trades for this filter.
@@ -1385,7 +1399,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
                 <span>
-                  {formatShares(displayShares(t))} sh @ {fmtPrice(t.entryPrice)}
+                  {formatShares(displayShares(t))} shares @ {fmtPrice(t.entryPrice)}
                 </span>
                 {v.r != null && (
                   <span>

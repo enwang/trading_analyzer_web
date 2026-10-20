@@ -907,6 +907,12 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
       }
     }
 
+    // Hover labels only make sense with a fine pointer (mouse/trackpad).
+    const hoverCapable =
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(hover: hover) and (pointer: fine)').matches
+
     const renderArrows = () => {
       const overlay = arrowsOverlayRef.current
       if (!overlay) return
@@ -1000,9 +1006,12 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
         const color = isBuy ? '#16a34a' : '#dc2626'
 
         // Wrapper enables pointer events for hover; bigger hit area than the triangle itself.
+        // Touch devices: pointer events OFF — a finger landing on an arrow must
+        // still reach the chart canvas, otherwise pinch/drag gestures that start
+        // on an arrow never zoom/pan the chart. Hover labels are mouse-only anyway.
         const wrapper = document.createElement('div')
         wrapper.style.position = 'absolute'
-        wrapper.style.pointerEvents = 'auto'
+        wrapper.style.pointerEvents = hoverCapable ? 'auto' : 'none'
         wrapper.style.cursor = 'default'
         wrapper.style.width = '24px'
         wrapper.style.height = '20px'
@@ -1149,7 +1158,9 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
     // different moments during smooth pan/zoom; missing either causes the HTML
     // arrows to drift relative to the redrawn candles.
     let pendingFrame = 0
+    let lastRangeChangeAt = 0
     const scheduleRerender = () => {
+      lastRangeChangeAt = performance.now()
       if (pendingFrame) return
       pendingFrame = requestAnimationFrame(() => {
         pendingFrame = 0
@@ -1158,34 +1169,52 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
     }
     chart.timeScale().subscribeVisibleLogicalRangeChange(scheduleRerender)
     chart.timeScale().subscribeVisibleTimeRangeChange(scheduleRerender)
-    // Wheel + drag interactions: re-render continuously while the user is
-    // actively manipulating the chart so arrows track the candles frame-for-frame.
+    // While the user manipulates the chart (mouse drag, touch drag, pinch,
+    // wheel), re-render the arrows every animation frame so they track the
+    // candles frame-for-frame. The old version started/stopped this loop on
+    // mousedown/mouseup only, so on touch devices it never ran during a
+    // gesture and the arrows froze while the candles moved underneath. The
+    // loop now starts on any pointer/touch/wheel interaction and keeps
+    // running until the visible range has been stable for 300 ms, which also
+    // covers kinetic (momentum) glides that continue after the fingers are
+    // lifted — so no explicit stop handler is needed.
     let interactionLoop = 0
+    let lastInteractionAt = 0
     const startInteractionLoop = () => {
+      lastInteractionAt = performance.now()
       if (interactionLoop) return
       const tick = () => {
         renderArrows()
+        const settled =
+          performance.now() - lastInteractionAt > 300 &&
+          performance.now() - lastRangeChangeAt > 300
+        if (settled) {
+          interactionLoop = 0
+          renderArrows()
+          return
+        }
         interactionLoop = requestAnimationFrame(tick)
       }
       interactionLoop = requestAnimationFrame(tick)
-      const stop = () => {
-        if (interactionLoop) cancelAnimationFrame(interactionLoop)
-        interactionLoop = 0
-        renderArrows()
-        window.removeEventListener('mouseup', stop)
-      }
-      window.addEventListener('mouseup', stop)
     }
-    container.addEventListener('mousedown', startInteractionLoop)
-    const wheelHandler = () => scheduleRerender()
-    container.addEventListener('wheel', wheelHandler, { passive: true })
+    const noteInteraction = () => {
+      lastInteractionAt = performance.now()
+    }
+    container.addEventListener('pointerdown', startInteractionLoop)
+    container.addEventListener('touchstart', startInteractionLoop, { passive: true })
+    container.addEventListener('wheel', startInteractionLoop, { passive: true })
+    window.addEventListener('pointermove', noteInteraction, { passive: true })
+    window.addEventListener('touchmove', noteInteraction, { passive: true })
 
     return () => {
       chart.unsubscribeCrosshairMove(handleCrosshair)
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(scheduleRerender)
       chart.timeScale().unsubscribeVisibleTimeRangeChange(scheduleRerender)
-      container.removeEventListener('mousedown', startInteractionLoop)
-      container.removeEventListener('wheel', wheelHandler)
+      container.removeEventListener('pointerdown', startInteractionLoop)
+      container.removeEventListener('touchstart', startInteractionLoop)
+      container.removeEventListener('wheel', startInteractionLoop)
+      window.removeEventListener('pointermove', noteInteraction)
+      window.removeEventListener('touchmove', noteInteraction)
       if (pendingFrame) cancelAnimationFrame(pendingFrame)
       if (interactionLoop) cancelAnimationFrame(interactionLoop)
       ro.disconnect()
