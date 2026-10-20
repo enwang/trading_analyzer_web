@@ -165,14 +165,6 @@ const TradeNotesInput = memo(function TradeNotesInput({
   )
 })
 
-// Full-word labels for the date-range buttons — the WTD/MTD/YTD
-// abbreviations were too cryptic to guess.
-const RANGE_LABELS: Record<DateRangeKey, string> = {
-  WTD: 'Week',
-  MTD: 'Month',
-  YTD: 'Year',
-  All: 'All',
-}
 const COLUMN_ORDER_STORAGE_KEY = 'trades-table-column-order-v1'
 const FILTER_STORAGE_KEY = 'trades-table-last-filter-v1'
 const TRADES_LAST_URL_STORAGE_KEY = 'trades-table-last-url'
@@ -1295,7 +1287,7 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
                     : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                 }`}
               >
-                {RANGE_LABELS[r]}
+                {r}
               </button>
             ))}
           </div>
