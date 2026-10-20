@@ -749,6 +749,52 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
     return null
   }
 
+  // Derived display values for the mobile card list. Mirrors the desktop
+  // table cells exactly (same draft-aware stop loss, open-trade P&L/P&L %
+  // and R computations) so both views always show identical numbers.
+  function mobileTradeView(t: Trade) {
+    const stopLossFirst = usesStopLossFirstSizing(t.entryTime)
+    const draftInitialRisk =
+      drafts[t.id]?.initialRisk
+      ?? (stopLossFirst ? '' : riskAmountForTrade(addonTradeIds.has(t.id)).toFixed(2))
+    const parsedDraftInitialRisk = draftInitialRisk.trim() === '' ? null : Number(draftInitialRisk)
+    const stopLossDraftValue = stopLossDrafts[t.id] ?? t.stopLoss?.toFixed(2) ?? ''
+    const parsedStopLossDraft = stopLossDraftValue !== '' ? Number(stopLossDraftValue) : null
+    const effectiveInitialStopLoss = stopLossFirst
+      ? (parsedStopLossDraft != null && Number.isFinite(parsedStopLossDraft) && parsedStopLossDraft > 0
+          ? parsedStopLossDraft
+          : t.stopLoss)
+      : (parsedDraftInitialRisk != null && Number.isFinite(parsedDraftInitialRisk)
+          ? suggestedStopLossFromRisk(t.side, t.entryPrice, riskShares(t), parsedDraftInitialRisk)
+          : t.stopLoss)
+    const currentStopLossDraftValue = currentStopLossDrafts[t.id] ?? (t.currentStopLoss ?? t.stopLoss)?.toFixed(2) ?? ''
+    const parsedCurrentStopLossDraft = currentStopLossDraftValue !== '' ? Number(currentStopLossDraftValue) : null
+    const currentStopLoss = parsedCurrentStopLossDraft != null && Number.isFinite(parsedCurrentStopLossDraft) && parsedCurrentStopLossDraft > 0
+      ? parsedCurrentStopLossDraft
+      : t.currentStopLoss ?? effectiveInitialStopLoss
+    const isOpen = t.exitTime == null || t.outcome === 'open'
+    let displayPnl: number | null = t.pnl
+    if (isOpen) {
+      const win = currentWin(t)
+      if (win != null) displayPnl = win
+    }
+    let displayPct: number | null = isOpen ? null : t.pnlPct
+    if (isOpen) {
+      const price = currentPrice(t)
+      if (t.entryPrice != null && price != null && t.entryPrice > 0) {
+        displayPct = t.side === 'long' ? (price - t.entryPrice) / t.entryPrice : (t.entryPrice - price) / t.entryPrice
+      }
+    }
+    return {
+      isOpen,
+      displayPnl,
+      displayPct,
+      r: computedR(t, effectiveInitialStopLoss) ?? t.rMultiple,
+      priceNow: currentPrice(t),
+      currentRisk: computeCurrentRisk(t, currentStopLoss),
+    }
+  }
+
   function valueForSort(t: Trade, key: SortKey): string | number | null {
     const stopLossFirst = usesStopLossFirstSizing(t.entryTime)
     const effectiveStopLoss = stopLossFirst
@@ -1257,7 +1303,112 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
       </div>
       {error && <div className="text-sm text-red-700">{error}</div>}
 
-      <div className={`rounded-lg border overflow-x-auto transition-opacity duration-150 ${isPending ? 'opacity-50' : 'opacity-100'}`}>
+      {/* Mobile card list (below md): the full table is ~1500px wide, so on a
+          phone the key numbers (P&L, R) sit several swipes off-screen. Each
+          trade becomes a compact card with everything important visible at
+          once; tapping it opens the same trade detail as the table row. */}
+      <div className={`space-y-2 transition-opacity duration-150 md:hidden ${isPending ? 'opacity-50' : 'opacity-100'}`}>
+        <div className="flex items-center justify-end gap-2">
+          <span className="text-xs text-muted-foreground">Sort</span>
+          <Select
+            value={`${sortKey}:${sortDir}`}
+            onValueChange={(v) => {
+              const [key, dir] = v.split(':') as [SortKey, SortDir]
+              setSortKey(key)
+              setSortDir(dir)
+            }}
+          >
+            <SelectTrigger className="h-8 w-[178px] text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent position="popper">
+              <SelectItem value="entryTime:desc">Entry · Newest first</SelectItem>
+              <SelectItem value="entryTime:asc">Entry · Oldest first</SelectItem>
+              <SelectItem value="exitTime:desc">Exit · Newest first</SelectItem>
+              <SelectItem value="pnl:desc">P&amp;L · High to low</SelectItem>
+              <SelectItem value="pnl:asc">P&amp;L · Low to high</SelectItem>
+              <SelectItem value="pnlPct:desc">P&amp;L % · High to low</SelectItem>
+              <SelectItem value="rMultiple:desc">R · High to low</SelectItem>
+              <SelectItem value="rMultiple:asc">R · Low to high</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        {filtered.length === 0 && (
+          <div className="rounded-lg border py-10 text-center text-sm text-muted-foreground">
+            No trades for this filter.
+          </div>
+        )}
+        {sortedFiltered.map((t) => {
+          const v = mobileTradeView(t)
+          const params = new URLSearchParams(searchParamsString)
+          params.set('view', filter)
+          if (v.r != null) params.set('r', v.r.toFixed(4))
+          const detailsHref = `/trades/${t.id}?${params.toString()}`
+          return (
+            <Link
+              key={t.id}
+              href={detailsHref}
+              prefetch={false}
+              scroll={false}
+              onClick={() => {
+                const container = getDashboardScrollContainer()
+                window.sessionStorage.setItem(TRADES_LAST_URL_STORAGE_KEY, currentListUrl)
+                window.sessionStorage.setItem(TRADES_LAST_SCROLL_STORAGE_KEY, String(container?.scrollTop ?? 0))
+              }}
+              className={`block rounded-lg border p-3 ${t.needsReview ? 'bg-amber-50/80' : 'bg-card'}`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="text-base font-semibold">{t.symbol}</span>
+                  <span className="rounded border px-1 py-px text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                    {t.side ?? '—'}
+                  </span>
+                  <OutcomeBadge outcome={t.outcome} />
+                </div>
+                <div className={`shrink-0 text-base font-semibold ${signedValueClass(v.displayPnl) || pnlClass(t.outcome)}`}>
+                  {v.displayPnl != null ? `${v.displayPnl >= 0 ? '+' : ''}$${v.displayPnl.toFixed(2)}` : '—'}
+                </div>
+              </div>
+              <div className="mt-1 flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                <span className="flex items-center gap-1">
+                  <LocalTime date={t.entryTime} dateOnly className="font-mono" />
+                  <span aria-hidden="true">→</span>
+                  {v.isOpen ? (
+                    <span>Open · {fmtHoldDuration(effectiveHoldTimeMin(t), t.holdDays)}</span>
+                  ) : (
+                    <LocalTime date={t.exitTime} dateOnly className="font-mono" />
+                  )}
+                </span>
+                <span className={`font-medium ${signedValueClass(v.displayPct) || pnlClass(t.outcome)}`}>
+                  {v.displayPct != null ? `${(v.displayPct * 100).toFixed(2)}%` : '—'}
+                </span>
+              </div>
+              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+                <span>
+                  {formatShares(displayShares(t))} sh @ {fmtPrice(t.entryPrice)}
+                </span>
+                {v.r != null && (
+                  <span>
+                    R <span className={`font-medium ${signedValueClass(v.r)}`}>{v.r.toFixed(2)}</span>
+                  </span>
+                )}
+                {!v.isOpen && (
+                  <span>Hold {fmtHoldDuration(effectiveHoldTimeMin(t), t.holdDays)}</span>
+                )}
+                {v.isOpen && v.priceNow != null && <span>Now {fmtPrice(v.priceNow)}</span>}
+                {v.isOpen && v.currentRisk != null && v.currentRisk > 0 && (
+                  <span className="font-medium text-red-600">Risk ${v.currentRisk.toFixed(2)}</span>
+                )}
+                {t.setupTag && t.setupTag !== 'untagged' && (
+                  <span className="capitalize">{t.setupTag}</span>
+                )}
+              </div>
+            </Link>
+          )
+        })}
+      </div>
+
+      <div className={`hidden rounded-lg border overflow-x-auto transition-opacity duration-150 md:block ${isPending ? 'opacity-50' : 'opacity-100'}`}>
         <Table className="min-w-full w-max">
           <TableHeader>
             <TableRow>

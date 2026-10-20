@@ -26,8 +26,10 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       )}
       <Sidebar mobileOpen={mobileOpen} onClose={() => setMobileOpen(false)} />
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* Mobile top bar: only shown below md, where the sidebar is a drawer. */}
-        <header className="flex h-14 shrink-0 items-center gap-2 border-b bg-background px-4 md:hidden">
+        {/* Mobile top bar: only shown below md, where the sidebar is a drawer.
+            No hard border-b divider — a soft shadow gives a natural transition
+            into the scrolling content, like native apps. */}
+        <header className="relative z-10 flex h-14 shrink-0 items-center gap-2 bg-background px-4 shadow-[0_10px_28px_-14px_rgba(0,0,0,0.55)] md:hidden">
           <button
             onClick={() => setMobileOpen(true)}
             aria-label="Open menu"
