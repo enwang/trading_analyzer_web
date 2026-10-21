@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import { computeSummary } from '@/lib/metrics'
 import type { Trade } from '@/types/trade'
 import { AccountEquityCurve } from '@/components/charts/account-equity-curve'
@@ -12,8 +12,6 @@ type NavRow = { report_date: string; total: number }
 type NavChange = { from_date: string; to_date: string; deposits_withdrawals: number | null; twr?: number | null }
 type CashDeposit = { transaction_ts: string; amount: number }
 type BenchmarkRow = { date: string; pct: number }
-
-const LS_RANGE_KEY = 'overview-date-range'
 
 function monthLabelOf(monthKey: string): string {
   const [y, m] = monthKey.split('-').map(Number)
@@ -103,18 +101,13 @@ export function OverviewContent({
   arkkReturns: BenchmarkRow[]
   brkbReturns: BenchmarkRow[]
 }) {
-  const [range, setRange] = useState<DateRangeKey>('YTD')
-
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(LS_RANGE_KEY)
-      if (saved && (DATE_RANGES as string[]).includes(saved)) setRange(saved as DateRangeKey)
-    } catch { /* ignore */ }
-  }, [])
+  // Default to All: the Overview always opens on the full history. The range
+  // is intentionally not persisted — a range saved from a previous session
+  // (e.g. WTD) used to be restored on every open and greet the user instead.
+  const [range, setRange] = useState<DateRangeKey>('All')
 
   function selectRange(r: DateRangeKey) {
     setRange(r)
-    try { localStorage.setItem(LS_RANGE_KEY, r) } catch { /* ignore */ }
   }
 
   const startDate = useMemo(() => getStartDate(range), [range])
