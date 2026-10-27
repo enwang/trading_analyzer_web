@@ -127,6 +127,20 @@ const TREND_METRICS: TrendMetricDef[] = [
   },
 ]
 
+// True below the sm breakpoint. Starts false so the first client render
+// matches the server render; the effect flips it right after mount.
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(false)
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 639px)')
+    const update = () => setIsMobile(mq.matches)
+    update()
+    mq.addEventListener('change', update)
+    return () => mq.removeEventListener('change', update)
+  }, [])
+  return isMobile
+}
+
 function fmtMoney(n: number) {
   const sign = n < 0 ? '-' : ''
   return `${sign}$${Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 2 })}`
@@ -140,6 +154,16 @@ function fmtBucketMoney(n: number) {
 function fmtBucketLabel(min: number, max: number) {
   if (min === 0 && max === 0) return '[0]'
   return `[${fmtBucketMoney(min)}, ${fmtBucketMoney(max)}]`
+}
+
+// Display-only compact form for phone-width axes: "[-13000, -12000]" →
+// "-13k..-12k". Bucket labels themselves stay untouched (they key the
+// bar-selection state).
+function compactBucketLabel(label: string) {
+  const m = /^\[(-?\d+), (-?\d+)\]$/.exec(label)
+  if (!m) return label
+  const k = (v: number) => (v === 0 ? '0' : `${v / 1000}k`)
+  return `${k(Number(m[1]))}..${k(Number(m[2]))}`
 }
 
 function fmtRatio(n: number) {
@@ -180,6 +204,18 @@ function formatDateCell(iso: string | null, timeZone: string) {
   }).format(d)
 }
 
+// Compact MM/DD form for narrow phone tables.
+function formatDateCellShort(iso: string | null, timeZone: string) {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d)
+}
+
 function MetricChartCard({
   title,
   points,
@@ -189,6 +225,7 @@ function MetricChartCard({
   points: TrendPoint[]
   defaultMetric: TrendMetricId
 }) {
+  const isMobile = useIsMobile()
   const [primaryMetric, setPrimaryMetric] = useState<TrendMetricId>(defaultMetric)
   const [secondaryMetric, setSecondaryMetric] = useState<TrendMetricId | null>(null)
 
@@ -201,9 +238,9 @@ function MetricChartCard({
     <Card className="overflow-hidden">
       <CardContent className="p-0">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto sm:flex-1">
             <Select value={primaryMetric} onValueChange={(v: TrendMetricId) => setPrimaryMetric(v)}>
-              <SelectTrigger className="w-[240px]">
+              <SelectTrigger className="w-full min-w-0 sm:w-[240px] sm:flex-none">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -220,7 +257,7 @@ function MetricChartCard({
                 value={secondaryMetric}
                 onValueChange={(v: TrendMetricId) => setSecondaryMetric(v)}
               >
-                <SelectTrigger className="w-[240px]">
+                <SelectTrigger className="w-full min-w-0 sm:w-[240px] sm:flex-none">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -268,16 +305,16 @@ function MetricChartCard({
               <XAxis dataKey="label" tick={{ fontSize: 12 }} interval="preserveStartEnd" />
               <YAxis
                 yAxisId="left"
-                tick={{ fontSize: 12 }}
-                width={72}
+                tick={{ fontSize: isMobile ? 11 : 12 }}
+                width={isMobile ? 52 : 72}
                 tickFormatter={(v: number) => primaryDef.fmt(v)}
               />
               {secondaryDef && (
                 <YAxis
                   yAxisId="right"
                   orientation="right"
-                  tick={{ fontSize: 12 }}
-                  width={72}
+                  tick={{ fontSize: isMobile ? 11 : 12 }}
+                  width={isMobile ? 52 : 72}
                   tickFormatter={(v: number) => secondaryDef.fmt(v)}
                 />
               )}
@@ -431,6 +468,7 @@ function buildPnlDistribution(trades: ClosedTrade[]) {
 }
 
 function PnlDistributionCard({ trades, timeZone, monthKey, range }: { trades: ClosedTrade[]; timeZone: string; monthKey: string | null; range: DateRangeKey }) {
+  const isMobile = useIsMobile()
   const [mode, setMode] = useState<DistributionMode>('pnl')
   const [selectedLabel, setSelectedLabel] = useState<string | null>(null)
   const distribution = useMemo(() => buildPnlDistribution(trades), [trades])
@@ -454,11 +492,14 @@ function PnlDistributionCard({ trades, timeZone, monthKey, range }: { trades: Cl
   const yTicks = [-yMax, -yMax / 2, 0, yMax / 2, yMax]
   const barDataKey = mode === 'count' ? 'signedCount' : 'signedTotalPnl'
   const xTicks = useMemo(() => {
+    // Bucket labels are wide ("[-12000, -11000]") — on a phone only ~5 fit
+    // before they smear into each other.
+    const maxTicks = isMobile ? 5 : 10
     const labels = distribution.buckets.map((bucket) => bucket.label)
-    if (labels.length <= 10) return labels
-    const every = Math.ceil(labels.length / 10)
+    if (labels.length <= maxTicks) return labels
+    const every = Math.ceil(labels.length / maxTicks)
     return labels.filter((_, index) => index === 0 || index === labels.length - 1 || index % every === 0)
-  }, [distribution.buckets])
+  }, [distribution.buckets, isMobile])
 
   return (
     <Card className="overflow-hidden">
@@ -506,6 +547,7 @@ function PnlDistributionCard({ trades, timeZone, monthKey, range }: { trades: Cl
                   interval={0}
                   ticks={xTicks}
                   tick={{ fontSize: 10 }}
+                  tickFormatter={isMobile ? compactBucketLabel : undefined}
                   tickLine={false}
                   axisLine={false}
                   height={44}
@@ -518,7 +560,7 @@ function PnlDistributionCard({ trades, timeZone, monthKey, range }: { trades: Cl
                   tickFormatter={(v: number) => mode === 'count' ? Math.abs(v).toFixed(0) : fmtMoney(v)}
                   axisLine={false}
                   tickLine={false}
-                  width={mode === 'count' ? 44 : 76}
+                  width={mode === 'count' ? 44 : isMobile ? 64 : 76}
                 />
                 <ReferenceLine y={0} stroke="#9ca3af" strokeWidth={1.25} />
                 <Tooltip
@@ -582,10 +624,10 @@ function PnlDistributionCard({ trades, timeZone, monthKey, range }: { trades: Cl
                 <TableHeader>
                   <TableRow>
                     <TableHead>Symbol</TableHead>
-                    <TableHead>Entry</TableHead>
+                    <TableHead className="hidden sm:table-cell">Entry</TableHead>
                     <TableHead>Exit</TableHead>
-                    <TableHead className="text-right">Shares</TableHead>
-                    <TableHead className="text-right">P&L %</TableHead>
+                    <TableHead className="hidden text-right sm:table-cell">Shares</TableHead>
+                    <TableHead className="hidden text-right sm:table-cell">P&L %</TableHead>
                     <TableHead className="text-right">Net P&L</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -597,10 +639,10 @@ function PnlDistributionCard({ trades, timeZone, monthKey, range }: { trades: Cl
                           {t.symbol}
                         </Link>
                       </TableCell>
-                      <TableCell>{formatDateCell(t.entryTime, timeZone)}</TableCell>
+                      <TableCell className="hidden sm:table-cell">{formatDateCell(t.entryTime, timeZone)}</TableCell>
                       <TableCell>{formatDateCell(t.exitTime, timeZone)}</TableCell>
-                      <TableCell className="text-right">{formatShares(Math.abs(t.shares))}</TableCell>
-                      <TableCell className={`text-right ${t.pnl >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                      <TableCell className="hidden text-right sm:table-cell">{formatShares(Math.abs(t.shares))}</TableCell>
+                      <TableCell className={`hidden text-right sm:table-cell ${t.pnl >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                         {t.pnlPct != null ? `${(t.pnlPct * 100).toFixed(2)}%` : '—'}
                       </TableCell>
                       <TableCell className={`text-right font-medium ${t.pnl >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
@@ -657,20 +699,20 @@ function SummaryGrid({
   )
   const winLossValue = (
     <div className="flex min-w-0 flex-col gap-0.5 text-base sm:text-lg lg:text-xl">
-      <span className="flex items-baseline justify-between gap-3 whitespace-nowrap text-emerald-600">
+      <span className="flex flex-col whitespace-nowrap text-emerald-600 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3">
         <span>{fmtMoney(summary.avgWin)}</span>
         <span>{summary.avgWinPct.toFixed(2)}%</span>
       </span>
-      <span className="flex items-baseline justify-between gap-3 whitespace-nowrap text-red-600">
+      <span className="flex flex-col whitespace-nowrap text-red-600 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3">
         <span>{fmtMoney(summary.avgLoss)}</span>
         <span>{summary.avgLossPct.toFixed(2)}%</span>
       </span>
     </div>
   )
   const winLossLabel = (
-    <div className="flex items-start justify-between gap-3">
+    <div className="flex flex-col gap-0.5 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
       <span>Avg win / loss</span>
-      <span className="text-right">Avg win / loss ratio</span>
+      <span className="sm:text-right">Avg win / loss ratio</span>
     </div>
   )
   const items: { key: string; label: React.ReactNode; value: React.ReactNode }[] = [
@@ -702,11 +744,17 @@ function SummaryGrid({
   ]
 
   return (
-    <Card>
+    <Card className="overflow-hidden">
       <CardContent className="p-0">
-        <div className="grid grid-cols-2 sm:grid-cols-3">
-          {items.map((item) => (
-            <div key={item.key} className="border-b border-r p-4 last:border-b-0 [&:nth-child(3n)]:border-r-0 sm:[&:nth-last-child(-n+3)]:border-b-0">
+        {/* Hairline dividers via gap-px over a border-colored background:
+            correct at any column count (the old per-cell border-r/border-b
+            math was written for 3 columns and broke in the 2-col layout). */}
+        <div className="grid grid-cols-2 gap-px bg-border sm:grid-cols-3">
+          {items.map((item, i) => (
+            <div
+              key={item.key}
+              className={`bg-card p-4 ${i === items.length - 1 ? 'col-span-2 sm:col-span-1' : ''}`}
+            >
               <div className="text-muted-foreground text-sm">{item.label}</div>
               <div className="text-xl leading-tight font-semibold tracking-tight sm:text-2xl lg:text-[1.6rem]">
                 {item.value}
@@ -771,6 +819,7 @@ function buildDayTrends(
 }
 
 export function AnalysisView({ data }: { data: AnalysisData }) {
+  const isMobile = useIsMobile()
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
   const searchParams = useSearchParams()
   // Restore the view the user came back to (e.g. via a trade detail's
@@ -923,13 +972,13 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
 
   return (
     <Tabs defaultValue={initialTab} className="space-y-4">
-      <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <TabsList variant="line" className="flex-1 justify-start">
           <TabsTrigger value="summary" className="max-w-fit px-4">Summary</TabsTrigger>
           <TabsTrigger value="days" className="max-w-fit px-4">Days</TabsTrigger>
           <TabsTrigger value="trades" className="max-w-fit px-4">Trades</TabsTrigger>
         </TabsList>
-        <div className="flex gap-1 shrink-0">
+        <div className="flex flex-wrap gap-1 sm:shrink-0">
           {selectedMonthLabel && (
             <div className="flex items-center gap-1 rounded bg-foreground py-1 pl-3 pr-1 text-xs font-medium text-background">
               <span>{selectedMonthLabel}</span>
@@ -1000,7 +1049,7 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
                   <TableHead className="text-right">Trades</TableHead>
                   <TableHead className="text-right">Win %</TableHead>
                   <TableHead className="text-right">Net P&L</TableHead>
-                  <TableHead className="text-right">Volume</TableHead>
+                  <TableHead className="hidden text-right sm:table-cell">Volume</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1023,7 +1072,7 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
                         <TableCell className={`text-right font-medium ${row.pnl >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                           {fmtMoney(row.pnl)}
                         </TableCell>
-                        <TableCell className="text-right">{formatShares(row.volume)}</TableCell>
+                        <TableCell className="hidden text-right sm:table-cell">{formatShares(row.volume)}</TableCell>
                       </TableRow>
                       {isExpanded && dayTrades.map((t) => (
                         <TableRow key={t.id} className="bg-muted/30">
@@ -1043,7 +1092,7 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
                           <TableCell className={`text-right font-medium ${t.pnl >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                             {fmtMoney(t.pnl)}
                           </TableCell>
-                          <TableCell />
+                          <TableCell className="hidden sm:table-cell" />
                         </TableRow>
                       ))}
                     </>
@@ -1062,7 +1111,7 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
               <TableHeader>
                 <TableRow>
                   <TableHead>Symbol</TableHead>
-                  <TableHead>Entry</TableHead>
+                  <TableHead className="hidden sm:table-cell">Entry</TableHead>
                   <TableHead>Exit</TableHead>
                   <TableHead className="text-right">Shares</TableHead>
                   <TableHead className="text-right">R Multiple</TableHead>
@@ -1077,8 +1126,8 @@ export function AnalysisView({ data }: { data: AnalysisData }) {
                         {t.symbol}
                       </Link>
                     </TableCell>
-                    <TableCell>{formatDateCell(t.entryTime, timeZone)}</TableCell>
-                    <TableCell>{formatDateCell(t.exitTime, timeZone)}</TableCell>
+                    <TableCell className="hidden sm:table-cell">{formatDateCell(t.entryTime, timeZone)}</TableCell>
+                    <TableCell>{isMobile ? formatDateCellShort(t.exitTime, timeZone) : formatDateCell(t.exitTime, timeZone)}</TableCell>
                     <TableCell className="text-right">{formatShares(Math.abs(t.shares))}</TableCell>
                     <TableCell className={`text-right ${t.pnl >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                       {`${(t.pnl / 2000).toFixed(2)}R`}
