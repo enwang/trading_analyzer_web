@@ -78,7 +78,7 @@ function MobileStatsBlock({
         <StatCell label="Win %" value={fmtPct(row.winPct)} />
         <StatCell label="Avg Win $" value={fmtMoney(row.avgWin)} className="text-emerald-600" />
         <StatCell label="Avg Loss $" value={fmtMoney(row.avgLoss)} className="text-red-600" />
-        <StatCell label="Loss %" value={fmtPct(row.lossPct)} />
+        {/* No Loss % cell: it is always 1 − Win %, no extra information. */}
         <StatCell label="Wins" value={String(row.wins)} />
         <StatCell label="Losses" value={String(row.losses)} />
         <StatCell label="Trades" value={String(row.trades)} />
@@ -86,8 +86,6 @@ function MobileStatsBlock({
         <StatCell label="LG Loss" value={fmtPct(row.largestLossPct)} className="text-red-600" />
         <StatCell label="Avg Hold Win" value={fmtDays(row.avgDaysGain)} />
         <StatCell label="Avg Hold Loss" value={fmtDays(row.avgDaysLoss)} />
-        <div className="bg-card" />
-        <div className="bg-card" />
       </div>
     </div>
   )
@@ -108,8 +106,9 @@ export function MonthlyRecap({ year, returns, stats, yearly, selectedMonthKey, o
               <thead className="bg-muted/60 text-xs uppercase text-muted-foreground">
                 <tr>
                   <th className="px-2 py-2 text-left">Month</th>
-                  <th className="px-2 py-2 text-right">NAV Start → End</th>
-                  <th className="px-2 py-2 text-right">Return Mo · Cum</th>
+                  <th className="px-2 py-2 text-right">NAV End</th>
+                  <th className="px-2 py-2 text-right">Mo Return</th>
+                  <th className="px-2 py-2 text-right">Cum Return</th>
                 </tr>
               </thead>
               <tbody>
@@ -124,19 +123,18 @@ export function MonthlyRecap({ year, returns, stats, yearly, selectedMonthKey, o
                         {row.monthLabel}
                       </button>
                     </td>
-                    <td className="px-2 py-2 text-right font-mono">
-                      <div>{fmtMoney(row.startingNav)}</div>
-                      <div className="font-semibold">{fmtMoney(row.endingNav)}</div>
+                    <td className="px-2 py-2 text-right font-mono">{fmtMoney(row.endingNav)}</td>
+                    <td className={`px-2 py-2 text-right font-mono ${returnClass(row.monthReturnPct)}`}>
+                      {fmtPct(row.monthReturnPct, true)}
                     </td>
-                    <td className="px-2 py-2 text-right font-mono">
-                      <div className={returnClass(row.monthReturnPct)}>{fmtPct(row.monthReturnPct, true)}</div>
-                      <div className={returnClass(row.cumulativeReturnPct)}>{fmtPct(row.cumulativeReturnPct, true)}</div>
+                    <td className={`px-2 py-2 text-right font-mono ${returnClass(row.cumulativeReturnPct)}`}>
+                      {fmtPct(row.cumulativeReturnPct, true)}
                     </td>
                   </tr>
                 ))}
                 {returns.length === 0 && (
                   <tr>
-                    <td colSpan={3} className="px-2 py-6 text-center text-muted-foreground">
+                    <td colSpan={4} className="px-2 py-6 text-center text-muted-foreground">
                       No NAV data yet. Run a sync after enabling Net Asset Value (NAV) in Base in your Flex Query.
                     </td>
                   </tr>
