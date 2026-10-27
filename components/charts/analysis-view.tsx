@@ -699,20 +699,22 @@ function SummaryGrid({
   )
   const winLossValue = (
     <div className="flex min-w-0 flex-col gap-0.5 text-base sm:text-lg lg:text-xl">
-      <span className="flex flex-col whitespace-nowrap text-emerald-600 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3">
+      <span className="flex items-baseline justify-between gap-2 whitespace-nowrap text-emerald-600">
         <span>{fmtMoney(summary.avgWin)}</span>
         <span>{summary.avgWinPct.toFixed(2)}%</span>
       </span>
-      <span className="flex flex-col whitespace-nowrap text-red-600 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3">
+      <span className="flex items-baseline justify-between gap-2 whitespace-nowrap text-red-600">
         <span>{fmtMoney(summary.avgLoss)}</span>
         <span>{summary.avgLossPct.toFixed(2)}%</span>
       </span>
     </div>
   )
   const winLossLabel = (
-    <div className="flex flex-col gap-0.5 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+    <div className="flex items-start justify-between gap-3">
       <span>Avg win / loss</span>
-      <span className="sm:text-right">Avg win / loss ratio</span>
+      {/* The ratio has its own labeled cell ("Avg win/loss rate"); repeating
+          it here just makes this card taller on phones. */}
+      <span className="hidden text-right sm:block">Avg win / loss ratio</span>
     </div>
   )
   const items: { key: string; label: React.ReactNode; value: React.ReactNode }[] = [
@@ -753,7 +755,7 @@ function SummaryGrid({
           {items.map((item, i) => (
             <div
               key={item.key}
-              className={`bg-card p-4 ${i === items.length - 1 ? 'col-span-2 sm:col-span-1' : ''}`}
+              className={`bg-card p-3 sm:p-4 ${i === items.length - 1 ? 'col-span-2 sm:col-span-1' : ''}`}
             >
               <div className="text-muted-foreground text-sm">{item.label}</div>
               <div className="text-xl leading-tight font-semibold tracking-tight sm:text-2xl lg:text-[1.6rem]">
