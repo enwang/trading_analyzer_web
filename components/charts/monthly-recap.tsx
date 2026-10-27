@@ -50,11 +50,11 @@ export function MonthlyRecap({ year, returns, stats, yearly, selectedMonthKey, o
               <thead className="bg-muted/60 text-xs uppercase text-muted-foreground">
                 <tr>
                   <th className="px-2 py-2 sm:px-3 text-left">Month</th>
-                  <th className="hidden sm:table-cell px-2 py-2 text-right sm:px-3">Starting NAV</th>
+                  <th className="px-2 py-2 text-right sm:px-3">Starting NAV</th>
                   <th className="px-2 py-2 sm:px-3 text-right">Ending NAV</th>
-                  <th className="hidden sm:table-cell px-2 py-2 text-right sm:px-3">Deposits / Withdrawals</th>
+                  <th className="px-2 py-2 text-right sm:px-3">Deposits / Withdrawals</th>
                   <th className="px-2 py-2 sm:px-3 text-right">Month Return</th>
-                  <th className="hidden sm:table-cell px-2 py-2 text-right sm:px-3">Cumulative Return</th>
+                  <th className="px-2 py-2 text-right sm:px-3">Cumulative Return</th>
                 </tr>
               </thead>
               <tbody>
@@ -69,13 +69,13 @@ export function MonthlyRecap({ year, returns, stats, yearly, selectedMonthKey, o
                         {row.monthLabel}
                       </button>
                     </td>
-                    <td className="hidden sm:table-cell px-2 py-2 sm:px-3 text-right font-mono">{fmtMoney(row.startingNav)}</td>
+                    <td className="px-2 py-2 sm:px-3 text-right font-mono">{fmtMoney(row.startingNav)}</td>
                     <td className="px-2 py-2 sm:px-3 text-right font-mono">{fmtMoney(row.endingNav)}</td>
-                    <td className="hidden sm:table-cell px-2 py-2 sm:px-3 text-right font-mono">{row.depositsWithdrawals != null ? fmtMoney(row.depositsWithdrawals) : '—'}</td>
+                    <td className="px-2 py-2 sm:px-3 text-right font-mono">{row.depositsWithdrawals != null ? fmtMoney(row.depositsWithdrawals) : '—'}</td>
                     <td className={`px-2 py-2 sm:px-3 text-right font-mono ${returnClass(row.monthReturnPct)}`}>
                       {fmtPct(row.monthReturnPct, true)}
                     </td>
-                    <td className={`hidden px-2 py-2 text-right font-mono sm:table-cell sm:px-3 ${returnClass(row.cumulativeReturnPct)}`}>
+                    <td className={`px-2 py-2 sm:px-3 text-right font-mono ${returnClass(row.cumulativeReturnPct)}`}>
                       {fmtPct(row.cumulativeReturnPct, true)}
                     </td>
                   </tr>
@@ -105,17 +105,17 @@ export function MonthlyRecap({ year, returns, stats, yearly, selectedMonthKey, o
                   <th className="px-2 py-2 sm:px-3 text-left">Month</th>
                   <th className="px-2 py-2 sm:px-3 text-right">Avg Gain %</th>
                   <th className="px-2 py-2 sm:px-3 text-right">Avg Win $</th>
-                  <th className="hidden sm:table-cell px-2 py-2 text-right sm:px-3">Avg Loss %</th>
-                  <th className="hidden sm:table-cell px-2 py-2 text-right sm:px-3">Avg Loss $</th>
+                  <th className="px-2 py-2 text-right sm:px-3">Avg Loss %</th>
+                  <th className="px-2 py-2 text-right sm:px-3">Avg Loss $</th>
                   <th className="px-2 py-2 sm:px-3 text-right">Win %</th>
-                  <th className="hidden sm:table-cell px-2 py-2 text-right sm:px-3">Loss %</th>
-                  <th className="hidden sm:table-cell px-2 py-2 text-right sm:px-3">Wins</th>
-                  <th className="hidden sm:table-cell px-2 py-2 text-right sm:px-3">Losses</th>
+                  <th className="px-2 py-2 text-right sm:px-3">Loss %</th>
+                  <th className="px-2 py-2 text-right sm:px-3">Wins</th>
+                  <th className="px-2 py-2 text-right sm:px-3">Losses</th>
                   <th className="px-2 py-2 sm:px-3 text-right">Trades</th>
-                  <th className="hidden sm:table-cell px-2 py-2 text-right sm:px-3">LG Gain</th>
-                  <th className="hidden sm:table-cell px-2 py-2 text-right sm:px-3">LG Loss</th>
-                  <th className="hidden sm:table-cell px-2 py-2 text-right sm:px-3">Avg Hold Win</th>
-                  <th className="hidden sm:table-cell px-2 py-2 text-right sm:px-3">Avg Hold Loss</th>
+                  <th className="px-2 py-2 text-right sm:px-3">LG Gain</th>
+                  <th className="px-2 py-2 text-right sm:px-3">LG Loss</th>
+                  <th className="px-2 py-2 text-right sm:px-3">Avg Hold Win</th>
+                  <th className="px-2 py-2 text-right sm:px-3">Avg Hold Loss</th>
                 </tr>
               </thead>
               <tbody>
@@ -123,17 +123,17 @@ export function MonthlyRecap({ year, returns, stats, yearly, selectedMonthKey, o
                   <td className="px-2 py-2 sm:px-3">{yearly.year}</td>
                   <td className="px-2 py-2 sm:px-3 text-right font-mono text-emerald-600">{fmtPct(yearly.avgGainPct)}</td>
                   <td className="px-2 py-2 sm:px-3 text-right font-mono text-emerald-600">{fmtMoney(yearly.avgWin)}</td>
-                  <td className="hidden sm:table-cell px-2 py-2 sm:px-3 text-right font-mono text-red-600">{fmtPct(yearly.avgLossPct)}</td>
-                  <td className="hidden sm:table-cell px-2 py-2 sm:px-3 text-right font-mono text-red-600">{fmtMoney(yearly.avgLoss)}</td>
+                  <td className="px-2 py-2 sm:px-3 text-right font-mono text-red-600">{fmtPct(yearly.avgLossPct)}</td>
+                  <td className="px-2 py-2 sm:px-3 text-right font-mono text-red-600">{fmtMoney(yearly.avgLoss)}</td>
                   <td className="px-2 py-2 sm:px-3 text-right font-mono">{fmtPct(yearly.winPct)}</td>
-                  <td className="hidden sm:table-cell px-2 py-2 sm:px-3 text-right font-mono">{fmtPct(yearly.lossPct)}</td>
-                  <td className="hidden sm:table-cell px-2 py-2 sm:px-3 text-right font-mono">{yearly.wins}</td>
-                  <td className="hidden sm:table-cell px-2 py-2 sm:px-3 text-right font-mono">{yearly.losses}</td>
+                  <td className="px-2 py-2 sm:px-3 text-right font-mono">{fmtPct(yearly.lossPct)}</td>
+                  <td className="px-2 py-2 sm:px-3 text-right font-mono">{yearly.wins}</td>
+                  <td className="px-2 py-2 sm:px-3 text-right font-mono">{yearly.losses}</td>
                   <td className="px-2 py-2 sm:px-3 text-right font-mono">{yearly.trades}</td>
-                  <td className="hidden sm:table-cell px-2 py-2 sm:px-3 text-right font-mono text-emerald-600">{fmtPct(yearly.largestGainPct)}</td>
-                  <td className="hidden sm:table-cell px-2 py-2 sm:px-3 text-right font-mono text-red-600">{fmtPct(yearly.largestLossPct)}</td>
-                  <td className="hidden sm:table-cell px-2 py-2 sm:px-3 text-right font-mono">{fmtDays(yearly.avgDaysGain)}</td>
-                  <td className="hidden sm:table-cell px-2 py-2 sm:px-3 text-right font-mono">{fmtDays(yearly.avgDaysLoss)}</td>
+                  <td className="px-2 py-2 sm:px-3 text-right font-mono text-emerald-600">{fmtPct(yearly.largestGainPct)}</td>
+                  <td className="px-2 py-2 sm:px-3 text-right font-mono text-red-600">{fmtPct(yearly.largestLossPct)}</td>
+                  <td className="px-2 py-2 sm:px-3 text-right font-mono">{fmtDays(yearly.avgDaysGain)}</td>
+                  <td className="px-2 py-2 sm:px-3 text-right font-mono">{fmtDays(yearly.avgDaysLoss)}</td>
                 </tr>
                 {stats.map((row) => (
                   <tr key={row.monthKey} className={`border-t ${selectedMonthKey === row.monthKey ? 'bg-muted/50' : ''}`}>
@@ -148,17 +148,17 @@ export function MonthlyRecap({ year, returns, stats, yearly, selectedMonthKey, o
                     </td>
                     <td className="px-2 py-2 sm:px-3 text-right font-mono text-emerald-600">{fmtPct(row.avgGainPct)}</td>
                     <td className="px-2 py-2 sm:px-3 text-right font-mono text-emerald-600">{fmtMoney(row.avgWin)}</td>
-                    <td className="hidden sm:table-cell px-2 py-2 sm:px-3 text-right font-mono text-red-600">{fmtPct(row.avgLossPct)}</td>
-                    <td className="hidden sm:table-cell px-2 py-2 sm:px-3 text-right font-mono text-red-600">{fmtMoney(row.avgLoss)}</td>
+                    <td className="px-2 py-2 sm:px-3 text-right font-mono text-red-600">{fmtPct(row.avgLossPct)}</td>
+                    <td className="px-2 py-2 sm:px-3 text-right font-mono text-red-600">{fmtMoney(row.avgLoss)}</td>
                     <td className="px-2 py-2 sm:px-3 text-right font-mono">{fmtPct(row.winPct)}</td>
-                    <td className="hidden sm:table-cell px-2 py-2 sm:px-3 text-right font-mono">{fmtPct(row.lossPct)}</td>
-                    <td className="hidden sm:table-cell px-2 py-2 sm:px-3 text-right font-mono">{row.wins}</td>
-                    <td className="hidden sm:table-cell px-2 py-2 sm:px-3 text-right font-mono">{row.losses}</td>
+                    <td className="px-2 py-2 sm:px-3 text-right font-mono">{fmtPct(row.lossPct)}</td>
+                    <td className="px-2 py-2 sm:px-3 text-right font-mono">{row.wins}</td>
+                    <td className="px-2 py-2 sm:px-3 text-right font-mono">{row.losses}</td>
                     <td className="px-2 py-2 sm:px-3 text-right font-mono">{row.trades}</td>
-                    <td className="hidden sm:table-cell px-2 py-2 sm:px-3 text-right font-mono text-emerald-600">{fmtPct(row.largestGainPct)}</td>
-                    <td className="hidden sm:table-cell px-2 py-2 sm:px-3 text-right font-mono text-red-600">{fmtPct(row.largestLossPct)}</td>
-                    <td className="hidden sm:table-cell px-2 py-2 sm:px-3 text-right font-mono">{fmtDays(row.avgDaysGain)}</td>
-                    <td className="hidden sm:table-cell px-2 py-2 sm:px-3 text-right font-mono">{fmtDays(row.avgDaysLoss)}</td>
+                    <td className="px-2 py-2 sm:px-3 text-right font-mono text-emerald-600">{fmtPct(row.largestGainPct)}</td>
+                    <td className="px-2 py-2 sm:px-3 text-right font-mono text-red-600">{fmtPct(row.largestLossPct)}</td>
+                    <td className="px-2 py-2 sm:px-3 text-right font-mono">{fmtDays(row.avgDaysGain)}</td>
+                    <td className="px-2 py-2 sm:px-3 text-right font-mono">{fmtDays(row.avgDaysLoss)}</td>
                   </tr>
                 ))}
               </tbody>
