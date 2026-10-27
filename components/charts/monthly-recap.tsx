@@ -109,7 +109,6 @@ export function MonthlyRecap({ year, returns, stats, yearly, selectedMonthKey, o
                 <tr>
                   <th className="px-2 py-2 text-left">Month</th>
                   <th className="px-2 py-2 text-right">NAV Start → End</th>
-                  <th className="px-2 py-2 text-right">Deposits</th>
                   <th className="px-2 py-2 text-right">Return Mo · Cum</th>
                 </tr>
               </thead>
@@ -129,7 +128,6 @@ export function MonthlyRecap({ year, returns, stats, yearly, selectedMonthKey, o
                       <div>{fmtMoney(row.startingNav)}</div>
                       <div className="font-semibold">{fmtMoney(row.endingNav)}</div>
                     </td>
-                    <td className="px-2 py-2 text-right font-mono">{row.depositsWithdrawals != null ? fmtMoney(row.depositsWithdrawals) : '—'}</td>
                     <td className="px-2 py-2 text-right font-mono">
                       <div className={returnClass(row.monthReturnPct)}>{fmtPct(row.monthReturnPct, true)}</div>
                       <div className={returnClass(row.cumulativeReturnPct)}>{fmtPct(row.cumulativeReturnPct, true)}</div>
@@ -138,7 +136,7 @@ export function MonthlyRecap({ year, returns, stats, yearly, selectedMonthKey, o
                 ))}
                 {returns.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="px-2 py-6 text-center text-muted-foreground">
+                    <td colSpan={3} className="px-2 py-6 text-center text-muted-foreground">
                       No NAV data yet. Run a sync after enabling Net Asset Value (NAV) in Base in your Flex Query.
                     </td>
                   </tr>
