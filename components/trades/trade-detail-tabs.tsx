@@ -179,6 +179,11 @@ export function TradeDetailTabs(props: Props) {
     JSON.stringify({ stopLoss: initialStopLoss, rMultiple: initialRMultiple })
   )
   const riskInputTouchedRef = useRef(false)
+  const pendingRiskSaveRef = useRef<{
+    stopLoss: number
+    rMultiple: number | null
+    initialRiskAmount: number | null
+  } | null>(null)
 
   const parsedInitialRisk = useMemo(() => {
     const n = Number(initialRiskInput.trim())
@@ -235,13 +240,71 @@ export function TradeDetailTabs(props: Props) {
   }
 
   useEffect(() => {
-    if (stopLoss == null) return
+    if (stopLoss == null) {
+      setRiskError(null)
+      return
+    }
+    // A stop on the wrong side of the entry has no calculable initial risk
+    // and the server rejects the save; explain here instead of letting the
+    // value silently disappear.
+    if (stopLossFirst && calculatedInitialRisk == null) {
+      setRiskError(
+        side === 'short'
+          ? 'Stop loss must be above the entry price for a short trade.'
+          : 'Stop loss must be below the entry price for a long trade.'
+      )
+      return
+    }
     if (!stopLossFirst && initialRiskAmount == null && initialStopLoss == null && !riskInputTouchedRef.current) return
     const currentKey = JSON.stringify({ stopLoss, rMultiple: liveR })
     if (currentKey === lastSavedKey) return
-    const timer = setTimeout(() => { void saveRisk(stopLoss, liveR, stopLossFirst ? calculatedInitialRisk : parsedInitialRisk) }, 700)
+    const nextInitialRisk = stopLossFirst ? calculatedInitialRisk : parsedInitialRisk
+    setRiskError(null)
+    const timer = setTimeout(() => {
+      pendingRiskSaveRef.current = null
+      void saveRisk(stopLoss, liveR, nextInitialRisk)
+    }, 700)
     return () => clearTimeout(timer)
-  }, [stopLoss, liveR, lastSavedKey, parsedInitialRisk, stopLossFirst, calculatedInitialRisk])
+  }, [stopLoss, liveR, lastSavedKey, parsedInitialRisk, stopLossFirst, calculatedInitialRisk, side])
+
+  // Track the latest unsaved risk values after every render so they can be
+  // flushed on unmount even if the debounced effect has not run yet.
+  useEffect(() => {
+    if (
+      stopLoss == null ||
+      (stopLossFirst && calculatedInitialRisk == null) ||
+      (!stopLossFirst && initialRiskAmount == null && initialStopLoss == null && !riskInputTouchedRef.current) ||
+      JSON.stringify({ stopLoss, rMultiple: liveR }) === lastSavedKey
+    ) {
+      pendingRiskSaveRef.current = null
+      return
+    }
+    pendingRiskSaveRef.current = {
+      stopLoss,
+      rMultiple: liveR,
+      initialRiskAmount: stopLossFirst ? calculatedInitialRisk : parsedInitialRisk,
+    }
+  })
+
+  // Navigating away inside the 700ms autosave window used to drop the save
+  // entirely (the cleanup cleared the timer). Flush it on unmount instead.
+  useEffect(() => {
+    return () => {
+      const pending = pendingRiskSaveRef.current
+      if (!pending) return
+      pendingRiskSaveRef.current = null
+      void fetch(`/api/trades/${tradeId}/risk`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        keepalive: true,
+        body: JSON.stringify({
+          stopLoss: pending.stopLoss,
+          rMultiple: pending.rMultiple,
+          initialRiskAmount: pending.initialRiskAmount,
+        }),
+      }).catch(() => {})
+    }
+  }, [tradeId])
 
   // ── MFE / MAE state ───────────────────────────────────────────────────────
   const [mfe, setMfe] = useState<number | null>(initialMfe)

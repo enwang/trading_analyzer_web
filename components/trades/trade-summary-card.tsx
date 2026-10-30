@@ -159,6 +159,11 @@ export function TradeSummaryCard({
     JSON.stringify({ stopLoss: initialStopLoss, rMultiple: initialRMultiple })
   )
   const riskInputTouchedRef = useRef(false)
+  const pendingRiskSaveRef = useRef<{
+    stopLoss: number
+    rMultiple: number | null
+    initialRiskAmount: number | null
+  } | null>(null)
 
   // Fetch fresh MFE/MAE from market data for open trades only.
   // Closed trades read initialMfe/initialMae from DB (no Yahoo fetch needed).
@@ -301,17 +306,72 @@ export function TradeSummaryCard({
   }, [exitTime, symbol, side, entryPrice, shares, pnl, parsedInitialRisk, stopLossFirst, calculatedInitialRisk])
 
   useEffect(() => {
-    if (stopLoss == null) return
+    if (stopLoss == null) {
+      setError(null)
+      return
+    }
+    // A stop on the wrong side of the entry has no calculable initial risk
+    // and the server rejects the save; explain here instead of letting the
+    // value silently disappear.
+    if (stopLossFirst && calculatedInitialRisk == null) {
+      setError(
+        side === 'short'
+          ? 'Stop loss must be above the entry price for a short trade.'
+          : 'Stop loss must be below the entry price for a long trade.'
+      )
+      return
+    }
     if (!stopLossFirst && initialRiskAmount == null && initialStopLoss == null && !riskInputTouchedRef.current) return
     const currentKey = JSON.stringify({ stopLoss, rMultiple: liveR })
     if (currentKey === lastSavedKey) return
-
+    const nextInitialRisk = stopLossFirst ? calculatedInitialRisk : parsedInitialRisk
+    setError(null)
     const timer = setTimeout(() => {
-      void saveRisk(stopLoss, liveR, stopLossFirst ? calculatedInitialRisk : parsedInitialRisk)
+      pendingRiskSaveRef.current = null
+      void saveRisk(stopLoss, liveR, nextInitialRisk)
     }, 700)
 
     return () => clearTimeout(timer)
-  }, [stopLoss, liveR, lastSavedKey, parsedInitialRisk, stopLossFirst, calculatedInitialRisk])
+  }, [stopLoss, liveR, lastSavedKey, parsedInitialRisk, stopLossFirst, calculatedInitialRisk, side])
+
+  // Track the latest unsaved risk values after every render so they can be
+  // flushed on unmount even if the debounced effect has not run yet.
+  useEffect(() => {
+    if (
+      stopLoss == null ||
+      (stopLossFirst && calculatedInitialRisk == null) ||
+      (!stopLossFirst && initialRiskAmount == null && initialStopLoss == null && !riskInputTouchedRef.current) ||
+      JSON.stringify({ stopLoss, rMultiple: liveR }) === lastSavedKey
+    ) {
+      pendingRiskSaveRef.current = null
+      return
+    }
+    pendingRiskSaveRef.current = {
+      stopLoss,
+      rMultiple: liveR,
+      initialRiskAmount: stopLossFirst ? calculatedInitialRisk : parsedInitialRisk,
+    }
+  })
+
+  // Navigating away inside the 700ms autosave window used to drop the save
+  // entirely (the cleanup cleared the timer). Flush it on unmount instead.
+  useEffect(() => {
+    return () => {
+      const pending = pendingRiskSaveRef.current
+      if (!pending) return
+      pendingRiskSaveRef.current = null
+      void fetch(`/api/trades/${tradeId}/risk`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        keepalive: true,
+        body: JSON.stringify({
+          stopLoss: pending.stopLoss,
+          rMultiple: pending.rMultiple,
+          initialRiskAmount: pending.initialRiskAmount,
+        }),
+      }).catch(() => {})
+    }
+  }, [tradeId])
 
   return (
     <Card>

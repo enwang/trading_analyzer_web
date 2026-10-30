@@ -54,14 +54,27 @@ export async function PATCH(
     payload.stopLossLocked !== true &&
     payload.initialRiskAmount == null
 
+  // A stop-loss save whose initial risk cannot be calculated (e.g. the stop
+  // sits on the wrong side of the entry) must never be silently dropped or
+  // written as nulls: reject it so the client can show the user why.
+  if (isStaleDefaultRiskSave) {
+    return NextResponse.json(
+      {
+        error:
+          'Could not calculate initial risk from this stop loss. For a long trade the stop must be below the entry price; for a short trade it must be above it.',
+      },
+      { status: 400 }
+    )
+  }
+
   const updatePayload: Record<string, unknown> = {
-    stop_loss: isStaleDefaultRiskSave ? null : payload.stopLoss,
-    r_multiple: isStaleDefaultRiskSave ? null : payload.rMultiple,
+    stop_loss: payload.stopLoss,
+    r_multiple: payload.rMultiple,
   }
   if ('stopLossLocked' in payload) updatePayload.stop_loss_locked = payload.stopLossLocked
   if ('currentStopLoss' in payload) {
-    updatePayload.current_stop_loss = isStaleDefaultRiskSave ? null : payload.currentStopLoss
-  } else if (!isStaleDefaultRiskSave && payload.stopLoss != null && existingTrade.current_stop_loss == null) {
+    updatePayload.current_stop_loss = payload.currentStopLoss
+  } else if (payload.stopLoss != null && existingTrade.current_stop_loss == null) {
     // Initialize live risk from Initial SL once. Future Current SL edits are
     // independent because they send currentStopLoss explicitly.
     updatePayload.current_stop_loss = payload.stopLoss
