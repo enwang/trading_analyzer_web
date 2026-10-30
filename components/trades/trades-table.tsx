@@ -34,7 +34,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { riskSharesForTrade } from '@/lib/trades'
+import { consumeTradesDataStale, riskSharesForTrade } from '@/lib/trades'
 import { formatShares } from '@/lib/format'
 import {
   initialRiskFromStopLoss,
@@ -432,6 +432,53 @@ export function TradesTable({ trades, accountEquity }: { trades: Trade[]; accoun
   const columnOrderSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const currentStopLossDraftsRef = useRef<Record<string, string>>({})
   const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set())
+  // Back navigation restores this page from the router cache, so edits saved
+  // on a trade detail page would not show here until a hard refresh. Detail
+  // saves flag the data as stale; refetch this page when we return to it.
+  useEffect(() => {
+    const refreshIfStale = () => {
+      if (consumeTradesDataStale()) router.refresh()
+    }
+    refreshIfStale()
+    window.addEventListener('popstate', refreshIfStale)
+    window.addEventListener('pageshow', refreshIfStale)
+    return () => {
+      window.removeEventListener('popstate', refreshIfStale)
+      window.removeEventListener('pageshow', refreshIfStale)
+    }
+  }, [router])
+
+  // After a refetch, adopt the fresh stop values for rows that are not being
+  // edited in this table (the drafts otherwise only seed on first mount).
+  useEffect(() => {
+    setStopLossDrafts((prev) => {
+      let changed = false
+      const next = { ...prev }
+      for (const t of trades) {
+        const serverValue = t.stopLoss?.toFixed(2) ?? ''
+        if (prev[t.id] === savedStopLossRef.current[t.id] && prev[t.id] !== serverValue) {
+          next[t.id] = serverValue
+          savedStopLossRef.current[t.id] = serverValue
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+    setCurrentStopLossDrafts((prev) => {
+      let changed = false
+      const next = { ...prev }
+      for (const t of trades) {
+        const serverValue = (t.currentStopLoss ?? t.stopLoss)?.toFixed(2) ?? ''
+        if (prev[t.id] === savedCurrentStopLossRef.current[t.id] && prev[t.id] !== serverValue) {
+          next[t.id] = serverValue
+          savedCurrentStopLossRef.current[t.id] = serverValue
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [trades])
+
   const tradeById = useMemo(() => new Map(trades.map((t) => [t.id, t])), [trades])
   const currentListUrl = useMemo(
     () => `${pathname}${searchParamsString ? `?${searchParamsString}` : ''}`,

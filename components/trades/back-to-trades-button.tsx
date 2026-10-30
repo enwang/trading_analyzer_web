@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import { consumeTradesDataStale } from '@/lib/trades'
 
 const TRADES_LAST_URL_STORAGE_KEY = 'trades-table-last-url'
 
@@ -18,6 +19,13 @@ export function BackToTradesButton({ href, label = 'Back to Trades' }: { href: s
       onClick={() => {
         const lastTradesUrl = window.sessionStorage.getItem(TRADES_LAST_URL_STORAGE_KEY)
         if (lastTradesUrl && window.history.length > 1) {
+          // If a save on this page changed trade data, router.back() would
+          // restore the list's cached snapshot and hide the edit until a
+          // hard refresh. Load the list fresh instead.
+          if (consumeTradesDataStale()) {
+            window.location.assign(lastTradesUrl)
+            return
+          }
           router.back()
           return
         }

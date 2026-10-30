@@ -275,3 +275,24 @@ export function pickTradeMetadata(group: Trade[], fallback: Trade) {
     rMultiple: firstNonEmpty(group.map((trade) => trade.rMultiple)) ?? fallback.rMultiple,
   }
 }
+
+const TRADES_DATA_STALE_KEY = 'trades-data-stale'
+
+/** Flag that trade data changed elsewhere (e.g. a save on the detail page)
+ * so the trades list refetches on return instead of showing the snapshot
+ * it was restored with. */
+export function markTradesDataStale() {
+  try {
+    window.sessionStorage.setItem(TRADES_DATA_STALE_KEY, '1')
+  } catch {}
+}
+
+export function consumeTradesDataStale(): boolean {
+  try {
+    if (window.sessionStorage.getItem(TRADES_DATA_STALE_KEY) !== '1') return false
+    window.sessionStorage.removeItem(TRADES_DATA_STALE_KEY)
+    return true
+  } catch {
+    return false
+  }
+}

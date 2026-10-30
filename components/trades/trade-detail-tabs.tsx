@@ -15,7 +15,7 @@ import {
   suggestedStopLossFromRisk,
   usesStopLossFirstSizing,
 } from '@/lib/market/stop-loss'
-import { riskSharesForTrade } from '@/lib/trades'
+import { markTradesDataStale, riskSharesForTrade } from '@/lib/trades'
 import { formatShares } from '@/lib/format'
 import type { ExecutionLeg } from '@/types/trade'
 
@@ -234,6 +234,7 @@ export function TradeDetailTabs(props: Props) {
       if (!res.ok) { setRiskError(json.error ?? 'Failed to save risk'); return }
       setSavedR(nextR)
       setLastSavedKey(JSON.stringify({ stopLoss: nextStopLoss, rMultiple: nextR }))
+      markTradesDataStale()
     } catch {
       setRiskError('Failed to save risk')
     }
@@ -293,6 +294,7 @@ export function TradeDetailTabs(props: Props) {
       const pending = pendingRiskSaveRef.current
       if (!pending) return
       pendingRiskSaveRef.current = null
+      markTradesDataStale()
       void fetch(`/api/trades/${tradeId}/risk`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },

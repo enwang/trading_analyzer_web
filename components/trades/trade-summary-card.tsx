@@ -11,7 +11,7 @@ import {
   suggestedStopLossFromRisk,
   usesStopLossFirstSizing,
 } from '@/lib/market/stop-loss'
-import { riskSharesForTrade } from '@/lib/trades'
+import { markTradesDataStale, riskSharesForTrade } from '@/lib/trades'
 import { formatShares } from '@/lib/format'
 import type { ExecutionLeg } from '@/types/trade'
 
@@ -272,6 +272,7 @@ export function TradeSummaryCard({
       }
       setSavedR(nextR)
       setLastSavedKey(JSON.stringify({ stopLoss: nextStopLoss, rMultiple: nextR }))
+      markTradesDataStale()
       onStopLossSaved?.(nextStopLoss, nextR)
     } catch {
       setError('Failed to save risk values')
