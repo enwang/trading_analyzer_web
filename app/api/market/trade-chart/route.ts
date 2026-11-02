@@ -222,7 +222,11 @@ async function fetchPolygonCandles(symbol: string, period1Sec: number, period2Se
   const apiKey = process.env.POLYGON_API_KEY
   if (!apiKey) return null
   const ticker = encodeURIComponent(symbol.replace(/-/g, '.'))
-  const fromMs = period1Sec * 1000
+  // Massive anchors its aggregate windows to the `from` timestamp: an
+  // unaligned from (e.g. entry time minus lookback, landing at :08) shifts
+  // every bar off the standard 5-minute grid (:33/:38 instead of :30/:35).
+  // Floor `from` to the 5-minute grid so bars come back on-grid.
+  const fromMs = Math.floor((period1Sec * 1000) / 300_000) * 300_000
   const toMs = period2Sec * 1000
   for (const host of ['api.massive.com', 'api.polygon.io']) {
     try {
