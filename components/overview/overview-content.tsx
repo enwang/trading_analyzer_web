@@ -142,10 +142,11 @@ export function OverviewContent({
     return cashDeposits.filter(r => r.transaction_ts.slice(0, 10) >= startDate)
   }, [cashDeposits, startDate])
 
-  // Chart-only month window: pick a From and To month and the equity chart
+  // Chart month window: pick a From and To month and the equity chart
   // shows just that window (account + benchmarks rebased to the window
-  // start), independent of the page date-range that drives the KPI cards.
-  // From = "All" follows the page range as before; To = "Now" is open-ended.
+  // start). The KPI stats follow the same window while one is set (see
+  // statsTrades below); From = "All" leaves both the chart and the stats
+  // on the page date-range as before. To = "Now" is open-ended.
   // From Sep / To Sep = a single month; From Jul / To Now = July to today.
   const [chartFrom, setChartFrom] = useState<string | null>(null)
   const [chartTo, setChartTo] = useState<string | null>(null)
@@ -200,11 +201,28 @@ export function OverviewContent({
     }
   }, [chartFrom, chartTo, navData, cashDeposits, spyReturns, qqqReturns, soxxReturns, arkkReturns, brkbReturns, filteredNavData, filteredNavChanges, filteredDeposits, filteredSpy, filteredQqq, filteredSoxx, filteredArkk, filteredBrkb, range])
 
-  const stats = useMemo(() => computeSummary(filteredTrades), [filteredTrades])
+  // While the equity chart is scoped to a month window, the KPI stats use
+  // that same window: only trades closed inside it count (Wilson, Nov 5:
+  // "when I change the time for account equity curve, the above win ratio,
+  // etc can also change accordingly"). Open positions are account state,
+  // not period performance — the account-summary / open-pnl / open-risk
+  // cards keep using the unfiltered trade list either way.
+  const statsTrades = useMemo(() => {
+    if (!chartFrom) return filteredTrades
+    const start = `${chartFrom}-01`
+    const end = chartTo ? monthWindow(chartTo).end : null
+    return trades.filter(t => {
+      if (t.exitTime == null) return false
+      const day = t.exitTime.slice(0, 10)
+      return day >= start && (end == null || day <= end)
+    })
+  }, [chartFrom, chartTo, trades, filteredTrades])
+
+  const stats = useMemo(() => computeSummary(statsTrades), [statsTrades])
 
   const closedFiltered = useMemo(
-    () => filteredTrades.filter(t => t.exitTime && t.pnl != null),
-    [filteredTrades]
+    () => statsTrades.filter(t => t.exitTime && t.pnl != null),
+    [statsTrades]
   )
 
   const avgWinLossPct = useMemo(() => {
