@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Info } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -135,6 +136,7 @@ export function TradeDetailTabs(props: Props) {
     initialStopLoss, initialRMultiple, initialRiskAmount,
     initialMfe, initialMae, executionLegs,
   } = props
+  const router = useRouter()
 
   // ── review state ──────────────────────────────────────────────────────────
   const [markedForReview, setMarkedForReview] = useState(needsReview)
@@ -235,6 +237,12 @@ export function TradeDetailTabs(props: Props) {
       setSavedR(nextR)
       setLastSavedKey(JSON.stringify({ stopLoss: nextStopLoss, rMultiple: nextR }))
       markTradesDataStale()
+      // The header stop and the chart stop line render from server props, and
+      // the router cache (staleTimes.dynamic = 180s) would otherwise keep
+      // serving this page's pre-save snapshot when the user navigates away
+      // and back — making a saved stop look lost. Refreshing now updates the
+      // props in place and invalidates the cached copy.
+      router.refresh()
     } catch {
       setRiskError('Failed to save risk')
     }

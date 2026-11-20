@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 
 import { Info } from 'lucide-react'
 
@@ -158,6 +159,7 @@ export function TradeSummaryCard({
   const [lastSavedKey, setLastSavedKey] = useState(
     JSON.stringify({ stopLoss: initialStopLoss, rMultiple: initialRMultiple })
   )
+  const router = useRouter()
   const riskInputTouchedRef = useRef(false)
   const pendingRiskSaveRef = useRef<{
     stopLoss: number
@@ -273,6 +275,10 @@ export function TradeSummaryCard({
       setSavedR(nextR)
       setLastSavedKey(JSON.stringify({ stopLoss: nextStopLoss, rMultiple: nextR }))
       markTradesDataStale()
+      // Keep server-rendered values (header stop, chart line) in sync with
+      // the save and invalidate the router-cache copy of this page, so
+      // navigating away and back never shows the pre-save snapshot.
+      router.refresh()
       onStopLossSaved?.(nextStopLoss, nextR)
     } catch {
       setError('Failed to save risk values')
