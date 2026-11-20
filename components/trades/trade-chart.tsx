@@ -425,6 +425,16 @@ export function TradeChart({ symbol, entryTime, exitTime, side, entryPrice, exit
         horzLines: { visible: false },
       },
       crosshair: { mode: CrosshairMode.Normal },
+      // Vertical touch drags belong to the page, not the chart: with
+      // vertTouchDrag on (the library default), a finger drag that starts
+      // on the candles pans the price axis and the page itself can't be
+      // scrolled from the chart area. Horizontal drags still pan time.
+      handleScroll: {
+        mouseWheel:       true,
+        pressedMouseMove: true,
+        horzTouchDrag:    true,
+        vertTouchDrag:    false,
+      },
       rightPriceScale: {
         borderVisible: false,
         scaleMargins: { top: 0.04, bottom: 0.43 },
