@@ -157,13 +157,16 @@ function fmtBucketLabel(min: number, max: number) {
 }
 
 // Display-only compact form for phone-width axes: "[-13000, -12000]" →
-// "-13k..-12k". Bucket labels themselves stay untouched (they key the
-// bar-selection state).
+// "-13k". Only the bucket's lower bound is shown — the step is uniform, and
+// the full range is in the tooltip / selected-bucket header. Bucket labels
+// themselves stay untouched (they key the bar-selection state).
 function compactBucketLabel(label: string) {
   const m = /^\[(-?\d+), (-?\d+)\]$/.exec(label)
   if (!m) return label
-  const k = (v: number) => (v === 0 ? '0' : `${v / 1000}k`)
-  return `${k(Number(m[1]))}..${k(Number(m[2]))}`
+  const v = Number(m[1])
+  if (v === 0) return '0'
+  const k = v / 1000
+  return `${Number.isInteger(k) ? k : k.toFixed(1)}k`
 }
 
 function fmtRatio(n: number) {
@@ -398,10 +401,9 @@ function niceCeil(value: number) {
   return niceNormalized * magnitude
 }
 
-function buildSideBuckets(trades: ClosedTrade[]) {
+function buildSideBuckets(trades: ClosedTrade[], step: number) {
   if (!trades.length) return [] as PnlDistributionBucket[]
 
-  const step = 1000
   const sorted = [...trades].sort((a, b) => a.pnl - b.pnl)
   const minValue = sorted[0].pnl
   const maxValue = sorted[sorted.length - 1].pnl
@@ -440,17 +442,31 @@ function buildSideBuckets(trades: ClosedTrade[]) {
   return Array.from(bucketMap.values()).filter((bucket) => bucket.count > 0)
 }
 
-function buildPnlDistribution(trades: ClosedTrade[]) {
+const BUCKET_STEP_LADDER = [250, 500, 1000, 2000, 2500, 5000, 10000, 20000, 25000, 50000, 100000, 200000]
+
+// Fixed $1,000 buckets smear into hair-thin bars and an unreadable axis when
+// the P&L span is wide (real data spans ~$80k → ~80 buckets). Widen the step
+// so the bucket count stays within the width the chart can actually show.
+function pickBucketStep(span: number, maxBuckets: number) {
+  for (const step of BUCKET_STEP_LADDER) {
+    if (span / step <= maxBuckets) return step
+  }
+  return BUCKET_STEP_LADDER[BUCKET_STEP_LADDER.length - 1]
+}
+
+function buildPnlDistribution(trades: ClosedTrade[], maxBuckets: number) {
   const valid = trades.filter((t) => Number.isFinite(t.pnl))
   if (!valid.length) {
     return { buckets: [] as PnlDistributionBucket[], total: 0 }
   }
 
+  const pnls = valid.map((t) => t.pnl)
+  const step = pickBucketStep(Math.max(...pnls) - Math.min(...pnls), maxBuckets)
   const losses = valid.filter((t) => t.pnl < 0)
   const breakevens = valid.filter((t) => t.pnl === 0)
   const wins = valid.filter((t) => t.pnl > 0)
   const buckets = [
-    ...buildSideBuckets(losses),
+    ...buildSideBuckets(losses, step),
     ...(breakevens.length ? [{
       min: 0,
       max: 0,
@@ -461,7 +477,7 @@ function buildPnlDistribution(trades: ClosedTrade[]) {
       signedTotalPnl: 0,
       trades: breakevens,
     }] : []),
-    ...buildSideBuckets(wins),
+    ...buildSideBuckets(wins, step),
   ]
 
   return { buckets, total: valid.length }
@@ -471,7 +487,7 @@ function PnlDistributionCard({ trades, timeZone, monthKey, range }: { trades: Cl
   const isMobile = useIsMobile()
   const [mode, setMode] = useState<DistributionMode>('pnl')
   const [selectedLabel, setSelectedLabel] = useState<string | null>(null)
-  const distribution = useMemo(() => buildPnlDistribution(trades), [trades])
+  const distribution = useMemo(() => buildPnlDistribution(trades, isMobile ? 16 : 32), [trades, isMobile])
   const selectedBucket = distribution.buckets.find((bucket) => bucket.label === selectedLabel) ?? null
   const selectedTrades = useMemo(() => {
     if (!selectedBucket) return [] as ClosedTrade[]
